@@ -1,8 +1,24 @@
 import 'package:latlong2/latlong.dart';
 
+/// Lifecycle of a real escalated incident, as an officer works it.
+enum IncidentStatus { newCase, inProgress, resolved }
+
+extension IncidentStatusX on IncidentStatus {
+  String get label {
+    switch (this) {
+      case IncidentStatus.newCase:
+        return 'New';
+      case IncidentStatus.inProgress:
+        return 'In Progress';
+      case IncidentStatus.resolved:
+        return 'Resolved';
+    }
+  }
+}
+
 /// A real escalated safety session, created only when a session actually
 /// reaches final "Emergency" escalation — not seeded example data. This is
-/// what the Emergency Responder Dashboard reads from.
+/// what the Emergency Responder Dashboard and Cases screens read from.
 class Incident {
   final String id;
   final String personName;
@@ -11,7 +27,8 @@ class Incident {
   final LatLng location;
   final DateTime startedAt;
   final bool locationIsStale;
-  bool responded;
+  IncidentStatus status;
+  DateTime? resolvedAt;
 
   Incident({
     required this.id,
@@ -21,6 +38,9 @@ class Incident {
     required this.location,
     required this.startedAt,
     this.locationIsStale = false,
-    this.responded = false,
+    this.status = IncidentStatus.newCase,
+    this.resolvedAt,
   });
+
+  bool get responded => status != IncidentStatus.newCase;
 }

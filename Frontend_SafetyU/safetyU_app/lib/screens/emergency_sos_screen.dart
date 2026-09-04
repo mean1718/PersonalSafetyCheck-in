@@ -8,7 +8,9 @@ import 'package:url_launcher/url_launcher.dart';
 import '../theme/app_theme.dart';
 import '../models/contact.dart';
 import '../models/app_notification.dart';
+import '../models/incident.dart';
 import '../services/app_session.dart';
+import '../services/alert_sound.dart';
 
 /// Immediate SOS screen reachable from the Home dashboard's
 /// "Emergency Assistant" action — for when someone needs help right now,
@@ -138,6 +140,7 @@ class _EmergencySosScreenState extends State<EmergencySosScreen> {
   }
 
   Future<void> _sendSos() async {
+    AlertSoundService.playAlert(times: 5);
     final pos = _currentPosition;
     final contacts = AppSession.instance.contacts;
 
@@ -167,6 +170,23 @@ class _EmergencySosScreenState extends State<EmergencySosScreen> {
         title: contacts.first.fullName,
         body: 'Alerted with your SOS and live location.',
         kind: NotificationKind.trustedContact,
+      );
+    }
+
+    // A manual SOS is always urgent enough to register as a real case for
+    // Emergency Responders, same as an escalated session timeout would.
+    if (pos != null) {
+      AppSession.instance.addIncident(
+        Incident(
+          id: DateTime.now().microsecondsSinceEpoch.toString(),
+          personName: AppSession.instance.fullName.isEmpty
+              ? 'SafetyU User'
+              : AppSession.instance.fullName,
+          phone: AppSession.instance.phone,
+          destination: 'Manual SOS — current location',
+          location: pos,
+          startedAt: DateTime.now(),
+        ),
       );
     }
 

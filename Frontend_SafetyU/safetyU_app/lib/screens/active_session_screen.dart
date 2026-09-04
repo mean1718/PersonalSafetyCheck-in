@@ -10,6 +10,7 @@ import 'package:share_plus/share_plus.dart';
 import '../models/session_record.dart';
 import '../models/app_notification.dart';
 import '../models/incident.dart';
+import '../services/alert_sound.dart';
 import '../models/contact.dart';
 import '../services/app_session.dart';
 import '../theme/app_theme.dart';
@@ -156,6 +157,11 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
       _stageSecondsRemaining = _stageGracePeriodSeconds;
     });
 
+    // Real alert feedback so the person notices even if the phone is face
+    // down or they've stepped away — more urgent pulses at each escalation.
+    AlertSoundService.playAlert(
+        times: stage == _EscalationStage.emergency ? 5 : 3);
+
     _notifyStage(stage);
 
     if (stage == _EscalationStage.emergency) {
@@ -283,6 +289,7 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
 
   void _triggerEmergencyAlert() {
     _stageTimer?.cancel();
+    AlertSoundService.playAlert(times: 5);
     if (mounted) {
       setState(() {
         _isAwaitingResponse = true;

@@ -185,7 +185,21 @@ class AppSession extends ChangeNotifier {
   void resolveIncident(String id) {
     for (final incident in activeIncidents) {
       if (incident.id == id) {
-        incident.responded = true;
+        incident.status = IncidentStatus.resolved;
+        incident.resolvedAt = DateTime.now();
+        break;
+      }
+    }
+    notifyListeners();
+  }
+
+  void setIncidentStatus(String id, IncidentStatus status) {
+    for (final incident in activeIncidents) {
+      if (incident.id == id) {
+        incident.status = status;
+        if (status == IncidentStatus.resolved) {
+          incident.resolvedAt = DateTime.now();
+        }
         break;
       }
     }
