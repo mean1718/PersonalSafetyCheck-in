@@ -3,6 +3,7 @@ import '../theme/app_theme.dart';
 import '../widgets/app_bottom_nav.dart';
 import '../models/contact.dart';
 import '../services/app_session.dart';
+import 'alert_detail_screen.dart';
 
 class TrustedContactsScreen extends StatefulWidget {
   const TrustedContactsScreen({super.key});
@@ -53,6 +54,20 @@ class _TrustedContactsScreenState extends State<TrustedContactsScreen> {
     });
   }
 
+  void _openChat(Contact contact) {
+    Navigator.pushNamed(context, '/chat', arguments: contact);
+  }
+
+  void _openRespondFlow(Contact contact) {
+    final request = AppSession.instance.buildHelpRequestFor(contact);
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => AlertDetailScreen(contact: contact, request: request),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -93,6 +108,9 @@ class _TrustedContactsScreenState extends State<TrustedContactsScreen> {
                           contact: _contacts[index],
                           onEdit: () => _openEditScreen(_contacts[index]),
                           onDelete: () => _deleteContact(_contacts[index].id),
+                          onOpenChat: () => _openChat(_contacts[index]),
+                          onOpenRespond: () =>
+                              _openRespondFlow(_contacts[index]),
                         ),
                       ),
               ),
@@ -171,11 +189,15 @@ class _ContactCard extends StatelessWidget {
   final Contact contact;
   final VoidCallback onEdit;
   final VoidCallback onDelete;
+  final VoidCallback onOpenChat;
+  final VoidCallback onOpenRespond;
 
   const _ContactCard({
     required this.contact,
     required this.onEdit,
     required this.onDelete,
+    required this.onOpenChat,
+    required this.onOpenRespond,
   });
 
   @override
@@ -190,62 +212,79 @@ class _ContactCard extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          CircleAvatar(
-            radius: 24,
-            backgroundColor: AppColors.navy.withValues(alpha: 0.1),
-            child: Text(
-              contact.initials,
-              style: TextStyle(
-                color: AppColors.navy,
-                fontWeight: FontWeight.w700,
-                fontSize: 16,
-              ),
-            ),
-          ),
-          const SizedBox(width: 12),
+          // Tapping the profile (avatar + name) opens the chat with this
+          // contact.
           Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Text(
-                      contact.fullName,
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: onOpenChat,
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  CircleAvatar(
+                    radius: 24,
+                    backgroundColor: AppColors.navy.withValues(alpha: 0.1),
+                    child: Text(
+                      contact.initials,
                       style: TextStyle(
-                        fontSize: 14.5,
+                        color: AppColors.navy,
                         fontWeight: FontWeight.w700,
-                        color: AppColors.textPrimary,
+                        fontSize: 16,
                       ),
                     ),
-                    const SizedBox(width: 6),
-                    Text(
-                      '(${contact.relationship})',
-                      style: TextStyle(
-                        fontSize: 11.5,
-                        fontWeight: FontWeight.w600,
-                        color: AppColors.textSecondary,
-                      ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Flexible(
+                              child: Text(
+                                contact.fullName,
+                                style: TextStyle(
+                                  fontSize: 14.5,
+                                  fontWeight: FontWeight.w700,
+                                  color: AppColors.textPrimary,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 6),
+                            Text(
+                              '(${contact.relationship})',
+                              style: TextStyle(
+                                fontSize: 11.5,
+                                fontWeight: FontWeight.w600,
+                                color: AppColors.textSecondary,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          contact.isMainContact
+                              ? 'Main Contact'
+                              : 'Secondary Contact',
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                            color: AppColors.textSecondary,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          contact.phone,
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: AppColors.textMuted,
+                          ),
+                        ),
+                      ],
                     ),
-                  ],
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  contact.isMainContact ? 'Main Contact' : 'Secondary Contact',
-                  style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
-                    color: AppColors.textSecondary,
                   ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  contact.phone,
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: AppColors.textMuted,
-                  ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
           Column(
@@ -254,6 +293,23 @@ class _ContactCard extends StatelessWidget {
               Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
+                  GestureDetector(
+                    onTap: onOpenRespond,
+                    child: Container(
+                      width: 38,
+                      height: 38,
+                      decoration: const BoxDecoration(
+                        color: Color(0xFFF5F7FA),
+                        shape: BoxShape.circle,
+                      ),
+                      child: Icon(
+                        Icons.notifications_active_outlined,
+                        size: 18,
+                        color: AppColors.navy,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
                   GestureDetector(
                     onTap: onEdit,
                     child: Container(

@@ -22,13 +22,15 @@ class AppNotification {
   final String body;
   final NotificationKind kind;
   final DateTime createdAt;
+  bool isRead;
 
-  const AppNotification({
+  AppNotification({
     required this.id,
     required this.title,
     required this.body,
     required this.kind,
     required this.createdAt,
+    this.isRead = false,
   });
 
   String get relativeTime {

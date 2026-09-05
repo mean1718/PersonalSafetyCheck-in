@@ -11,6 +11,7 @@ import '../models/session_record.dart';
 import '../models/app_notification.dart';
 import '../models/incident.dart';
 import '../models/contact.dart';
+import '../models/chat_message.dart';
 import '../services/app_session.dart';
 import '../theme/app_theme.dart';
 import 'session_safe_screen.dart';
@@ -57,10 +58,21 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
   int _stageSecondsRemaining = _stageGracePeriodSeconds;
   Timer? _stageTimer;
 
+  // Real trusted contacts actually alerted during this session — used so
+  // "I'm Safe" can send a real follow-up chat message only to the people
+  // who were genuinely notified, not to everyone.
+  final Set<String> _notifiedContactIds = {};
+  // The contact currently responsible for responding at this stage, so a
+  // stage timeout can be recorded against the right contact for Home.
+  Contact? _currentStageTarget;
+
   @override
   void initState() {
     super.initState();
     _sessionStartedAt = DateTime.now();
+    // Fresh session — clear any leftover response tracking from a
+    // previous alert so Home only ever shows the current one.
+    AppSession.instance.clearCurrentAlertResponses();
   }
 
   @override
@@ -117,6 +129,20 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
     _timer?.cancel();
     _stageTimer?.cancel();
     _logHistory(SessionOutcome.safe);
+
+    // Tell every trusted contact who was actually alerted during this
+    // session that the person is safe now — a real chat message, not just
+    // an in-app log.
+    for (final contact in AppSession.instance.contacts) {
+      if (_notifiedContactIds.contains(contact.id)) {
+        AppSession.instance.sendChatMessage(
+          contact.id,
+          "I'm safe now. Thanks for checking on me!",
+          kind: ChatMessageKind.safeCheckIn,
+        );
+      }
+    }
+
     final contactName = AppSession.instance.mainContact?.fullName;
     Navigator.pushReplacement(
       context,
@@ -173,6 +199,11 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
         setState(() => _stageSecondsRemaining--);
       } else {
         timer.cancel();
+        // This stage's contact didn't respond in time — record that on
+        // Home before moving on, instead of just silently escalating.
+        if (_currentStageTarget != null) {
+          AppSession.instance.markContactTimedOut(_currentStageTarget!.id);
+        }
         final next = stage == _EscalationStage.main
             ? _EscalationStage.secondary
             : _EscalationStage.emergency;
@@ -209,11 +240,24 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
     }
 
     if (target != null) {
+      _currentStageTarget = target;
+      AppSession.instance.registerContactNotified(target);
       AppSession.instance.addNotification(
         title: tagTitle,
         body: 'Alerted about your safety session near $_destination.',
         kind: NotificationKind.trustedContact,
       );
+      // Send the real "I need help" message into that contact's chat
+      // thread, so opening the chat shows the actual alert instead of
+      // staying empty.
+      _notifiedContactIds.add(target.id);
+      AppSession.instance.sendChatMessage(
+        target.id,
+        "I need help! I haven't checked in near $_destination — can you help?",
+        kind: ChatMessageKind.helpRequest,
+      );
+    } else {
+      _currentStageTarget = null;
     }
 
     await _shareLocation(specificContact: target);
@@ -289,6 +333,27 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
         _stage = _EscalationStage.emergency;
       });
     }
+
+    // Manual "Need Help" skips the timed main/secondary stages, but the
+    // main contact should still get a real chat alert, not just Emergency
+    // Responders.
+    final main = AppSession.instance.mainContact;
+    if (main != null) {
+      _currentStageTarget = main;
+      AppSession.instance.registerContactNotified(main);
+      AppSession.instance.addNotification(
+        title: main.fullName,
+        body: 'Alerted about your safety session near $_destination.',
+        kind: NotificationKind.trustedContact,
+      );
+      _notifiedContactIds.add(main.id);
+      AppSession.instance.sendChatMessage(
+        main.id,
+        "I need help right now near $_destination — can you help?",
+        kind: ChatMessageKind.helpRequest,
+      );
+    }
+
     _escalateToEmergencyResponders();
   }
 

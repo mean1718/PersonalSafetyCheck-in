@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_bottom_nav.dart';
 import '../services/app_session.dart';
+import '../models/contact_response_state.dart';
 
 class HomeDashboardScreen extends StatefulWidget {
   const HomeDashboardScreen({super.key});
@@ -76,16 +77,58 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                   ),
                   GestureDetector(
                     onTap: () => Navigator.pushNamed(context, '/notifications'),
-                    child: Container(
-                      padding: const EdgeInsets.all(10),
-                      margin: const EdgeInsets.only(right: 8),
-                      decoration: BoxDecoration(
-                        color: AppColors.card,
-                        shape: BoxShape.circle,
-                        border: Border.all(color: AppColors.border),
-                      ),
-                      child: Icon(Icons.notifications_none,
-                          color: AppColors.textPrimary, size: 20),
+                    child: AnimatedBuilder(
+                      animation: AppSession.instance,
+                      builder: (context, _) {
+                        final unread =
+                            AppSession.instance.unreadNotificationCount;
+                        return Container(
+                          margin: const EdgeInsets.only(right: 8),
+                          child: Stack(
+                            clipBehavior: Clip.none,
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.all(10),
+                                decoration: BoxDecoration(
+                                  color: AppColors.card,
+                                  shape: BoxShape.circle,
+                                  border: Border.all(color: AppColors.border),
+                                ),
+                                child: Icon(Icons.notifications_none,
+                                    color: AppColors.textPrimary, size: 20),
+                              ),
+                              if (unread > 0)
+                                Positioned(
+                                  top: -4,
+                                  right: -4,
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 5, vertical: 2),
+                                    constraints: const BoxConstraints(
+                                        minWidth: 18, minHeight: 18),
+                                    decoration: BoxDecoration(
+                                      color: AppColors.danger,
+                                      borderRadius: BorderRadius.circular(10),
+                                      border: Border.all(
+                                          color: AppColors.background,
+                                          width: 2),
+                                    ),
+                                    child: Text(
+                                      unread > 9 ? '9+' : '$unread',
+                                      textAlign: TextAlign.center,
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.w800,
+                                        height: 1.15,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                            ],
+                          ),
+                        );
+                      },
                     ),
                   ),
                   GestureDetector(
@@ -183,6 +226,8 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                   ),
                 ],
               ),
+              const SizedBox(height: 20),
+              _ContactResponsesPanel(),
               const Spacer(),
             ],
           ),
@@ -233,6 +278,133 @@ class _QuickActionCard extends StatelessWidget {
                     height: 1.25)),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// Shown under the quick actions once a session has actually alerted one
+/// or more trusted contacts. Since a person can select more than one
+/// contact, this makes it visible right on Home who's been notified and
+/// whether they've responded yet — including if a contact's window timed
+/// out with no response, so the person immediately knows to expect the
+/// next contact (or Emergency Responders) to pick it up instead.
+class _ContactResponsesPanel extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: AppSession.instance,
+      builder: (context, _) {
+        final responses = AppSession.instance.currentAlertResponses;
+        if (responses.isEmpty) {
+          return const SizedBox.shrink();
+        }
+        return Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: AppColors.card,
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: AppColors.border),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(Icons.groups_outlined, size: 18, color: AppColors.navy),
+                  const SizedBox(width: 8),
+                  Text(
+                    'Your Alert Status',
+                    style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w800,
+                        color: AppColors.textPrimary),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 4),
+              Text(
+                'Who was notified and who has responded so far.',
+                style:
+                    TextStyle(fontSize: 11.5, color: AppColors.textSecondary),
+              ),
+              const SizedBox(height: 12),
+              ...responses.map((r) => Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 6),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            r.contactName,
+                            style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                                color: AppColors.textPrimary),
+                          ),
+                        ),
+                        _StatusChip(status: r.status),
+                      ],
+                    ),
+                  )),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _StatusChip extends StatelessWidget {
+  final ContactResponseStatus status;
+  const _StatusChip({required this.status});
+
+  @override
+  Widget build(BuildContext context) {
+    late final String label;
+    late final Color color;
+    late final IconData icon;
+
+    switch (status) {
+      case ContactResponseStatus.pending:
+        label = 'Waiting…';
+        color = const Color(0xFFE59A2E);
+        icon = Icons.hourglass_top;
+        break;
+      case ContactResponseStatus.canHelp:
+        label = 'Can Help';
+        color = AppColors.success;
+        icon = Icons.check_circle;
+        break;
+      case ContactResponseStatus.cantHelp:
+        label = "Can't Help";
+        color = AppColors.danger;
+        icon = Icons.cancel;
+        break;
+      case ContactResponseStatus.timedOut:
+        label = 'No response';
+        color = AppColors.textMuted;
+        icon = Icons.timer_off;
+        break;
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 13, color: color),
+          const SizedBox(width: 5),
+          Text(
+            label,
+            style: TextStyle(
+                fontSize: 11, fontWeight: FontWeight.w700, color: color),
+          ),
+        ],
       ),
     );
   }

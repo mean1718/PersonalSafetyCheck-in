@@ -21,6 +21,7 @@ import 'screens/personal_info_screen.dart';
 import 'screens/change_password_screen.dart';
 import 'screens/select_contacts_screen.dart';
 import 'screens/verify_phone_screen.dart';
+import 'screens/chat_screen.dart';
 
 void main() {
   runApp(const SafetyUApp());
@@ -72,6 +73,15 @@ class SafetyUApp extends StatelessWidget {
                 builder: (context) => EditContactScreen(contact: contact),
                 settings: settings,
               );
+            }
+            if (settings.name == '/chat') {
+              final args = settings.arguments;
+              if (args is Contact) {
+                return MaterialPageRoute(
+                  builder: (context) => ChatScreen(contact: args),
+                  settings: settings,
+                );
+              }
             }
             return null;
           },
