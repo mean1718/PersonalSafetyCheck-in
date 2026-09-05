@@ -3,9 +3,7 @@ import 'package:geolocator/geolocator.dart';
 import '../theme/app_theme.dart';
 import '../theme/theme_controller.dart';
 import '../widgets/app_bottom_nav.dart';
-import '../widgets/responder_bottom_nav.dart';
 import '../services/app_session.dart';
-import '../models/user_role.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -19,21 +17,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   void _onNavTap(int index) {
     if (index == _navIndex) return;
-    final isResponder = AppSession.instance.role == UserRole.emergencyResponder;
-    if (isResponder) {
-      switch (index) {
-        case 0:
-          Navigator.pushReplacementNamed(context, '/emergency-home');
-          break;
-        case 1:
-          Navigator.pushReplacementNamed(context, '/cases');
-          break;
-        case 2:
-          Navigator.pushReplacementNamed(context, '/reports');
-          break;
-      }
-      return;
-    }
     switch (index) {
       case 0:
         Navigator.pushReplacementNamed(context, '/home');
@@ -196,27 +179,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
               value: session.locationSharingEnabled,
               onChanged: _toggleLocation,
             ),
-            const SizedBox(height: 20),
-            if (session.role == UserRole.emergencyResponder) ...[
-              const _SectionLabel('Officer Info'),
-              _ValueRow(
-                  label: 'Badge / Officer ID',
-                  value: session.badgeId.isEmpty ? '—' : session.badgeId,
-                  onTap: () {}),
-              _ValueRow(
-                  label: 'Verification',
-                  value: session.responderStatus.name == 'verified'
-                      ? 'Verified'
-                      : 'Pending',
-                  onTap: () {}),
-            ] else ...[
-              const _SectionLabel('Trust Mode'),
-              _SwitchRow(
-                label: 'Your availability to help',
-                value: session.availableToHelp,
-                onChanged: (v) => setState(() => session.availableToHelp = v),
-              ),
-            ],
             const SizedBox(height: 32),
             SizedBox(
               width: double.infinity,
@@ -238,9 +200,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
           ],
         ),
       ),
-      bottomNavigationBar: session.role == UserRole.emergencyResponder
-          ? ResponderBottomNav(currentIndex: _navIndex, onTap: _onNavTap)
-          : AppBottomNav(currentIndex: _navIndex, onTap: _onNavTap),
+      bottomNavigationBar:
+          AppBottomNav(currentIndex: _navIndex, onTap: _onNavTap),
     );
   }
 }
