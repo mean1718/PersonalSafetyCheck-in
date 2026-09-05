@@ -22,6 +22,10 @@ import 'screens/change_password_screen.dart';
 import 'screens/select_contacts_screen.dart';
 import 'screens/verify_phone_screen.dart';
 import 'screens/chat_screen.dart';
+import 'screens/cases_screen.dart';
+import 'screens/case_detail_screen.dart';
+import 'screens/update_case_screen.dart';
+import 'screens/case_resolved_screen.dart'; 
 
 void main() {
   runApp(const SafetyUApp());
@@ -64,6 +68,10 @@ class SafetyUApp extends StatelessWidget {
             '/change-password': (context) => const ChangePasswordScreen(),
             '/select-contacts': (context) => const SelectContactsScreen(),
             '/verify-phone': (context) => const VerifyPhoneScreen(),
+            '/cases': (context) => const CasesScreen(),
+            '/case-detail': (context) => const CaseDetailScreen(),
+            '/update-case': (context) => const UpdateCaseScreen(),
+            '/case-resolved': (context) => const CaseResolvedScreen(),
           },
           onGenerateRoute: (settings) {
             if (settings.name == '/edit-contact') {

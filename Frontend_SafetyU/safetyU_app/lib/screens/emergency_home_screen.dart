@@ -1,24 +1,19 @@
 import 'dart:async';
-import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
-import 'package:url_launcher/url_launcher.dart';
-import 'package:http/http.dart' as http;
 import '../theme/app_theme.dart';
-import '../models/app_notification.dart';
 import '../models/incident.dart';
 import '../models/verification_status.dart';
 import '../services/app_session.dart';
+import '../services/alert_sound.dart';
+import '../widgets/responder_bottom_nav.dart';
 
-/// Dashboard for the Emergency Responder role: real escalated sessions
-/// (see AppSession.activeIncidents) plotted on a real map, with call,
-/// respond, and nearby-police-station lookup actions.
-///
-/// Since this is a single-device demo with no backend, incidents only
-/// appear here once a User-role session actually escalates to "Emergency"
-/// within this same app instance — there's no live multi-device feed.
+/// Officer Dashboard — landing screen for the Emergency Responder role.
+/// Shows a live "new emergency" banner, a mini map, real case counts, and
+/// recent activity, all computed from AppSession.activeIncidents rather
+/// than fabricated example data.
 class EmergencyHomeScreen extends StatefulWidget {
   const EmergencyHomeScreen({super.key});
 
@@ -30,25 +25,31 @@ class _EmergencyHomeScreenState extends State<EmergencyHomeScreen> {
   final MapController _mapController = MapController();
   StreamSubscription<Position>? _positionSub;
   LatLng? _myPosition;
-  Timer? _clockTimer;
-
-  final Map<String, String> _policeLookupResult = {};
-  final Set<String> _policeLookupLoading = {};
+  int _lastKnownIncidentCount = 0;
 
   @override
   void initState() {
     super.initState();
+    _lastKnownIncidentCount = AppSession.instance.activeIncidents.length;
     _initLocationTracking();
-    _clockTimer = Timer.periodic(const Duration(seconds: 30), (_) {
-      if (mounted) setState(() {});
-    });
+    AppSession.instance.addListener(_onSessionChanged);
   }
 
   @override
   void dispose() {
     _positionSub?.cancel();
-    _clockTimer?.cancel();
+    AppSession.instance.removeListener(_onSessionChanged);
     super.dispose();
+  }
+
+  void _onSessionChanged() {
+    final count = AppSession.instance.activeIncidents.length;
+    if (count > _lastKnownIncidentCount) {
+      // A brand-new emergency case just came in — alert the officer for real.
+      AlertSoundService.playAlert(times: 4);
+    }
+    _lastKnownIncidentCount = count;
+    if (mounted) setState(() {});
   }
 
   Future<void> _initLocationTracking() async {
@@ -73,114 +74,11 @@ class _EmergencyHomeScreenState extends State<EmergencyHomeScreen> {
 
     _positionSub = Geolocator.getPositionStream(
       locationSettings: const LocationSettings(
-          accuracy: LocationAccuracy.high, distanceFilter: 10),
+          accuracy: LocationAccuracy.high, distanceFilter: 15),
     ).listen((pos) {
       if (!mounted) return;
       setState(() => _myPosition = LatLng(pos.latitude, pos.longitude));
     });
-  }
-
-  String _elapsedLabel(DateTime startedAt) {
-    final diff = DateTime.now().difference(startedAt);
-    if (diff.inMinutes < 1) return 'just now';
-    if (diff.inMinutes < 60) return '${diff.inMinutes} min ago';
-    final hours = diff.inMinutes ~/ 60;
-    return '$hours h ${diff.inMinutes % 60} min ago';
-  }
-
-  double? _distanceKm(Incident incident) {
-    final mine = _myPosition;
-    if (mine == null) return null;
-    final meters = Geolocator.distanceBetween(mine.latitude, mine.longitude,
-        incident.location.latitude, incident.location.longitude);
-    return meters / 1000;
-  }
-
-  Future<void> _callPerson(Incident incident) async {
-    final digits = incident.phone.replaceAll(RegExp(r'[^0-9+]'), '');
-    final uri = Uri(scheme: 'tel', path: digits);
-    try {
-      final launched = await launchUrl(uri);
-      if (!launched && mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text('Could not open the dialer for ${incident.phone}')));
-      }
-    } catch (_) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text('Could not open the dialer for ${incident.phone}')));
-    }
-  }
-
-  /// Real query against OpenStreetMap's free Overpass API for
-  /// amenity=police nodes within 5km of the incident, picks the nearest.
-  Future<void> _findNearestPolice(Incident incident) async {
-    setState(() => _policeLookupLoading.add(incident.id));
-
-    try {
-      final lat = incident.location.latitude;
-      final lng = incident.location.longitude;
-      final query =
-          '[out:json][timeout:10];node["amenity"="police"](around:5000,$lat,$lng);out body 5;';
-      final url = Uri.parse(
-          'https://overpass-api.de/api/interpreter?data=${Uri.encodeComponent(query)}');
-
-      final response = await http.get(url).timeout(const Duration(seconds: 12));
-      if (response.statusCode != 200)
-        throw Exception('status ${response.statusCode}');
-
-      final data = jsonDecode(response.body) as Map<String, dynamic>;
-      final elements = (data['elements'] as List?) ?? [];
-
-      if (elements.isEmpty) {
-        setState(() => _policeLookupResult[incident.id] =
-            'No police station found within 5 km.');
-        return;
-      }
-
-      String? bestName;
-      double bestDistance = double.infinity;
-      for (final el in elements) {
-        final tags = el['tags'] as Map<String, dynamic>?;
-        final name = tags?['name'] as String? ?? 'Police Station';
-        final elLat = (el['lat'] as num?)?.toDouble();
-        final elLng = (el['lon'] as num?)?.toDouble();
-        if (elLat == null || elLng == null) continue;
-        final dist = Geolocator.distanceBetween(lat, lng, elLat, elLng);
-        if (dist < bestDistance) {
-          bestDistance = dist;
-          bestName = name;
-        }
-      }
-
-      if (bestName == null) {
-        setState(() => _policeLookupResult[incident.id] =
-            'No police station found within 5 km.');
-      } else {
-        setState(() => _policeLookupResult[incident.id] =
-            '$bestName — ${(bestDistance / 1000).toStringAsFixed(1)} km away');
-      }
-    } catch (e) {
-      setState(() => _policeLookupResult[incident.id] =
-          'Lookup failed — check your internet connection.');
-    } finally {
-      if (mounted) setState(() => _policeLookupLoading.remove(incident.id));
-    }
-  }
-
-  void _markResponded(Incident incident) {
-    AppSession.instance.resolveIncident(incident.id);
-    AppSession.instance.addNotification(
-      title: AppSession.instance.fullName.isEmpty
-          ? 'Responder'
-          : AppSession.instance.fullName,
-      body:
-          'Responding to ${incident.personName}\'s safety code near ${incident.destination}.',
-      kind: NotificationKind.emergency,
-    );
-    setState(() {});
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text('Marked ${incident.personName} as responded to.')));
   }
 
   void _logout() {
@@ -188,220 +86,294 @@ class _EmergencyHomeScreenState extends State<EmergencyHomeScreen> {
     Navigator.pushNamedAndRemoveUntil(context, '/login', (route) => false);
   }
 
+  void _onNavTap(int index) {
+    switch (index) {
+      case 1:
+        Navigator.pushNamed(context, '/cases');
+        break;
+      case 2:
+        Navigator.pushNamed(context, '/reports');
+        break;
+      case 3:
+        Navigator.pushNamed(context, '/profile');
+        break;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     if (AppSession.instance.responderStatus != VerificationStatus.verified) {
       return _PendingVerificationView(
-          onSimulateApproval: () => setState(() => AppSession
-              .instance.responderStatus = VerificationStatus.verified),
-          onLogout: _logout);
+        onSimulateApproval: () => setState(() =>
+            AppSession.instance.responderStatus = VerificationStatus.verified),
+        onLogout: _logout,
+      );
     }
 
-    final activeIncidents =
-        AppSession.instance.activeIncidents.where((i) => !i.responded).toList();
+    final incidents = AppSession.instance.activeIncidents;
+    final newCount =
+        incidents.where((i) => i.status == IncidentStatus.newCase).length;
+    final inProgressCount =
+        incidents.where((i) => i.status == IncidentStatus.inProgress).length;
+    final resolvedCount =
+        incidents.where((i) => i.status == IncidentStatus.resolved).length;
+    final newestIncident =
+        incidents.where((i) => i.status == IncidentStatus.newCase).isNotEmpty
+            ? incidents.firstWhere((i) => i.status == IncidentStatus.newCase)
+            : null;
+
+    final recentlyResolved = incidents
+        .where((i) => i.status == IncidentStatus.resolved)
+        .toList()
+      ..sort((a, b) =>
+          (b.resolvedAt ?? b.startedAt).compareTo(a.resolvedAt ?? a.startedAt));
 
     return Scaffold(
       backgroundColor: AppColors.background,
-      appBar: AppBar(
-        backgroundColor: AppColors.background,
-        elevation: 0,
-        foregroundColor: AppColors.textPrimary,
-        automaticallyImplyLeading: false,
-        title: Text('Responder Dashboard',
-            style: TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.w700,
-                color: AppColors.textPrimary)),
-        actions: [
-          IconButton(
-              onPressed: _logout,
-              icon: Icon(Icons.logout, color: AppColors.textPrimary),
-              tooltip: 'Log out'),
-        ],
-      ),
       body: SafeArea(
-        child: Column(
-          children: [
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-              child: Row(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
                 children: [
-                  Expanded(
-                    child: Text(
-                      'Signed in as ${AppSession.instance.fullName.isEmpty ? 'Responder' : AppSession.instance.fullName}',
-                      style: TextStyle(
-                          fontSize: 12.5, color: AppColors.textSecondary),
-                    ),
+                  Container(
+                    width: 42,
+                    height: 42,
+                    decoration: BoxDecoration(
+                        color: AppColors.navy,
+                        borderRadius: BorderRadius.circular(12)),
+                    child: const Icon(Icons.local_police,
+                        color: Colors.white, size: 22),
                   ),
-                  Text('${activeIncidents.length} active',
-                      style: TextStyle(
-                          fontSize: 12.5,
-                          fontWeight: FontWeight.w700,
-                          color: AppColors.danger)),
-                ],
-              ),
-            ),
-            Container(
-              height: 190,
-              margin: const EdgeInsets.symmetric(horizontal: 20),
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(16),
-                child: FlutterMap(
-                  mapController: _mapController,
-                  options: MapOptions(
-                      initialCenter:
-                          _myPosition ?? const LatLng(11.5696, 104.9210),
-                      initialZoom: 13.5),
-                  children: [
-                    TileLayer(
-                        urlTemplate:
-                            'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                        userAgentPackageName: 'com.safetyu.app'),
-                    MarkerLayer(
-                      markers: [
-                        if (_myPosition != null)
-                          Marker(
-                              point: _myPosition!,
-                              child: const Icon(Icons.my_location,
-                                  color: Colors.blueAccent, size: 28)),
-                        for (final incident in activeIncidents)
-                          Marker(
-                              point: incident.location,
-                              child: Icon(Icons.location_on,
-                                  color: AppColors.danger, size: 34)),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('Incoming Officer',
+                            style: TextStyle(
+                                fontSize: 12.5,
+                                color: AppColors.textSecondary)),
+                        Text(
+                          AppSession.instance.fullName.isEmpty
+                              ? 'Officer'
+                              : AppSession.instance.fullName,
+                          style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w800,
+                              color: AppColors.textPrimary),
+                        ),
                       ],
                     ),
-                  ],
-                ),
+                  ),
+                  GestureDetector(
+                    onTap: () => Navigator.pushNamed(context, '/notifications'),
+                    child: Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                          color: AppColors.card,
+                          shape: BoxShape.circle,
+                          border: Border.all(color: AppColors.border)),
+                      child: Icon(Icons.notifications_none,
+                          color: AppColors.textPrimary, size: 20),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  GestureDetector(
+                    onTap: _logout,
+                    child: Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                          color: AppColors.card,
+                          shape: BoxShape.circle,
+                          border: Border.all(color: AppColors.border)),
+                      child: Icon(Icons.logout,
+                          color: AppColors.textPrimary, size: 20),
+                    ),
+                  ),
+                ],
               ),
-            ),
-            const SizedBox(height: 16),
-            Expanded(
-              child: activeIncidents.isEmpty
-                  ? Center(
-                      child: Padding(
-                        padding: EdgeInsets.symmetric(horizontal: 32),
-                        child: Text(
-                          'No active sessions right now. Escalated safety sessions from users on this device will show up here.',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                              color: AppColors.textSecondary, fontSize: 13),
-                        ),
-                      ),
-                    )
-                  : ListView.separated(
-                      padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
-                      itemCount: activeIncidents.length,
-                      separatorBuilder: (_, __) => const SizedBox(height: 12),
-                      itemBuilder: (context, index) {
-                        final incident = activeIncidents[index];
-                        final distance = _distanceKm(incident);
-                        final policeResult = _policeLookupResult[incident.id];
-                        final policeLoading =
-                            _policeLookupLoading.contains(incident.id);
-
-                        return Container(
-                          padding: const EdgeInsets.all(14),
-                          decoration: BoxDecoration(
-                            color: AppColors.card,
-                            borderRadius: BorderRadius.circular(16),
-                            border: Border.all(
-                                color: AppColors.border.withValues(alpha: 0.6)),
-                          ),
+              const SizedBox(height: 20),
+              if (newestIncident != null)
+                GestureDetector(
+                  onTap: () => Navigator.pushNamed(context, '/case-detail',
+                      arguments: newestIncident.id),
+                  child: Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: AppColors.dangerLight,
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: const Color(0xFFFFC9C0)),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(Icons.warning_amber_rounded,
+                            color: AppColors.danger),
+                        const SizedBox(width: 10),
+                        Expanded(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Row(
-                                children: [
-                                  Expanded(
-                                      child: Text(incident.personName,
-                                          style: const TextStyle(
-                                              fontSize: 14.5,
-                                              fontWeight: FontWeight.w700))),
-                                  Text(_elapsedLabel(incident.startedAt),
-                                      style: TextStyle(
-                                          fontSize: 11.5,
-                                          color: AppColors.textMuted)),
-                                ],
-                              ),
-                              const SizedBox(height: 4),
-                              Text('Heading to ${incident.destination}',
+                              Text('New Emergency',
                                   style: TextStyle(
-                                      fontSize: 12.5,
-                                      color: AppColors.textSecondary)),
-                              if (incident.locationIsStale)
-                                const Padding(
-                                  padding: EdgeInsets.only(top: 2),
-                                  child: Text(
-                                      '⚠ Last known location — live signal was unavailable',
-                                      style: TextStyle(
-                                          fontSize: 11,
-                                          color: Color(0xFFE59A2E))),
-                                ),
-                              if (distance != null) ...[
-                                const SizedBox(height: 2),
-                                Text(
-                                    '${distance.toStringAsFixed(1)} km from you',
-                                    style: TextStyle(
-                                        fontSize: 12,
-                                        color: AppColors.textMuted)),
-                              ],
-                              const SizedBox(height: 8),
-                              if (policeResult != null)
-                                Text('🚓 $policeResult',
-                                    style: TextStyle(
-                                        fontSize: 11.5,
-                                        color: AppColors.navy,
-                                        fontWeight: FontWeight.w600))
-                              else
-                                GestureDetector(
-                                  onTap: policeLoading
-                                      ? null
-                                      : () => _findNearestPolice(incident),
-                                  child: Text(
-                                    policeLoading
-                                        ? 'Finding nearest police station…'
-                                        : 'Find nearest police station',
-                                    style: TextStyle(
-                                        fontSize: 11.5,
-                                        color: AppColors.navy,
-                                        fontWeight: FontWeight.w600,
-                                        decoration: TextDecoration.underline),
-                                  ),
-                                ),
-                              const SizedBox(height: 10),
-                              Row(
-                                children: [
-                                  Expanded(
-                                    child: OutlinedButton.icon(
-                                      onPressed: () => _callPerson(incident),
-                                      icon: const Icon(Icons.call, size: 16),
-                                      label: const Text('Call'),
-                                      style: OutlinedButton.styleFrom(
-                                          minimumSize: const Size(0, 40),
-                                          foregroundColor: AppColors.navy),
-                                    ),
-                                  ),
-                                  const SizedBox(width: 10),
-                                  Expanded(
-                                    child: ElevatedButton(
-                                      onPressed: () => _markResponded(incident),
-                                      style: ElevatedButton.styleFrom(
-                                          backgroundColor: AppColors.navy,
-                                          minimumSize: const Size(0, 40)),
-                                      child: const Text('Mark Responded'),
-                                    ),
-                                  ),
-                                ],
-                              ),
+                                      fontSize: 13.5,
+                                      fontWeight: FontWeight.w800,
+                                      color: AppColors.danger)),
+                              Text('${newestIncident.personName} needs help',
+                                  style: TextStyle(
+                                      fontSize: 12, color: AppColors.danger)),
                             ],
                           ),
-                        );
-                      },
+                        ),
+                        Icon(Icons.chevron_right, color: AppColors.danger),
+                      ],
                     ),
-            ),
-          ],
+                  ),
+                ),
+              const SizedBox(height: 16),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(16),
+                child: SizedBox(
+                  height: 160,
+                  child: FlutterMap(
+                    mapController: _mapController,
+                    options: MapOptions(
+                        initialCenter:
+                            _myPosition ?? const LatLng(11.5696, 104.9210),
+                        initialZoom: 13.0),
+                    children: [
+                      TileLayer(
+                          urlTemplate:
+                              'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                          userAgentPackageName: 'com.safetyu.app'),
+                      MarkerLayer(
+                        markers: [
+                          if (_myPosition != null)
+                            Marker(
+                                point: _myPosition!,
+                                child: const Icon(Icons.my_location,
+                                    color: Colors.blueAccent, size: 26)),
+                          for (final incident in incidents.where(
+                              (i) => i.status != IncidentStatus.resolved))
+                            Marker(
+                                point: incident.location,
+                                child: Icon(Icons.location_on,
+                                    color: AppColors.danger, size: 30)),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 22),
+              Text("Today's Overview",
+                  style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w800,
+                      color: AppColors.textPrimary)),
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  Expanded(
+                      child: _StatPill(
+                          count: newCount,
+                          label: 'New',
+                          color: AppColors.danger)),
+                  const SizedBox(width: 10),
+                  Expanded(
+                      child: _StatPill(
+                          count: inProgressCount,
+                          label: 'In Progress',
+                          color: const Color(0xFFE59A2E))),
+                  const SizedBox(width: 10),
+                  Expanded(
+                      child: _StatPill(
+                          count: resolvedCount,
+                          label: 'Resolved',
+                          color: AppColors.success)),
+                ],
+              ),
+              const SizedBox(height: 22),
+              Text('Recent Activity',
+                  style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w800,
+                      color: AppColors.textPrimary)),
+              const SizedBox(height: 10),
+              if (recentlyResolved.isEmpty)
+                Text('No resolved cases yet.',
+                    style: TextStyle(
+                        fontSize: 12.5, color: AppColors.textSecondary))
+              else
+                ...recentlyResolved.take(3).map(
+                      (incident) => Padding(
+                        padding: const EdgeInsets.only(bottom: 10),
+                        child: Row(
+                          children: [
+                            Container(
+                              width: 34,
+                              height: 34,
+                              decoration: BoxDecoration(
+                                  color:
+                                      AppColors.success.withValues(alpha: 0.12),
+                                  shape: BoxShape.circle),
+                              child: Icon(Icons.check,
+                                  color: AppColors.success, size: 18),
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Text(
+                                'Case #${incident.id.substring(incident.id.length - 3)} marked as resolved',
+                                style: TextStyle(
+                                    fontSize: 12.5,
+                                    color: AppColors.textPrimary,
+                                    fontWeight: FontWeight.w600),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+            ],
+          ),
         ),
+      ),
+      bottomNavigationBar:
+          ResponderBottomNav(currentIndex: 0, onTap: _onNavTap),
+    );
+  }
+}
+
+class _StatPill extends StatelessWidget {
+  final int count;
+  final String label;
+  final Color color;
+
+  const _StatPill(
+      {required this.count, required this.label, required this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 8),
+      decoration: BoxDecoration(
+        color: AppColors.card,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: color.withValues(alpha: 0.4)),
+      ),
+      child: Column(
+        children: [
+          Text('$count',
+              style: TextStyle(
+                  fontSize: 18, fontWeight: FontWeight.w800, color: color)),
+          const SizedBox(height: 2),
+          Text(label,
+              style: TextStyle(fontSize: 11, color: AppColors.textSecondary),
+              textAlign: TextAlign.center),
+        ],
       ),
     );
   }
