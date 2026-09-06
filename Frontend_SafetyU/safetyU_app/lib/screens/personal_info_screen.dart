@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
 import '../services/app_session.dart';
+import '../utils/validators.dart';
 
 class PersonalInfoScreen extends StatefulWidget {
   const PersonalInfoScreen({super.key});
@@ -66,19 +67,25 @@ class _PersonalInfoScreenState extends State<PersonalInfoScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _field('FULL NAME', _nameController,
-                    validator: (v) => (v == null || v.trim().isEmpty)
-                        ? 'Name is required'
-                        : null),
+                _field('FULL NAME', _nameController, validator: (v) {
+                  final text = v?.trim() ?? '';
+                  if (text.isEmpty) return 'Name is required';
+                  if (AppSession.instance.isOwnNameTakenByContact(text)) {
+                    return 'This name is already used by one of your saved contacts';
+                  }
+                  return null;
+                }),
                 _field(
                   'EMAIL ADDRESS',
                   _emailController,
                   keyboardType: TextInputType.emailAddress,
                   validator: (v) {
-                    final t = v?.trim() ?? '';
-                    if (t.isEmpty) return 'Email is required';
-                    if (!RegExp(r'^[\w\.\-]+@[\w\-]+\.[\w\-\.]+$').hasMatch(t))
-                      return 'Enter a valid email address';
+                    final err = emailValidator(v);
+                    if (err != null) return err;
+                    if (AppSession.instance
+                        .isOwnEmailTakenByContact(v!.trim())) {
+                      return 'This email is already used by one of your saved contacts';
+                    }
                     return null;
                   },
                 ),
@@ -87,10 +94,12 @@ class _PersonalInfoScreenState extends State<PersonalInfoScreen> {
                   _phoneController,
                   keyboardType: TextInputType.phone,
                   validator: (v) {
-                    final t = v?.trim() ?? '';
-                    if (t.isEmpty) return 'Phone number is required';
-                    if (t.replaceAll(RegExp(r'[^0-9]'), '').length < 7)
-                      return 'Enter a valid phone number';
+                    final err = phoneValidator(v);
+                    if (err != null) return err;
+                    if (AppSession.instance
+                        .isOwnPhoneTakenByContact(v!.trim())) {
+                      return 'This phone number is already used by one of your saved contacts';
+                    }
                     return null;
                   },
                 ),

@@ -142,7 +142,7 @@ class _EmergencySosScreenState extends State<EmergencySosScreen> {
   Future<void> _sendSos() async {
     AlertSoundService.playAlert(times: 5);
     final pos = _currentPosition;
-    final contacts = AppSession.instance.contacts;
+    final contacts = AppSession.instance.friends;
 
     final locationLine = pos != null
         ? 'https://maps.google.com/?q=${pos.latitude},${pos.longitude}'
@@ -202,7 +202,7 @@ class _EmergencySosScreenState extends State<EmergencySosScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final contacts = AppSession.instance.contacts;
+    final contacts = AppSession.instance.friends;
 
     return Scaffold(
       backgroundColor: AppColors.background,

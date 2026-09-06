@@ -4,33 +4,24 @@ import '../models/contact.dart';
 import '../services/app_session.dart';
 import '../utils/validators.dart';
 
-class EditContactScreen extends StatefulWidget {
-  final Contact? contact;
-  const EditContactScreen({super.key, this.contact});
+/// "Add Contact" — sends a friend request. There's no backend to actually
+/// deliver it, so the new contact is saved as [ContactStatus.pending] and
+/// only becomes a real friend once confirmed from the Friends screen — they
+/// can't be notified or escalated to until then.
+class AddContactScreen extends StatefulWidget {
+  const AddContactScreen({super.key});
 
   @override
-  State<EditContactScreen> createState() => _EditContactScreenState();
+  State<AddContactScreen> createState() => _AddContactScreenState();
 }
 
-class _EditContactScreenState extends State<EditContactScreen> {
+class _AddContactScreenState extends State<AddContactScreen> {
   final _formKey = GlobalKey<FormState>();
-  late final TextEditingController _nameController;
-  late final TextEditingController _phoneController;
-  late final TextEditingController _emailController;
-  late final TextEditingController _relationshipController;
-  late bool _isMainContact;
-
-  @override
-  void initState() {
-    super.initState();
-    final c = widget.contact;
-    _nameController = TextEditingController(text: c?.fullName ?? '');
-    _phoneController = TextEditingController(text: c?.phone ?? '');
-    _emailController = TextEditingController(text: c?.email ?? '');
-    _relationshipController =
-        TextEditingController(text: c?.relationship ?? '');
-    _isMainContact = c?.isMainContact ?? true;
-  }
+  final _nameController = TextEditingController();
+  final _phoneController = TextEditingController();
+  final _emailController = TextEditingController();
+  final _relationshipController = TextEditingController();
+  bool _isMainContact = true;
 
   @override
   void dispose() {
@@ -41,7 +32,7 @@ class _EditContactScreenState extends State<EditContactScreen> {
     super.dispose();
   }
 
-  void _saveContact() {
+  void _sendRequest() {
     if (!(_formKey.currentState?.validate() ?? false)) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -50,29 +41,21 @@ class _EditContactScreenState extends State<EditContactScreen> {
       return;
     }
 
-    final updatedContact = Contact(
-      id: widget.contact?.id ??
-          DateTime.now().millisecondsSinceEpoch.toString(),
+    final contact = Contact(
+      id: DateTime.now().millisecondsSinceEpoch.toString(),
       fullName: _nameController.text.trim(),
       phone: _phoneController.text.trim(),
       email: _emailController.text.trim(),
       relationship: _relationshipController.text.trim(),
       isMainContact: _isMainContact,
-      isAvailable: widget.contact?.isAvailable ?? true,
-      // Editing never changes whether this contact has confirmed the
-      // friend request — brand new contacts (no widget.contact) still
-      // start out pending, same as Add Contact.
-      status: widget.contact?.status ?? ContactStatus.pending,
+      status: ContactStatus.pending,
     );
 
-    // Returns the newly updated/created contact to TrustedContactsScreen
-    Navigator.pop(context, updatedContact);
+    Navigator.pop(context, contact);
   }
 
   @override
   Widget build(BuildContext context) {
-    final isEditing = widget.contact != null;
-
     return Scaffold(
       body: SafeArea(
         child: SingleChildScrollView(
@@ -90,7 +73,7 @@ class _EditContactScreenState extends State<EditContactScreen> {
                           Icon(Icons.arrow_back, color: AppColors.textPrimary),
                     ),
                     Text(
-                      isEditing ? 'Edit Contact' : 'Add Contact',
+                      'Add Contact',
                       style: TextStyle(
                           fontSize: 18,
                           fontWeight: FontWeight.w800,
@@ -106,8 +89,7 @@ class _EditContactScreenState extends State<EditContactScreen> {
                   validator: (v) {
                     final text = v?.trim() ?? '';
                     if (text.isEmpty) return 'Name is required';
-                    if (AppSession.instance.isContactNameTaken(text,
-                        excludingId: widget.contact?.id)) {
+                    if (AppSession.instance.isContactNameTaken(text)) {
                       return 'This name is already used by another contact';
                     }
                     return null;
@@ -121,8 +103,7 @@ class _EditContactScreenState extends State<EditContactScreen> {
                   validator: (v) {
                     final err = phoneValidator(v);
                     if (err != null) return err;
-                    if (AppSession.instance.isContactPhoneTaken(v!.trim(),
-                        excludingId: widget.contact?.id)) {
+                    if (AppSession.instance.isContactPhoneTaken(v!.trim())) {
                       return 'This phone number is already used by another contact';
                     }
                     return null;
@@ -136,8 +117,7 @@ class _EditContactScreenState extends State<EditContactScreen> {
                   validator: (v) {
                     final err = emailValidator(v);
                     if (err != null) return err;
-                    if (AppSession.instance.isContactEmailTaken(v!.trim(),
-                        excludingId: widget.contact?.id)) {
+                    if (AppSession.instance.isContactEmailTaken(v!.trim())) {
                       return 'This email is already used by another contact';
                     }
                     return null;
@@ -187,19 +167,29 @@ class _EditContactScreenState extends State<EditContactScreen> {
                   width: double.infinity,
                   height: 50,
                   child: ElevatedButton(
-                    onPressed: _saveContact,
+                    onPressed: _sendRequest,
                     style: ElevatedButton.styleFrom(
                       backgroundColor: AppColors.navy,
                       shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(25)),
                     ),
-                    child: Text(
-                      isEditing ? 'Save Edit' : 'Add Contact',
-                      style: const TextStyle(
+                    child: const Text(
+                      'Send Request',
+                      style: TextStyle(
                           color: Colors.white,
                           fontSize: 15,
                           fontWeight: FontWeight.w700),
                     ),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Center(
+                  child: TextButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: Text('Cancel',
+                        style: TextStyle(
+                            color: AppColors.textSecondary,
+                            fontWeight: FontWeight.w600)),
                   ),
                 ),
               ],

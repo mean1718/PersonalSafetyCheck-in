@@ -3,8 +3,13 @@ import '../theme/app_theme.dart';
 import '../widgets/app_bottom_nav.dart';
 import '../models/contact.dart';
 import '../services/app_session.dart';
+import 'add_contact_screen.dart';
 import 'alert_detail_screen.dart';
 
+/// "Friends" tab — the people who'll actually be notified in an emergency.
+/// A sent request sits under Requests as [ContactStatus.pending] until the
+/// other person confirms; only then do they move to Your Friends and
+/// become eligible to be notified, chatted with, or escalated to.
 class TrustedContactsScreen extends StatefulWidget {
   const TrustedContactsScreen({super.key});
 
@@ -13,11 +18,30 @@ class TrustedContactsScreen extends StatefulWidget {
 }
 
 class _TrustedContactsScreenState extends State<TrustedContactsScreen> {
-  int _navIndex = 1;
+  final int _navIndex = 1;
 
-  // Contacts live in AppSession so they persist across screens and are the
-  // person's real, typed-in contacts — not seeded example data.
-  List<Contact> get _contacts => AppSession.instance.contacts;
+  List<Contact> get _friends => AppSession.instance.friends;
+  List<Contact> get _requests => AppSession.instance.pendingRequests;
+
+  @override
+  void initState() {
+    super.initState();
+    // A sent request can flip from pending -> friend on its own (the
+    // simulated delay in AppSession.sendFriendRequest fires outside any tap
+    // on this screen), so this screen needs to listen for that instead of
+    // only relying on setState after its own button presses.
+    AppSession.instance.addListener(_onSessionChanged);
+  }
+
+  @override
+  void dispose() {
+    AppSession.instance.removeListener(_onSessionChanged);
+    super.dispose();
+  }
+
+  void _onSessionChanged() {
+    if (mounted) setState(() {});
+  }
 
   void _onNavTap(int index) {
     if (index == _navIndex) return;
@@ -34,24 +58,36 @@ class _TrustedContactsScreenState extends State<TrustedContactsScreen> {
     }
   }
 
-  Future<void> _openEditScreen([Contact? contact]) async {
+  Future<void> _addContact() async {
+    final result = await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (context) => const AddContactScreen()),
+    );
+    if (result is Contact) {
+      setState(() => AppSession.instance.sendFriendRequest(result));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+              content: Text(
+                  'Request sent to ${result.fullName} — waiting for them to accept.')),
+        );
+      }
+    }
+  }
+
+  Future<void> _openEditScreen(Contact contact) async {
     final result = await Navigator.pushNamed(
       context,
       '/edit-contact',
       arguments: contact,
     );
-
     if (result is Contact) {
-      setState(() {
-        AppSession.instance.upsertContact(result);
-      });
+      setState(() => AppSession.instance.upsertContact(result));
     }
   }
 
-  void _deleteContact(String id) {
-    setState(() {
-      AppSession.instance.removeContact(id);
-    });
+  void _delete(Contact contact) {
+    setState(() => AppSession.instance.removeContact(contact.id));
   }
 
   void _openChat(Contact contact) {
@@ -70,48 +106,77 @@ class _TrustedContactsScreenState extends State<TrustedContactsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final friends = _friends;
+    final requests = _requests;
+    final isEmpty = friends.isEmpty && requests.isEmpty;
+
     return Scaffold(
+      backgroundColor: AppColors.background,
       body: SafeArea(
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+          padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'Manage Contacts',
+                'Friends',
                 style: TextStyle(
-                    fontSize: 22,
+                    fontSize: 24,
                     fontWeight: FontWeight.w800,
                     color: AppColors.textPrimary),
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 6),
               Text(
-                'Your Safety Contact',
-                style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w700,
-                    color: AppColors.textPrimary),
-              ),
-              const SizedBox(height: 2),
-              Text(
-                'These people will be alerted if you miss a respond.',
-                style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
+                'People you trust and can notify in an emergency.',
+                style: TextStyle(fontSize: 13, color: AppColors.textSecondary),
               ),
               const SizedBox(height: 18),
               Expanded(
-                child: _contacts.isEmpty
-                    ? _EmptyContactsState(onAdd: () => _openEditScreen())
-                    : ListView.separated(
-                        itemCount: _contacts.length,
-                        separatorBuilder: (_, __) => const SizedBox(height: 12),
-                        itemBuilder: (context, index) => _ContactCard(
-                          contact: _contacts[index],
-                          onEdit: () => _openEditScreen(_contacts[index]),
-                          onDelete: () => _deleteContact(_contacts[index].id),
-                          onOpenChat: () => _openChat(_contacts[index]),
-                          onOpenRespond: () =>
-                              _openRespondFlow(_contacts[index]),
-                        ),
+                child: isEmpty
+                    ? _EmptyFriendsState(onAdd: _addContact)
+                    : ListView(
+                        padding: const EdgeInsets.only(bottom: 20),
+                        children: [
+                          if (requests.isNotEmpty) ...[
+                            Text(
+                              'Requests',
+                              style: TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w800,
+                                  color: AppColors.textPrimary),
+                            ),
+                            const SizedBox(height: 10),
+                            ...requests.map((c) => Padding(
+                                  padding: const EdgeInsets.only(bottom: 12),
+                                  child: _RequestCard(
+                                    contact: c,
+                                    onDelete: () => _delete(c),
+                                    onEdit: () => _openEditScreen(c),
+                                  ),
+                                )),
+                            const SizedBox(height: 8),
+                          ],
+                          if (friends.isNotEmpty) ...[
+                            Text(
+                              'Your Friends',
+                              style: TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w800,
+                                  color: AppColors.textPrimary),
+                            ),
+                            const SizedBox(height: 10),
+                            ...friends.map((c) => Padding(
+                                  padding: const EdgeInsets.only(bottom: 12),
+                                  child: _FriendCard(
+                                    contact: c,
+                                    onUnfriend: () => _delete(c),
+                                    onOpenChat: () => _openChat(c),
+                                    onOpenRespond: () => _openRespondFlow(c),
+                                    onEdit: () => _openEditScreen(c),
+                                  ),
+                                )),
+                          ],
+                        ],
                       ),
               ),
             ],
@@ -119,7 +184,7 @@ class _TrustedContactsScreenState extends State<TrustedContactsScreen> {
         ),
       ),
       floatingActionButton: FloatingActionButton(
-        onPressed: () => _openEditScreen(),
+        onPressed: _addContact,
         backgroundColor: AppColors.navy,
         shape: const CircleBorder(),
         child: const Icon(Icons.add, color: Colors.white, size: 28),
@@ -130,9 +195,9 @@ class _TrustedContactsScreenState extends State<TrustedContactsScreen> {
   }
 }
 
-class _EmptyContactsState extends StatelessWidget {
+class _EmptyFriendsState extends StatelessWidget {
   final VoidCallback onAdd;
-  const _EmptyContactsState({required this.onAdd});
+  const _EmptyFriendsState({required this.onAdd});
 
   @override
   Widget build(BuildContext context) {
@@ -154,7 +219,7 @@ class _EmptyContactsState extends StatelessWidget {
             ),
             const SizedBox(height: 16),
             Text(
-              'No trusted contacts yet',
+              'No friends yet',
               style: TextStyle(
                   fontSize: 15,
                   fontWeight: FontWeight.w800,
@@ -171,7 +236,7 @@ class _EmptyContactsState extends StatelessWidget {
             ElevatedButton.icon(
               onPressed: onAdd,
               icon: const Icon(Icons.add, size: 18),
-              label: const Text('Add Your First Contact'),
+              label: const Text('Add Contact'),
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppColors.navy,
                 minimumSize: const Size(0, 46),
@@ -185,19 +250,19 @@ class _EmptyContactsState extends StatelessWidget {
   }
 }
 
-class _ContactCard extends StatelessWidget {
+class _FriendCard extends StatelessWidget {
   final Contact contact;
-  final VoidCallback onEdit;
-  final VoidCallback onDelete;
+  final VoidCallback onUnfriend;
   final VoidCallback onOpenChat;
   final VoidCallback onOpenRespond;
+  final VoidCallback onEdit;
 
-  const _ContactCard({
+  const _FriendCard({
     required this.contact,
-    required this.onEdit,
-    required this.onDelete,
+    required this.onUnfriend,
     required this.onOpenChat,
     required this.onOpenRespond,
+    required this.onEdit,
   });
 
   @override
@@ -206,157 +271,219 @@ class _ContactCard extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       decoration: BoxDecoration(
         color: AppColors.card,
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(18),
         border: Border.all(color: AppColors.border.withValues(alpha: 0.6)),
       ),
-      child: Row(
+      child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Tapping the profile (avatar + name) opens the chat with this
-          // contact.
-          Expanded(
-            child: GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onTap: onOpenChat,
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  CircleAvatar(
-                    radius: 24,
-                    backgroundColor: AppColors.navy.withValues(alpha: 0.1),
-                    child: Text(
-                      contact.initials,
-                      style: TextStyle(
-                        color: AppColors.navy,
-                        fontWeight: FontWeight.w700,
-                        fontSize: 16,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+          Row(
+            children: [
+              CircleAvatar(
+                radius: 24,
+                backgroundColor: AppColors.navy.withValues(alpha: 0.1),
+                child: Text(
+                  contact.initials,
+                  style: TextStyle(
+                      color: AppColors.navy,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 16),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
                       children: [
-                        Row(
-                          children: [
-                            Flexible(
-                              child: Text(
-                                contact.fullName,
-                                style: TextStyle(
-                                  fontSize: 14.5,
-                                  fontWeight: FontWeight.w700,
-                                  color: AppColors.textPrimary,
-                                ),
-                              ),
+                        Flexible(
+                          child: Text(
+                            contact.fullName,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                                fontSize: 14.5,
+                                fontWeight: FontWeight.w700,
+                                color: AppColors.textPrimary),
+                          ),
+                        ),
+                        if (contact.relationship.isNotEmpty) ...[
+                          const SizedBox(width: 6),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 8, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: AppColors.navy.withValues(alpha: 0.08),
+                              borderRadius: BorderRadius.circular(10),
                             ),
-                            const SizedBox(width: 6),
-                            Text(
-                              '(${contact.relationship})',
+                            child: Text(
+                              contact.isMainContact
+                                  ? 'Main'
+                                  : contact.relationship,
                               style: TextStyle(
-                                fontSize: 11.5,
-                                fontWeight: FontWeight.w600,
-                                color: AppColors.textSecondary,
-                              ),
+                                  fontSize: 10.5,
+                                  fontWeight: FontWeight.w700,
+                                  color: AppColors.navy),
                             ),
-                          ],
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          contact.isMainContact
-                              ? 'Main Contact'
-                              : 'Secondary Contact',
-                          style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w600,
-                            color: AppColors.textSecondary,
                           ),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          contact.phone,
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: AppColors.textMuted,
-                          ),
-                        ),
+                        ],
                       ],
                     ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  GestureDetector(
-                    onTap: onOpenRespond,
-                    child: Container(
-                      width: 38,
-                      height: 38,
-                      decoration: const BoxDecoration(
-                        color: Color(0xFFF5F7FA),
-                        shape: BoxShape.circle,
-                      ),
-                      child: Icon(
-                        Icons.notifications_active_outlined,
-                        size: 18,
-                        color: AppColors.navy,
-                      ),
+                    const SizedBox(height: 3),
+                    Text(
+                      contact.email.isNotEmpty ? contact.email : contact.phone,
+                      style: TextStyle(
+                          fontSize: 12, color: AppColors.textSecondary),
                     ),
-                  ),
-                  const SizedBox(width: 8),
-                  GestureDetector(
-                    onTap: onEdit,
-                    child: Container(
-                      width: 38,
-                      height: 38,
-                      decoration: const BoxDecoration(
-                        color: Color(0xFFF5F7FA),
-                        shape: BoxShape.circle,
-                      ),
-                      child: Icon(
-                        Icons.edit_square,
-                        size: 18,
-                        color: AppColors.navy,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  GestureDetector(
-                    onTap: onDelete,
-                    child: Container(
-                      width: 38,
-                      height: 38,
-                      decoration: BoxDecoration(
-                        color: AppColors.navy,
-                        shape: BoxShape.circle,
-                      ),
-                      child: const Icon(
-                        Icons.delete_outline,
-                        size: 18,
-                        color: Colors.white,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              Text(
-                contact.isAvailable ? 'Available' : 'Not Available',
-                style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w700,
-                  color: contact.isAvailable
-                      ? AppColors.navy
-                      : AppColors.textMuted,
+                  ],
                 ),
               ),
             ],
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              GestureDetector(
+                onTap: onOpenChat,
+                child: Container(
+                  width: 34,
+                  height: 34,
+                  decoration: const BoxDecoration(
+                    color: Color(0xFFF5F7FA),
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(Icons.chat_bubble_outline,
+                      size: 16, color: AppColors.navy),
+                ),
+              ),
+              const SizedBox(width: 8),
+              GestureDetector(
+                onTap: onOpenRespond,
+                child: Container(
+                  width: 34,
+                  height: 34,
+                  decoration: const BoxDecoration(
+                    color: Color(0xFFF5F7FA),
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(Icons.notifications_active_outlined,
+                      size: 16, color: AppColors.navy),
+                ),
+              ),
+              const SizedBox(width: 8),
+              GestureDetector(
+                onTap: onEdit,
+                child: Container(
+                  width: 34,
+                  height: 34,
+                  decoration: const BoxDecoration(
+                    color: Color(0xFFF5F7FA),
+                    shape: BoxShape.circle,
+                  ),
+                  child:
+                      Icon(Icons.edit_square, size: 16, color: AppColors.navy),
+                ),
+              ),
+              const Spacer(),
+              ElevatedButton(
+                onPressed: onUnfriend,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.navy,
+                  minimumSize: const Size(0, 36),
+                  padding: const EdgeInsets.symmetric(horizontal: 14),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(20)),
+                  textStyle: const TextStyle(
+                      fontSize: 12, fontWeight: FontWeight.w700),
+                ),
+                child: const Text('Unfriend'),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _RequestCard extends StatelessWidget {
+  final Contact contact;
+  final VoidCallback onDelete;
+  final VoidCallback onEdit;
+
+  const _RequestCard({
+    required this.contact,
+    required this.onDelete,
+    required this.onEdit,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppColors.card,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: AppColors.border.withValues(alpha: 0.6)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              CircleAvatar(
+                radius: 22,
+                backgroundColor: AppColors.navy.withValues(alpha: 0.1),
+                child: Text(
+                  contact.initials,
+                  style: TextStyle(
+                      color: AppColors.navy,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 14),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(contact.fullName,
+                        style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w700,
+                            color: AppColors.textPrimary)),
+                    Text(
+                        'Waiting for ${contact.fullName.split(' ').first} to accept',
+                        style: TextStyle(
+                            fontSize: 11.5, color: AppColors.textSecondary)),
+                  ],
+                ),
+              ),
+              GestureDetector(
+                onTap: onEdit,
+                child: Container(
+                  width: 34,
+                  height: 34,
+                  decoration: const BoxDecoration(
+                    color: Color(0xFFF5F7FA),
+                    shape: BoxShape.circle,
+                  ),
+                  child:
+                      Icon(Icons.edit_square, size: 16, color: AppColors.navy),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton(
+              onPressed: onDelete,
+              style: OutlinedButton.styleFrom(
+                  minimumSize: const Size(0, 38),
+                  foregroundColor: AppColors.textSecondary),
+              child: const Text('Cancel Request'),
+            ),
           ),
         ],
       ),

@@ -36,6 +36,52 @@ class AppSession extends ChangeNotifier {
   final List<SessionRecord> sessionHistory = [];
   final List<AppNotification> notifications = [];
 
+  // ---- Real-life uniqueness checks -------------------------------------
+  // Two different people essentially never share the exact same phone
+  // number or email address, so either being already saved on another
+  // contact (or on the signed-in user's own identity) means this is a
+  // duplicate, not a new person. Name matching is blunter — different real
+  // people can share a full name — but it's included for the same
+  // treatment, at the requester's request.
+  String _normName(String s) => s.trim().toLowerCase();
+  String _normEmail(String s) => s.trim().toLowerCase();
+  String _normPhone(String s) => s.replaceAll(RegExp(r'[^0-9]'), '');
+
+  /// True if [candidateName] already belongs to another saved contact, or
+  /// to the signed-in user themselves. Pass [excludingId] when editing an
+  /// existing contact so it doesn't collide with itself.
+  bool isContactNameTaken(String candidateName, {String? excludingId}) {
+    final n = _normName(candidateName);
+    if (n.isEmpty) return false;
+    if (n == _normName(fullName)) return true;
+    return contacts
+        .any((c) => c.id != excludingId && _normName(c.fullName) == n);
+  }
+
+  bool isContactPhoneTaken(String candidatePhone, {String? excludingId}) {
+    final n = _normPhone(candidatePhone);
+    if (n.isEmpty) return false;
+    if (n == _normPhone(phone)) return true;
+    return contacts.any((c) => c.id != excludingId && _normPhone(c.phone) == n);
+  }
+
+  bool isContactEmailTaken(String candidateEmail, {String? excludingId}) {
+    final n = _normEmail(candidateEmail);
+    if (n.isEmpty) return false;
+    if (n == _normEmail(email)) return true;
+    return contacts.any((c) => c.id != excludingId && _normEmail(c.email) == n);
+  }
+
+  /// The reverse direction — used when the signed-in user edits their own
+  /// name/phone/email, to stop them taking on the identity of one of their
+  /// own saved contacts.
+  bool isOwnNameTakenByContact(String candidateName) =>
+      contacts.any((c) => _normName(c.fullName) == _normName(candidateName));
+  bool isOwnPhoneTakenByContact(String candidatePhone) =>
+      contacts.any((c) => _normPhone(c.phone) == _normPhone(candidatePhone));
+  bool isOwnEmailTakenByContact(String candidateEmail) =>
+      contacts.any((c) => _normEmail(c.email) == _normEmail(candidateEmail));
+
   // Real chat threads, keyed by contact id. Only messages the person
   // actually sent from this device live here — no seeded conversations.
   final Map<String, List<ChatMessage>> _chatThreads = {};
@@ -79,21 +125,92 @@ class AppSession extends ChangeNotifier {
 
   Contact? get mainContact {
     for (final c in contacts) {
-      if (c.isMainContact) return c;
+      if (c.status == ContactStatus.friend && c.isMainContact) return c;
     }
-    return contacts.isNotEmpty ? contacts.first : null;
+    final friends = contacts.where((c) => c.status == ContactStatus.friend);
+    return friends.isNotEmpty ? friends.first : null;
   }
 
   /// The next contact in line after the main contact — used for the
-  /// main → secondary escalation stage. Just the next contact in the list
-  /// that isn't the main one; there's no separate "secondary" flag on
-  /// Contact, so order is what we have without adding a new field.
+  /// main → secondary escalation stage. Just the next confirmed friend in
+  /// the list that isn't the main one; there's no separate "secondary"
+  /// flag on Contact, so order is what we have without adding a new field.
   Contact? get secondaryContact {
     final main = mainContact;
     for (final c in contacts) {
-      if (c.id != main?.id) return c;
+      if (c.status == ContactStatus.friend && c.id != main?.id) return c;
     }
     return null;
+  }
+
+  /// Confirmed friends only — pending requests can't be notified or
+  /// escalated to until the other person actually confirms.
+  List<Contact> get friends =>
+      contacts.where((c) => c.status == ContactStatus.friend).toList();
+
+  List<Contact> get pendingRequests =>
+      contacts.where((c) => c.status == ContactStatus.pending).toList();
+
+  /// Simulates the other person accepting a friend request — this app has
+  /// no backend to actually deliver/receive that confirmation, so this is
+  /// the honest, demo-only stand-in for it. Only ever called internally by
+  /// [sendFriendRequest]'s simulated delay — never directly from a button
+  /// the *sender* taps, since confirming your own outgoing request isn't
+  /// something the sender should be able to do.
+  void _acceptFriendRequest(String id) {
+    final index = contacts.indexWhere((c) => c.id == id);
+    if (index != -1 && contacts[index].status == ContactStatus.pending) {
+      contacts[index] = contacts[index].copyWith(status: ContactStatus.friend);
+      addNotification(
+        title: '${contacts[index].fullName} accepted your request',
+        body:
+            '${contacts[index].fullName} is now one of your trusted contacts.',
+        kind: NotificationKind.trustedContact,
+      );
+      notifyListeners();
+    }
+  }
+
+  /// Sends a friend request to a new contact. The contact is saved as
+  /// [ContactStatus.pending] and stays that way until the *other* person
+  /// accepts — there's no backend in this build to deliver a real request
+  /// to their device, so acceptance is simulated after a short delay
+  /// instead of letting the sender confirm their own request (which would
+  /// defeat the point of a request in the first place).
+  void sendFriendRequest(Contact contact) {
+    upsertContact(contact);
+    Future.delayed(const Duration(seconds: 6), () {
+      _acceptFriendRequest(contact.id);
+    });
+  }
+
+  // ---- Plan / paywall ----
+  // SafetyU's free plan caps how many contacts can be notified per safety
+  // session: up to 2 Main and 2 Other. Going over that shows the upgrade /
+  // pay-per-contact paywall instead of silently notifying everyone.
+  static const int freeMainContactLimit = 2;
+  static const int freeOtherContactLimit = 2;
+
+  bool isPro = false;
+  int purchasedExtraMainSlots = 0;
+  int purchasedExtraOtherSlots = 0;
+
+  int get maxMainContacts =>
+      isPro ? 1 << 30 : freeMainContactLimit + purchasedExtraMainSlots;
+  int get maxOtherContacts =>
+      isPro ? 1 << 30 : freeOtherContactLimit + purchasedExtraOtherSlots;
+
+  void upgradeToPro() {
+    isPro = true;
+    notifyListeners();
+  }
+
+  /// Simulates a one-time "pay per extra contact" purchase — there's no
+  /// real payment processor in this build, so this just grants the slots.
+  void purchaseExtraSlots({int extraMain = 0, int extraOther = 0}) {
+    purchasedExtraMainSlots += extraMain;
+    purchasedExtraOtherSlots += extraOther;
+    notifyListeners();
   }
 
   void signIn({
@@ -144,19 +261,17 @@ class AppSession extends ChangeNotifier {
     return message;
   }
 
+  // Any number of contacts can be marked as "Main" — the free-plan cap on
+  // how many *notified* main contacts a session can use is enforced at
+  // notify-selection time (see maxMainContacts / SelectContactsScreen),
+  // not here. Marking a new contact as Main must never silently demote an
+  // existing Main contact to Other.
   void upsertContact(Contact contact) {
     final index = contacts.indexWhere((c) => c.id == contact.id);
     if (index >= 0) {
       contacts[index] = contact;
     } else {
       contacts.add(contact);
-    }
-    if (contact.isMainContact) {
-      for (var i = 0; i < contacts.length; i++) {
-        if (contacts[i].id != contact.id) {
-          contacts[i] = contacts[i].copyWith(isMainContact: false);
-        }
-      }
     }
     notifyListeners();
   }

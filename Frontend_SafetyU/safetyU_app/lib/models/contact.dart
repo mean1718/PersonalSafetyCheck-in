@@ -1,3 +1,5 @@
+enum ContactStatus { pending, friend }
+
 class Contact {
   final String id;
   final String fullName;
@@ -6,6 +8,7 @@ class Contact {
   final String relationship;
   final bool isMainContact;
   final bool isAvailable;
+  final ContactStatus status;
   final String? avatarUrl;
 
   const Contact({
@@ -16,6 +19,7 @@ class Contact {
     required this.relationship,
     this.isMainContact = false,
     this.isAvailable = true,
+    this.status = ContactStatus.pending,
     this.avatarUrl,
   });
 
@@ -37,6 +41,7 @@ class Contact {
     String? relationship,
     bool? isMainContact,
     bool? isAvailable,
+    ContactStatus? status,
     String? avatarUrl,
   }) {
     return Contact(
@@ -47,6 +52,7 @@ class Contact {
       relationship: relationship ?? this.relationship,
       isMainContact: isMainContact ?? this.isMainContact,
       isAvailable: isAvailable ?? this.isAvailable,
+      status: status ?? this.status,
       avatarUrl: avatarUrl ?? this.avatarUrl,
     );
   }

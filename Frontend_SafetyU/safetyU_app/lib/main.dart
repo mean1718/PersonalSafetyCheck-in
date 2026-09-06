@@ -25,7 +25,7 @@ import 'screens/chat_screen.dart';
 import 'screens/cases_screen.dart';
 import 'screens/case_detail_screen.dart';
 import 'screens/update_case_screen.dart';
-import 'screens/case_resolved_screen.dart'; 
+import 'screens/case_resolved_screen.dart';
 
 void main() {
   runApp(const SafetyUApp());

@@ -175,7 +175,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
   /// the same respond flow that contact would see. Returns null (no tap
   /// action) when nothing matches rather than guessing.
   Contact? _findContactByName(String name) {
-    final contacts = AppSession.instance.contacts;
+    final contacts = AppSession.instance.friends;
     for (final c in contacts) {
       if (c.fullName == name) return c;
     }

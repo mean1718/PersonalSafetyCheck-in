@@ -3,6 +3,7 @@ import 'package:geolocator/geolocator.dart';
 import '../theme/app_theme.dart';
 import '../models/user_role.dart';
 import '../services/app_session.dart';
+import '../utils/validators.dart';
 
 class SignUpScreen extends StatefulWidget {
   const SignUpScreen({super.key});
@@ -141,27 +142,14 @@ class _SignUpScreenState extends State<SignUpScreen> {
                   _emailController,
                   hint: 'you@example.com',
                   keyboardType: TextInputType.emailAddress,
-                  validator: (v) {
-                    final text = v?.trim() ?? '';
-                    if (text.isEmpty) return 'Email is required';
-                    final pattern = RegExp(r'^[\w\.\-]+@[\w\-]+\.[\w\-\.]+$');
-                    if (!pattern.hasMatch(text))
-                      return 'Enter a valid email address';
-                    return null;
-                  },
+                  validator: emailValidator,
                 ),
                 _buildField(
                   'PHONE NUMBER',
                   _phoneController,
                   hint: '+1 (000) 000-0000',
                   keyboardType: TextInputType.phone,
-                  validator: (v) {
-                    final text = v?.trim() ?? '';
-                    if (text.isEmpty) return 'Phone number is required';
-                    final digits = text.replaceAll(RegExp(r'[^0-9]'), '');
-                    if (digits.length < 7) return 'Enter a valid phone number';
-                    return null;
-                  },
+                  validator: phoneValidator,
                 ),
                 _buildPasswordField(
                   'PASSWORD',

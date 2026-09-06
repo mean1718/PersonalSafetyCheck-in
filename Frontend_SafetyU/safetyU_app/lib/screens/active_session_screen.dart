@@ -52,7 +52,7 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
   bool _historyLogged = false;
 
   // ---- Escalation chain ----
-  static const int _stageGracePeriodSeconds = 5 * 60; // 5 min per tier
+  static const int _stageGracePeriodSeconds = 2 * 60; // 2 min per tier
 
   bool _isAwaitingResponse = false;
   _EscalationStage _stage = _EscalationStage.main;
@@ -134,7 +134,7 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
     // Tell every trusted contact who was actually alerted during this
     // session that the person is safe now — a real chat message, not just
     // an in-app log.
-    for (final contact in AppSession.instance.contacts) {
+    for (final contact in AppSession.instance.friends) {
       if (_notifiedContactIds.contains(contact.id)) {
         AppSession.instance.sendChatMessage(
           contact.id,
@@ -219,7 +219,7 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
   }
 
   Future<void> _notifyStage(_EscalationStage stage) async {
-    final contacts = AppSession.instance.contacts;
+    final contacts = AppSession.instance.friends;
     Contact? target;
     String tagTitle;
 
