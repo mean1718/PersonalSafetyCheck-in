@@ -30,6 +30,13 @@ class Incident {
   IncidentStatus status;
   DateTime? resolvedAt;
 
+  /// Ids of the trusted contacts who were actually alerted about this
+  /// person's session before it escalated. When a responder changes this
+  /// case's status, these are the people (besides the requester) who get
+  /// told — never the requester's whole friends list regardless of who
+  /// was really notified.
+  final List<String> notifiedContactIds;
+
   Incident({
     required this.id,
     required this.personName,
@@ -40,7 +47,8 @@ class Incident {
     this.locationIsStale = false,
     this.status = IncidentStatus.newCase,
     this.resolvedAt,
-  });
+    List<String>? notifiedContactIds,
+  }) : notifiedContactIds = notifiedContactIds ?? const [];
 
   bool get responded => status != IncidentStatus.newCase;
 }

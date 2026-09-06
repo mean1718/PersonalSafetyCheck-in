@@ -51,6 +51,38 @@ class _CaseDetailScreenState extends State<CaseDetailScreen> {
     setState(() {});
   }
 
+  void _viewOnMap(BuildContext context, Incident incident) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      builder: (_) => SizedBox(
+        height: 320,
+        child: ClipRRect(
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+          child: FlutterMap(
+            options:
+                MapOptions(initialCenter: incident.location, initialZoom: 15),
+            children: [
+              TileLayer(
+                urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                userAgentPackageName: 'com.safetyu.app',
+              ),
+              MarkerLayer(
+                markers: [
+                  Marker(
+                    point: incident.location,
+                    child: Icon(Icons.location_on,
+                        color: AppColors.danger, size: 38),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final incident = _findIncident(context);
@@ -230,7 +262,7 @@ class _CaseDetailScreenState extends State<CaseDetailScreen> {
                   width: double.infinity,
                   height: 46,
                   child: OutlinedButton.icon(
-                    onPressed: () {},
+                    onPressed: () => _viewOnMap(context, incident),
                     icon: const Icon(Icons.map_outlined, size: 18),
                     label: const Text('View on Map'),
                   ),

@@ -36,6 +36,11 @@ class AlertDetailScreen extends StatelessWidget {
           ? ContactResponseStatus.canHelp
           : ContactResponseStatus.cantHelp,
     );
+    if (outcome == AlertResponseOutcome.canHelp) {
+      // Let every other contact who was also alerted (and hasn't answered
+      // yet) know someone's already on it, so they don't all show up too.
+      AppSession.instance.notifyOthersHelping(contact.id, contact.fullName);
+    }
     Navigator.push(
       context,
       MaterialPageRoute(

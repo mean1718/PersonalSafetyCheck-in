@@ -151,6 +151,13 @@ class AppSession extends ChangeNotifier {
   List<Contact> get pendingRequests =>
       contacts.where((c) => c.status == ContactStatus.pending).toList();
 
+  /// Resolves the contact ids confirmed for a specific session (passed
+  /// through from Setup Safety Session) back into real Contact objects,
+  /// confirmed friends only.
+  List<Contact> contactsByIds(List<String> ids) => contacts
+      .where((c) => c.status == ContactStatus.friend && ids.contains(c.id))
+      .toList();
+
   /// Simulates the other person accepting a friend request — this app has
   /// no backend to actually deliver/receive that confirmation, so this is
   /// the honest, demo-only stand-in for it. Only ever called internally by
@@ -380,6 +387,26 @@ class AppSession extends ChangeNotifier {
     }
   }
 
+  /// When one contact confirms they can help, let every other contact who
+  /// was also notified in this same alert (and hasn't answered yet) know,
+  /// so they don't all rush to the same place at once.
+  void notifyOthersHelping(String helperContactId, String helperName) {
+    for (final r in currentAlertResponses) {
+      if (r.contactId == helperContactId) continue;
+      if (r.status != ContactResponseStatus.pending) continue;
+      sendChatMessage(
+        r.contactId,
+        "Update: $helperName confirmed they're on the way to help. You don't need to go unless asked.",
+        kind: ChatMessageKind.text,
+      );
+      addNotification(
+        title: r.contactName,
+        body: '$helperName can help — you can stand by for now.',
+        kind: NotificationKind.trustedContact,
+      );
+    }
+  }
+
   void markContactTimedOut(String contactId) {
     final i = currentAlertResponses.indexWhere((r) => r.contactId == contactId);
     if (i != -1 &&
@@ -403,27 +430,75 @@ class AppSession extends ChangeNotifier {
     notifyListeners();
   }
 
-  void resolveIncident(String id) {
-    for (final incident in activeIncidents) {
-      if (incident.id == id) {
-        incident.status = IncidentStatus.resolved;
-        incident.resolvedAt = DateTime.now();
+  void resolveIncident(String id) =>
+      setIncidentStatus(id, IncidentStatus.resolved);
+
+  /// Single choke point for every responder-side status change — used by
+  /// "Take Case", "Mark as Resolved", and "Cancel", from whichever screen
+  /// triggers them. Flips the status *and* tells the actual people
+  /// affected: an in-app notification for the requester, plus a real chat
+  /// message to every trusted contact who was alerted about this case, so
+  /// nobody is left wondering what happened after a status silently
+  /// changes underneath them.
+  void setIncidentStatus(String id, IncidentStatus status) {
+    Incident? incident;
+    for (final i in activeIncidents) {
+      if (i.id == id) {
+        incident = i;
         break;
       }
     }
+    if (incident == null) return;
+
+    final previousStatus = incident.status;
+    incident.status = status;
+    if (status == IncidentStatus.resolved) {
+      incident.resolvedAt = DateTime.now();
+    }
+
+    if (previousStatus != status) {
+      _notifyIncidentStatusChange(incident, status);
+    }
+
     notifyListeners();
   }
 
-  void setIncidentStatus(String id, IncidentStatus status) {
-    for (final incident in activeIncidents) {
-      if (incident.id == id) {
-        incident.status = status;
-        if (status == IncidentStatus.resolved) {
-          incident.resolvedAt = DateTime.now();
-        }
+  void _notifyIncidentStatusChange(Incident incident, IncidentStatus status) {
+    final String requesterBody;
+    final String contactMessage;
+    switch (status) {
+      case IncidentStatus.inProgress:
+        requesterBody =
+            'An Emergency Responder has taken your case and is on the way.';
+        contactMessage =
+            "Update: an Emergency Responder has taken ${incident.personName}'s case and is on the way.";
         break;
-      }
+      case IncidentStatus.resolved:
+        requesterBody = 'Your case has been marked resolved by a responder.';
+        contactMessage =
+            "Update: ${incident.personName}'s case has been marked resolved by an Emergency Responder.";
+        break;
+      case IncidentStatus.newCase:
+        requesterBody =
+            'Your case was reopened and is waiting for a responder again.';
+        contactMessage =
+            "Update: ${incident.personName}'s case was reopened and is waiting for a responder again.";
+        break;
     }
-    notifyListeners();
+
+    // The requester's own notification feed. This is a single-device demo
+    // with no backend to push to the requester's phone specifically, so
+    // this in-app feed is the honest stand-in for "tell the requester."
+    addNotification(
+      title: 'Emergency Responders',
+      body: requesterBody,
+      kind: NotificationKind.emergency,
+    );
+
+    // Every trusted contact who was actually alerted about this case
+    // before it escalated — never the requester's whole friends list.
+    for (final contactId in incident.notifiedContactIds) {
+      sendChatMessage(contactId, contactMessage);
+    }
   }
 }

@@ -3,6 +3,8 @@ import 'package:geolocator/geolocator.dart';
 import '../theme/app_theme.dart';
 import '../theme/theme_controller.dart';
 import '../widgets/app_bottom_nav.dart';
+import '../widgets/responder_bottom_nav.dart';
+import '../models/user_role.dart';
 import '../services/app_session.dart';
 
 class ProfileScreen extends StatefulWidget {
@@ -13,10 +15,30 @@ class ProfileScreen extends StatefulWidget {
 }
 
 class _ProfileScreenState extends State<ProfileScreen> {
+  // Index 3 in both nav bars is "Profile" — User (Home/Friends/History/
+  // Profile) and Responder (Home/Case/Report/Profile) happen to share that
+  // position, but everything they route to below is role-specific.
   final int _navIndex = 3;
+
+  bool get _isResponder =>
+      AppSession.instance.role == UserRole.emergencyResponder;
 
   void _onNavTap(int index) {
     if (index == _navIndex) return;
+    if (_isResponder) {
+      switch (index) {
+        case 0:
+          Navigator.pushReplacementNamed(context, '/emergency-home');
+          break;
+        case 1:
+          Navigator.pushReplacementNamed(context, '/cases');
+          break;
+        case 2:
+          Navigator.pushReplacementNamed(context, '/reports');
+          break;
+      }
+      return;
+    }
     switch (index) {
       case 0:
         Navigator.pushReplacementNamed(context, '/home');
@@ -135,6 +157,24 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       Text(session.email,
                           style: TextStyle(
                               fontSize: 12.5, color: AppColors.textSecondary)),
+                      if (_isResponder) ...[
+                        const SizedBox(height: 4),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: AppColors.navy.withValues(alpha: 0.1),
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: Text(
+                            'Emergency Responder',
+                            style: TextStyle(
+                                fontSize: 10.5,
+                                fontWeight: FontWeight.w700,
+                                color: AppColors.navy),
+                          ),
+                        ),
+                      ],
                     ],
                   ),
                 ),
@@ -200,8 +240,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
           ],
         ),
       ),
-      bottomNavigationBar:
-          AppBottomNav(currentIndex: _navIndex, onTap: _onNavTap),
+      bottomNavigationBar: _isResponder
+          ? ResponderBottomNav(currentIndex: _navIndex, onTap: _onNavTap)
+          : AppBottomNav(currentIndex: _navIndex, onTap: _onNavTap),
     );
   }
 }

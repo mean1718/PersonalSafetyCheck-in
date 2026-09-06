@@ -186,6 +186,7 @@ class _EmergencySosScreenState extends State<EmergencySosScreen> {
           destination: 'Manual SOS — current location',
           location: pos,
           startedAt: DateTime.now(),
+          notifiedContactIds: contacts.map((c) => c.id).toList(),
         ),
       );
     }

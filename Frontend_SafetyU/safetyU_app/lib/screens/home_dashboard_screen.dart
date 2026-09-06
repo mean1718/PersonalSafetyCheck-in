@@ -38,7 +38,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       body: SafeArea(
-        child: Padding(
+        child: SingleChildScrollView(
           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -228,7 +228,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
               ),
               const SizedBox(height: 20),
               _ContactResponsesPanel(),
-              const Spacer(),
+              const SizedBox(height: 24),
             ],
           ),
         ),
@@ -290,6 +290,22 @@ class _QuickActionCard extends StatelessWidget {
 /// out with no response, so the person immediately knows to expect the
 /// next contact (or Emergency Responders) to pick it up instead.
 class _ContactResponsesPanel extends StatelessWidget {
+  String _initials(String name) {
+    final parts =
+        name.trim().split(RegExp(r'\s+')).where((p) => p.isNotEmpty).toList();
+    if (parts.length >= 2) return '${parts[0][0]}${parts[1][0]}'.toUpperCase();
+    if (parts.isNotEmpty) return parts[0][0].toUpperCase();
+    return '?';
+  }
+
+  String _relativeTime(DateTime at) {
+    final diff = DateTime.now().difference(at);
+    if (diff.inSeconds < 60) return 'Just now';
+    if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
+    if (diff.inHours < 24) return '${diff.inHours}h ago';
+    return '${diff.inDays}d ago';
+  }
+
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
@@ -299,6 +315,9 @@ class _ContactResponsesPanel extends StatelessWidget {
         if (responses.isEmpty) {
           return const SizedBox.shrink();
         }
+        final respondedCount = responses
+            .where((r) => r.status != ContactResponseStatus.pending)
+            .length;
         return Container(
           width: double.infinity,
           padding: const EdgeInsets.all(16),
@@ -314,12 +333,29 @@ class _ContactResponsesPanel extends StatelessWidget {
                 children: [
                   Icon(Icons.groups_outlined, size: 18, color: AppColors.navy),
                   const SizedBox(width: 8),
-                  Text(
-                    'Your Alert Status',
-                    style: TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w800,
-                        color: AppColors.textPrimary),
+                  Expanded(
+                    child: Text(
+                      'Your Alert Status',
+                      style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w800,
+                          color: AppColors.textPrimary),
+                    ),
+                  ),
+                  Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: AppColors.navy.withValues(alpha: 0.08),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Text(
+                      '$respondedCount/${responses.length} responded',
+                      style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.navy),
+                    ),
                   ),
                 ],
               ),
@@ -329,24 +365,52 @@ class _ContactResponsesPanel extends StatelessWidget {
                 style:
                     TextStyle(fontSize: 11.5, color: AppColors.textSecondary),
               ),
-              const SizedBox(height: 12),
-              ...responses.map((r) => Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 6),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            r.contactName,
-                            style: TextStyle(
-                                fontSize: 13,
-                                fontWeight: FontWeight.w600,
-                                color: AppColors.textPrimary),
-                          ),
+              const SizedBox(height: 8),
+              for (int i = 0; i < responses.length; i++) ...[
+                if (i > 0) Divider(height: 1, color: AppColors.border),
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 10),
+                  child: Row(
+                    children: [
+                      CircleAvatar(
+                        radius: 16,
+                        backgroundColor: AppColors.navy.withValues(alpha: 0.1),
+                        child: Text(
+                          _initials(responses[i].contactName),
+                          style: TextStyle(
+                              fontSize: 11.5,
+                              fontWeight: FontWeight.w800,
+                              color: AppColors.navy),
                         ),
-                        _StatusChip(status: r.status),
-                      ],
-                    ),
-                  )),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              responses[i].contactName,
+                              style: TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w700,
+                                  color: AppColors.textPrimary),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              'Notified ${_relativeTime(responses[i].notifiedAt)}',
+                              style: TextStyle(
+                                  fontSize: 10.5,
+                                  color: AppColors.textSecondary),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      _StatusChip(status: responses[i].status),
+                    ],
+                  ),
+                ),
+              ],
             ],
           ),
         );

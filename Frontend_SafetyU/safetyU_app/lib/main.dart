@@ -26,6 +26,7 @@ import 'screens/cases_screen.dart';
 import 'screens/case_detail_screen.dart';
 import 'screens/update_case_screen.dart';
 import 'screens/case_resolved_screen.dart';
+import 'screens/report_screen.dart';
 
 void main() {
   runApp(const SafetyUApp());
@@ -72,6 +73,7 @@ class SafetyUApp extends StatelessWidget {
             '/case-detail': (context) => const CaseDetailScreen(),
             '/update-case': (context) => const UpdateCaseScreen(),
             '/case-resolved': (context) => const CaseResolvedScreen(),
+            '/reports': (context) => const ReportsScreen(),
           },
           onGenerateRoute: (settings) {
             if (settings.name == '/edit-contact') {

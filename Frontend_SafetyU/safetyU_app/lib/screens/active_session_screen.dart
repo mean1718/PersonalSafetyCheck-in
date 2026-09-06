@@ -6,10 +6,12 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../models/session_record.dart';
 import '../models/app_notification.dart';
 import '../models/incident.dart';
+import '../models/contact_response_state.dart';
 import '../services/alert_sound.dart';
 import '../models/contact.dart';
 import '../models/chat_message.dart';
@@ -51,6 +53,19 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
   bool _hadDelay = false;
   bool _historyLogged = false;
 
+  // Contacts actually confirmed on the Setup screen for *this* session —
+  // escalation must only ever notify these people, never the person's
+  // whole friends list regardless of what they picked.
+  List<String> _confirmedNotifyContactIds = [];
+  List<Contact> get _sessionMainContacts => AppSession.instance
+      .contactsByIds(_confirmedNotifyContactIds)
+      .where((c) => c.isMainContact)
+      .toList();
+  List<Contact> get _sessionOtherContacts => AppSession.instance
+      .contactsByIds(_confirmedNotifyContactIds)
+      .where((c) => !c.isMainContact)
+      .toList();
+
   // ---- Escalation chain ----
   static const int _stageGracePeriodSeconds = 2 * 60; // 2 min per tier
 
@@ -63,9 +78,10 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
   // "I'm Safe" can send a real follow-up chat message only to the people
   // who were genuinely notified, not to everyone.
   final Set<String> _notifiedContactIds = {};
-  // The contact currently responsible for responding at this stage, so a
-  // stage timeout can be recorded against the right contact for Home.
-  Contact? _currentStageTarget;
+  // Everyone currently being waited on at this escalation stage — a stage
+  // times out (or gets an early "can help" response) as a group, not one
+  // contact at a time.
+  List<Contact> _currentStageTargets = [];
 
   @override
   void initState() {
@@ -74,6 +90,47 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
     // Fresh session — clear any leftover response tracking from a
     // previous alert so Home only ever shows the current one.
     AppSession.instance.clearCurrentAlertResponses();
+    // So an early "I can help" response stops further escalation instead
+    // of waiting out the full 2-minute stage timer regardless.
+    AppSession.instance.addListener(_onSessionChanged);
+  }
+
+  @override
+  void dispose() {
+    AppSession.instance.removeListener(_onSessionChanged);
+    _timer?.cancel();
+    _stageTimer?.cancel();
+    _positionSub?.cancel();
+    super.dispose();
+  }
+
+  void _onSessionChanged() {
+    if (!mounted || !_isAwaitingResponse || _emergencyTriggered) return;
+    // Check every contact notified so far this session — not just the
+    // current stage's targets — so a "Can Help" that arrives just as it
+    // rolls over to the next stage still counts instead of being silently
+    // ignored because it's no longer "the current tier".
+    if (_notifiedContactIds.isEmpty) return;
+    final helper = AppSession.instance.currentAlertResponses.firstWhere(
+      (r) =>
+          _notifiedContactIds.contains(r.contactId) &&
+          r.status == ContactResponseStatus.canHelp,
+      orElse: () => ContactResponseState(
+          contactId: '',
+          contactName: '',
+          status: ContactResponseStatus.pending,
+          notifiedAt: DateTime.now()),
+    );
+    if (helper.contactId.isEmpty) return;
+
+    // Someone confirmed they can help — stop escalating.
+    _stageTimer?.cancel();
+    setState(() => _isAwaitingResponse = false);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+          content:
+              Text('${helper.contactName} can help — pausing further alerts.')),
+    );
   }
 
   @override
@@ -97,6 +154,10 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
       final double longitude =
           (rawArguments['longitude'] as num?)?.toDouble() ?? 104.9210;
       _destinationCoords = LatLng(latitude, longitude);
+      final dynamic ids = rawArguments['notifyContactIds'];
+      if (ids is List) {
+        _confirmedNotifyContactIds = ids.map((e) => e.toString()).toList();
+      }
     }
 
     _isInitialized = true;
@@ -144,7 +205,17 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
       }
     }
 
-    final contactName = AppSession.instance.mainContact?.fullName;
+    final notifiedNames = AppSession.instance.friends
+        .where((c) => _notifiedContactIds.contains(c.id))
+        .map((c) => c.fullName)
+        .toList();
+    final String? contactName = notifiedNames.isEmpty
+        ? null
+        : notifiedNames.length == 1
+            ? notifiedNames.first
+            : notifiedNames.length == 2
+                ? '${notifiedNames[0]} and ${notifiedNames[1]}'
+                : '${notifiedNames[0]} and ${notifiedNames.length - 1} others';
     Navigator.pushReplacement(
       context,
       MaterialPageRoute(
@@ -205,10 +276,10 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
         setState(() => _stageSecondsRemaining--);
       } else {
         timer.cancel();
-        // This stage's contact didn't respond in time — record that on
-        // Home before moving on, instead of just silently escalating.
-        if (_currentStageTarget != null) {
-          AppSession.instance.markContactTimedOut(_currentStageTarget!.id);
+        // Nobody at this stage responded in time — record that on Home for
+        // every one of them, not just one, before moving on.
+        for (final target in _currentStageTargets) {
+          AppSession.instance.markContactTimedOut(target.id);
         }
         final next = stage == _EscalationStage.main
             ? _EscalationStage.secondary
@@ -219,23 +290,18 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
   }
 
   Future<void> _notifyStage(_EscalationStage stage) async {
-    final contacts = AppSession.instance.friends;
-    Contact? target;
-    String tagTitle;
-
+    List<Contact> targets;
     if (stage == _EscalationStage.main) {
-      target = AppSession.instance.mainContact;
-      tagTitle = target?.fullName ?? 'Main contact';
+      targets = _sessionMainContacts;
     } else if (stage == _EscalationStage.secondary) {
-      target = AppSession.instance.secondaryContact;
-      tagTitle = target?.fullName ?? 'Secondary contact';
+      targets = _sessionOtherContacts;
     } else {
-      target = null;
-      tagTitle = 'Emergency Responders';
+      targets = [];
     }
 
-    if (stage != _EscalationStage.emergency && target == null) {
-      // No contact available at this tier — skip straight to the next one.
+    if (stage != _EscalationStage.emergency && targets.isEmpty) {
+      // Nobody confirmed at this tier for this session — skip straight to
+      // the next one instead of waiting out a timer for nobody.
       final next = stage == _EscalationStage.main
           ? _EscalationStage.secondary
           : _EscalationStage.emergency;
@@ -245,34 +311,45 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
       return;
     }
 
-    if (target != null) {
-      _currentStageTarget = target;
+    _currentStageTargets = targets;
+
+    // Everyone at this tier is alerted at the same time. A real per-contact
+    // OS Share sheet would mean tapping through N separate popups with no
+    // user interaction expected, so the automatic broadcast lives entirely
+    // inside the app (an in-app notification + a chat message carrying a
+    // live location link) — the same "delivery" a push/SMS backend would
+    // provide, which this build doesn't have. The manual "Share My
+    // Location" button still opens the real OS share sheet for when the
+    // person wants to send it somewhere themselves.
+    final LatLng? position =
+        _currentPosition ?? AppSession.instance.lastKnownPosition;
+    final String? mapsUrl = position != null
+        ? 'https://maps.google.com/?q=${position.latitude},${position.longitude}'
+        : null;
+    final String locationLine = mapsUrl != null
+        ? '\nMy live location: $mapsUrl'
+        : '\n(Location unavailable right now.)';
+
+    for (final target in targets) {
       AppSession.instance.registerContactNotified(target);
       AppSession.instance.addNotification(
-        title: tagTitle,
+        title: target.fullName,
         body: 'Alerted about your safety session near $_destination.',
         kind: NotificationKind.trustedContact,
       );
-      // Send the real "I need help" message into that contact's chat
-      // thread, so opening the chat shows the actual alert instead of
-      // staying empty.
       _notifiedContactIds.add(target.id);
       AppSession.instance.sendChatMessage(
         target.id,
-        "I need help! I haven't checked in near $_destination — can you help?",
+        "I need help! I haven't checked in near $_destination.$locationLine\nCan you help?",
         kind: ChatMessageKind.helpRequest,
       );
-    } else {
-      _currentStageTarget = null;
     }
 
-    await _shareLocation(specificContact: target);
-
-    if (contacts.isEmpty && stage == _EscalationStage.main) {
+    if (_confirmedNotifyContactIds.isEmpty && stage == _EscalationStage.main) {
       AppSession.instance.addNotification(
         title: 'SafetyU System',
         body:
-            'No trusted contact available — escalating to Emergency Responders.',
+            'No trusted contacts were confirmed for this session — escalating to Emergency Responders.',
         kind: NotificationKind.escalation,
       );
     }
@@ -302,6 +379,7 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
         location: position,
         startedAt: _sessionStartedAt,
         locationIsStale: isStale,
+        notifiedContactIds: _notifiedContactIds.toList(),
       ),
     );
 
@@ -341,12 +419,17 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
       });
     }
 
-    // Manual "Need Help" skips the timed main/secondary stages, but the
+    // Manual "Need Help" skips the timed main/secondary stages, but every
     // main contact should still get a real chat alert, not just Emergency
     // Responders.
-    final main = AppSession.instance.mainContact;
-    if (main != null) {
-      _currentStageTarget = main;
+    final mains = _sessionMainContacts;
+    _currentStageTargets = mains;
+    final LatLng? position =
+        _currentPosition ?? AppSession.instance.lastKnownPosition;
+    final String locationLine = position != null
+        ? '\nMy live location: https://maps.google.com/?q=${position.latitude},${position.longitude}'
+        : '\n(Location unavailable right now.)';
+    for (final main in mains) {
       AppSession.instance.registerContactNotified(main);
       AppSession.instance.addNotification(
         title: main.fullName,
@@ -356,7 +439,7 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
       _notifiedContactIds.add(main.id);
       AppSession.instance.sendChatMessage(
         main.id,
-        "I need help right now near $_destination — can you help?",
+        "I need help right now near $_destination.$locationLine\nCan you help?",
         kind: ChatMessageKind.helpRequest,
       );
     }
@@ -367,6 +450,29 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
   // =========================================================
   // LOCATION
   // =========================================================
+
+  /// Cambodia's real national police number (117) — verified, not guessed.
+  /// This never auto-dials on its own; it only opens the phone dialer when
+  /// the person themselves taps the button, same as any other emergency
+  /// call. If this app ever supports other countries, this needs to become
+  /// location-aware rather than a single hardcoded number.
+  Future<void> _callPolice() async {
+    final uri = Uri(scheme: 'tel', path: '117');
+    try {
+      final launched = await launchUrl(uri);
+      if (!launched && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not open the dialer.')),
+        );
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not open the dialer.')),
+        );
+      }
+    }
+  }
 
   Future<void> _initLocationTracking() async {
     try {
@@ -542,14 +648,6 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
     return _formatClock(DateTime.now().add(Duration(seconds: secondsFromNow)));
   }
 
-  @override
-  void dispose() {
-    _timer?.cancel();
-    _stageTimer?.cancel();
-    _positionSub?.cancel();
-    super.dispose();
-  }
-
   // =========================================================
   // UI
   // =========================================================
@@ -583,7 +681,11 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
           child: Column(
             children: [
               if (_isAwaitingResponse)
-                _EscalationBanner(stage: _stage, sosSent: _emergencyTriggered)
+                _EscalationBanner(
+                  stage: _stage,
+                  sosSent: _emergencyTriggered,
+                  onCallPolice: _callPolice,
+                )
               else
                 Container(
                   height: 180,
@@ -813,7 +915,7 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
                         children: [
                           Text(
                             _stage == _EscalationStage.main
-                                ? 'Escalates to secondary contact in'
+                                ? 'Escalates to other contacts in'
                                 : 'Escalates to Emergency Responders in',
                             style: TextStyle(
                                 fontSize: 12,
@@ -855,8 +957,10 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
 class _EscalationBanner extends StatelessWidget {
   final _EscalationStage stage;
   final bool sosSent;
+  final VoidCallback onCallPolice;
 
-  const _EscalationBanner({required this.stage, required this.sosSent});
+  const _EscalationBanner(
+      {required this.stage, required this.sosSent, required this.onCallPolice});
 
   @override
   Widget build(BuildContext context) {
@@ -869,11 +973,11 @@ class _EscalationBanner extends StatelessWidget {
           'Your Emergency Responders have been alerted with your location.';
     } else if (stage == _EscalationStage.main) {
       title = 'Time is up!';
-      subtitle = 'Are you safe? Your main contact has been notified.';
+      subtitle = 'Are you safe? Your main contacts have been notified.';
     } else {
       title = 'Escalating';
       subtitle =
-          'No confirmation yet — your secondary contact has been notified.';
+          'No confirmation yet — your other contacts have been notified.';
     }
 
     return Container(
@@ -901,6 +1005,22 @@ class _EscalationBanner extends StatelessWidget {
                   fontSize: 13.5,
                   fontWeight: FontWeight.w700,
                   color: Color(0xFFFF6554))),
+          if (sosSent) ...[
+            const SizedBox(height: 16),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                onPressed: onCallPolice,
+                icon: const Icon(Icons.call, size: 18),
+                label: const Text('Call Police (117)'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFFFF6554),
+                  foregroundColor: Colors.white,
+                  minimumSize: const Size(0, 46),
+                ),
+              ),
+            ),
+          ],
         ],
       ),
     );

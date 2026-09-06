@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
+import 'package:latlong2/latlong.dart';
 
 import '../theme/app_theme.dart';
 import '../models/contact.dart';
 import '../models/help_request.dart';
+import '../models/incident.dart';
 import '../models/app_notification.dart';
 import '../services/app_session.dart';
 
@@ -77,6 +79,35 @@ class AlertResponseResultScreen extends StatelessWidget {
     Navigator.of(context).popUntil((route) => route.isFirst);
   }
 
+  void _alertEmergencyResponders(BuildContext context) {
+    AppSession.instance.addIncident(
+      Incident(
+        id: DateTime.now().microsecondsSinceEpoch.toString(),
+        personName: request.requesterName.isEmpty
+            ? 'SafetyU User'
+            : request.requesterName,
+        phone: request.requesterPhone,
+        destination: request.destination,
+        location: request.location ?? const LatLng(11.5696, 104.9210),
+        startedAt: request.requestedAt,
+        locationIsStale: request.location == null,
+        notifiedContactIds: [contact.id],
+      ),
+    );
+    AppSession.instance.addNotification(
+      title: 'SafetyU System',
+      body:
+          '${contact.fullName} could not help and alerted Emergency Responders for ${request.requesterName}.',
+      kind: NotificationKind.escalation,
+    );
+    Navigator.of(context).popUntil((route) => route.isFirst);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+          content: Text(
+              'Emergency Responders have been alerted for ${request.requesterName}.')),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     switch (outcome) {
@@ -93,14 +124,32 @@ class AlertResponseResultScreen extends StatelessWidget {
           icon: Icons.close,
           iconColor: AppColors.danger,
           subtitle:
-              "Thanks for responding.\nDon't worry, another contact will help.",
-          child: SizedBox(
-            width: double.infinity,
-            height: 52,
-            child: ElevatedButton(
-              onPressed: () => _backToHome(context),
-              child: const Text('Back To Home'),
-            ),
+              "Thanks for responding.\nIf this looks serious, you can alert Emergency Responders directly.",
+          child: Column(
+            children: [
+              SizedBox(
+                width: double.infinity,
+                height: 52,
+                child: ElevatedButton.icon(
+                  onPressed: () => _alertEmergencyResponders(context),
+                  icon: const Icon(Icons.warning_amber_rounded, size: 18),
+                  label: const Text('Alert Emergency Responders'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.danger,
+                    foregroundColor: Colors.white,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                height: 52,
+                child: OutlinedButton(
+                  onPressed: () => _backToHome(context),
+                  child: const Text('Back To Home'),
+                ),
+              ),
+            ],
           ),
         );
 
