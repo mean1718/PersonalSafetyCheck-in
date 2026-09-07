@@ -27,6 +27,17 @@ class AppSession extends ChangeNotifier {
   String phone = '';
   UserRole role = UserRole.user;
 
+    // Local file path to the picture the person chose from their own camera
+  // or gallery. SafetyU has no backend/cloud storage in this build, so
+  // this only points at a file already on the device — nothing is
+  // uploaded anywhere.
+  String? profilePhotoPath;
+
+  void updateProfilePhoto(String? path) {
+    profilePhotoPath = path;
+    notifyListeners();
+  }
+
   // ---- Emergency Responder identity (see verification_status.dart for
   // an honest note on what this app can and can't actually verify) ----
   String badgeId = '';
@@ -239,6 +250,7 @@ class AppSession extends ChangeNotifier {
     phone = '';
     role = UserRole.user;
     contacts.clear();
+    profilePhotoPath = null;
     // Session history, notifications, and incidents intentionally persist
     // across sign-out in this local-only build so nothing the person did
     // is lost just from logging out again during testing.

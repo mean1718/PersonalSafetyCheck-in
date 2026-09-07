@@ -1,5 +1,7 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:image_picker/image_picker.dart';
 import '../theme/app_theme.dart';
 import '../theme/theme_controller.dart';
 import '../widgets/app_bottom_nav.dart';
@@ -108,6 +110,83 @@ class _ProfileScreenState extends State<ProfileScreen> {
     if (selected != null) onSelected(selected);
   }
 
+  Future<void> _pickProfilePhoto() async {
+    final hasPhoto = AppSession.instance.profilePhotoPath != null;
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: AppColors.background,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (context) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: Text('Update Profile Photo',
+                    style: TextStyle(
+                        fontWeight: FontWeight.w800,
+                        fontSize: 15,
+                        color: AppColors.textPrimary)),
+              ),
+              ListTile(
+                leading:
+                    Icon(Icons.photo_camera_outlined, color: AppColors.navy),
+                title: const Text('Take Photo'),
+                onTap: () => Navigator.pop(context, 'camera'),
+              ),
+              ListTile(
+                leading:
+                    Icon(Icons.photo_library_outlined, color: AppColors.navy),
+                title: const Text('Choose from Gallery'),
+                onTap: () => Navigator.pop(context, 'gallery'),
+              ),
+              if (hasPhoto)
+                ListTile(
+                  leading: Icon(Icons.delete_outline, color: AppColors.danger),
+                  title: Text('Remove Photo',
+                      style: TextStyle(color: AppColors.danger)),
+                  onTap: () => Navigator.pop(context, 'remove'),
+                ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        );
+      },
+    );
+
+    if (choice == null) return;
+
+    if (choice == 'remove') {
+      setState(() => AppSession.instance.updateProfilePhoto(null));
+      return;
+    }
+
+    final source =
+        choice == 'camera' ? ImageSource.camera : ImageSource.gallery;
+    try {
+      final picked = await ImagePicker().pickImage(
+        source: source,
+        maxWidth: 800,
+        imageQuality: 85,
+      );
+      if (picked == null || !mounted) return;
+      // Evict any previously-cached image at this same path first — some
+      // Android/iOS pickers reuse temp file paths, which would otherwise
+      // make Flutter think "same image" and skip redrawing it.
+      FileImage(File(picked.path)).evict();
+      setState(() => AppSession.instance.updateProfilePhoto(picked.path));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+            content: Text(
+                'Could not open ${choice == 'camera' ? 'camera' : 'gallery'}: $e')),
+      );
+    }
+  }
+
   void _logout() {
     AppSession.instance.signOut();
     Navigator.pushNamedAndRemoveUntil(context, '/login', (route) => false);
@@ -133,14 +212,44 @@ class _ProfileScreenState extends State<ProfileScreen> {
           children: [
             Row(
               children: [
-                CircleAvatar(
-                  radius: 28,
-                  backgroundColor: AppColors.navy,
-                  child: Text(session.initials,
-                      style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 18,
-                          fontWeight: FontWeight.w700)),
+                GestureDetector(
+                  onTap: _pickProfilePhoto,
+                  child: Stack(
+                    clipBehavior: Clip.none,
+                    children: [
+                      CircleAvatar(
+                        radius: 28,
+                        backgroundColor: AppColors.navy,
+                        backgroundImage: session.profilePhotoPath != null
+                            ? FileImage(File(session.profilePhotoPath!))
+                            : null,
+                        child: session.profilePhotoPath == null
+                            ? Text(session.initials,
+                                style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 18,
+                                    fontWeight: FontWeight.w700))
+                            : null,
+                      ),
+                      // Small camera badge — signals the avatar is tappable
+                      // and lets you change the photo.
+                      Positioned(
+                        right: -2,
+                        bottom: -2,
+                        child: Container(
+                          padding: const EdgeInsets.all(4),
+                          decoration: BoxDecoration(
+                            color: AppColors.navy,
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                                color: AppColors.background, width: 2),
+                          ),
+                          child: const Icon(Icons.camera_alt,
+                              size: 12, color: Colors.white),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
                 const SizedBox(width: 14),
                 Expanded(

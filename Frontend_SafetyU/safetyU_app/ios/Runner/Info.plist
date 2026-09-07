@@ -87,5 +87,9 @@
        <string>UIInterfaceOrientationLandscapeLeft</string>
        <string>UIInterfaceOrientationLandscapeRight</string>
     </array>
+    <key>NSPhotoLibraryUsageDescription</key>
+    <string>SafetyU needs access to your photo library so you can set a profile picture.</string>
+    <key>NSCameraUsageDescription</key>
+    <string>SafetyU needs access to your camera so you can take a profile picture.</string>
 </dict>
 </plist>
