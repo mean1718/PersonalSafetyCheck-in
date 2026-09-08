@@ -3,6 +3,7 @@ import '../theme/app_theme.dart';
 import '../widgets/app_bottom_nav.dart';
 import '../services/app_session.dart';
 import '../models/contact_response_state.dart';
+import 'dart:io';
 
 class HomeDashboardScreen extends StatefulWidget {
   const HomeDashboardScreen({super.key});
@@ -48,11 +49,18 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                   CircleAvatar(
                     radius: 22,
                     backgroundColor: AppColors.navy,
-                    child: Text(
-                      AppSession.instance.initials,
-                      style: const TextStyle(
-                          color: Colors.white, fontWeight: FontWeight.w700),
-                    ),
+                    backgroundImage: AppSession.instance.profilePhotoPath !=
+                            null
+                        ? FileImage(File(AppSession.instance.profilePhotoPath!))
+                        : null,
+                    child: AppSession.instance.profilePhotoPath == null
+                        ? Text(
+                            AppSession.instance.initials,
+                            style: const TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.w700),
+                          )
+                        : null,
                   ),
                   const SizedBox(width: 12),
                   Expanded(

@@ -8,6 +8,11 @@ import '../utils/validators.dart';
 /// deliver it, so the new contact is saved as [ContactStatus.pending] and
 /// only becomes a real friend once confirmed from the Friends screen — they
 /// can't be notified or escalated to until then.
+///
+/// Priority tier (Main vs Other) is no longer chosen here — every new
+/// contact starts as an "Other" contact, and the person picks who's Main
+/// from the Notify Contacts screen instead, where the free-plan limits are
+/// actually visible.
 class AddContactScreen extends StatefulWidget {
   const AddContactScreen({super.key});
 
@@ -21,7 +26,6 @@ class _AddContactScreenState extends State<AddContactScreen> {
   final _phoneController = TextEditingController();
   final _emailController = TextEditingController();
   final _relationshipController = TextEditingController();
-  bool _isMainContact = true;
 
   @override
   void dispose() {
@@ -47,7 +51,6 @@ class _AddContactScreenState extends State<AddContactScreen> {
       phone: _phoneController.text.trim(),
       email: _emailController.text.trim(),
       relationship: _relationshipController.text.trim(),
-      isMainContact: _isMainContact,
       status: ContactStatus.pending,
     );
 
@@ -131,38 +134,7 @@ class _AddContactScreenState extends State<AddContactScreen> {
                       ? 'Relationship is required'
                       : null,
                 ),
-                const SizedBox(height: 8),
-                Text(
-                  'CONTACT PRIORITY TIER',
-                  style: TextStyle(
-                      fontSize: 11.5,
-                      fontWeight: FontWeight.w700,
-                      color: AppColors.textSecondary,
-                      letterSpacing: 0.4),
-                ),
-                const SizedBox(height: 10),
-                Row(
-                  children: [
-                    Expanded(
-                      child: _PriorityOption(
-                        label: 'Main Contact',
-                        sublabel: 'Notified first',
-                        selected: _isMainContact,
-                        onTap: () => setState(() => _isMainContact = true),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: _PriorityOption(
-                        label: 'Other Contact',
-                        sublabel: 'Backup notification',
-                        selected: !_isMainContact,
-                        onTap: () => setState(() => _isMainContact = false),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 32),
+                const SizedBox(height: 16),
                 SizedBox(
                   width: double.infinity,
                   height: 50,
@@ -236,70 +208,6 @@ class _AddContactScreenState extends State<AddContactScreen> {
             autovalidateMode: AutovalidateMode.onUserInteraction,
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _PriorityOption extends StatelessWidget {
-  final String label;
-  final String sublabel;
-  final bool selected;
-  final VoidCallback onTap;
-
-  const _PriorityOption({
-    required this.label,
-    required this.sublabel,
-    required this.selected,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: selected
-              ? AppColors.navy.withValues(alpha: 0.06)
-              : AppColors.card,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(
-              color: selected ? AppColors.navy : AppColors.border,
-              width: selected ? 1.6 : 1),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(
-                  selected
-                      ? Icons.radio_button_checked
-                      : Icons.radio_button_unchecked,
-                  size: 18,
-                  color: selected ? AppColors.navy : AppColors.textMuted,
-                ),
-                const SizedBox(width: 6),
-                Expanded(
-                  child: Text(label,
-                      style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w700,
-                          color: AppColors.textPrimary)),
-                ),
-              ],
-            ),
-            const SizedBox(height: 4),
-            Padding(
-              padding: const EdgeInsets.only(left: 24),
-              child: Text(sublabel,
-                  style:
-                      TextStyle(fontSize: 11, color: AppColors.textSecondary)),
-            ),
-          ],
-        ),
       ),
     );
   }

@@ -7,10 +7,12 @@ import 'add_contact_screen.dart';
 
 /// Lets the person pick which of their confirmed friends should be
 /// notified for a specific safety session, split into Main and Other
-/// tiers. You cannot get through this screen with zero people selected —
-/// if there isn't a single confirmed friend yet, session_setup_screen
-/// routes to the Friends screen before ever opening this one, and the
-/// Confirm button here stays disabled until at least one is selected.
+/// tiers. The tier itself is also set here — each tile has a Main/Other
+/// toggle — since Add Contact no longer asks for it. You cannot get
+/// through this screen with zero people selected — if there isn't a
+/// single confirmed friend yet, session_setup_screen routes to the
+/// Friends screen before ever opening this one, and the Confirm button
+/// here stays disabled until at least one is selected.
 class SelectContactsScreen extends StatefulWidget {
   const SelectContactsScreen({super.key});
 
@@ -60,10 +62,17 @@ class _SelectContactsScreenState extends State<SelectContactsScreen> {
     super.dispose();
   }
 
-  List<Contact> get _mainFriends =>
-      AppSession.instance.friends.where((c) => c.isMainContact).toList();
-  List<Contact> get _otherFriends =>
-      AppSession.instance.friends.where((c) => !c.isMainContact).toList();
+  // Contacts that have never been explicitly tagged Main or Other sit in
+  // their own group above both sections. Tagging one moves it out of here
+  // and into the matching section below, for the rest of this list.
+  List<Contact> get _unassignedFriends =>
+      AppSession.instance.friends.where((c) => !c.tierAssigned).toList();
+  List<Contact> get _mainFriends => AppSession.instance.friends
+      .where((c) => c.tierAssigned && c.isMainContact)
+      .toList();
+  List<Contact> get _otherFriends => AppSession.instance.friends
+      .where((c) => c.tierAssigned && !c.isMainContact)
+      .toList();
 
   List<Contact> _filtered(List<Contact> list) {
     if (_query.isEmpty) return list;
@@ -83,6 +92,22 @@ class _SelectContactsScreenState extends State<SelectContactsScreen> {
       _selectedMainCount > AppSession.instance.maxMainContacts;
   bool get _overOtherLimit =>
       _selectedOtherCount > AppSession.instance.maxOtherContacts;
+
+  /// Tags a contact as Main or Other, or — if it's already tagged that way
+  /// — untags it and sends it back to Unassigned. This is a change to the
+  /// contact's saved profile (not just this session), so it persists the
+  /// next time this screen — or anywhere else Main/Other is used — is
+  /// opened. Tapping the *other* chip (the one not currently active) just
+  /// switches which of the two tiers it's in, same as before.
+  void _setTier(Contact contact, bool isMain) {
+    if (contact.tierAssigned && contact.isMainContact == isMain) {
+      // Tapping the already-active chip again clears the tag.
+      AppSession.instance.upsertContact(contact.copyWith(tierAssigned: false));
+      return;
+    }
+    AppSession.instance.upsertContact(
+        contact.copyWith(isMainContact: isMain, tierAssigned: true));
+  }
 
   Future<void> _addFriend() async {
     final result = await Navigator.push(
@@ -232,6 +257,33 @@ class _SelectContactsScreenState extends State<SelectContactsScreen> {
                   : ListView(
                       padding: const EdgeInsets.symmetric(horizontal: 20),
                       children: [
+                        if (_filtered(_unassignedFriends).isNotEmpty) ...[
+                          Text(
+                            'UNASSIGNED — TAG AS MAIN OR OTHER',
+                            style: TextStyle(
+                                fontSize: 11.5,
+                                fontWeight: FontWeight.w700,
+                                color: AppColors.textSecondary,
+                                letterSpacing: 0.4),
+                          ),
+                          const SizedBox(height: 10),
+                          ..._filtered(_unassignedFriends).map((c) => Padding(
+                                padding: const EdgeInsets.only(bottom: 10),
+                                child: _ContactTile(
+                                  contact: c,
+                                  selected: _selectedIds.contains(c.id),
+                                  onTap: () => setState(() {
+                                    if (_selectedIds.contains(c.id)) {
+                                      _selectedIds.remove(c.id);
+                                    } else {
+                                      _selectedIds.add(c.id);
+                                    }
+                                  }),
+                                  onSetTier: (isMain) => _setTier(c, isMain),
+                                ),
+                              )),
+                          const SizedBox(height: 20),
+                        ],
                         _sectionHeader('Main Contacts', _selectedMainCount,
                             AppSession.instance.maxMainContacts, isPro,
                             over: _overMainLimit),
@@ -251,6 +303,7 @@ class _SelectContactsScreenState extends State<SelectContactsScreen> {
                                       _selectedIds.add(c.id);
                                     }
                                   }),
+                                  onSetTier: (isMain) => _setTier(c, isMain),
                                 ),
                               )),
                         const SizedBox(height: 18),
@@ -273,6 +326,7 @@ class _SelectContactsScreenState extends State<SelectContactsScreen> {
                                       _selectedIds.add(c.id);
                                     }
                                   }),
+                                  onSetTier: (isMain) => _setTier(c, isMain),
                                 ),
                               )),
                         const SizedBox(height: 12),
@@ -397,55 +451,129 @@ class _ContactTile extends StatelessWidget {
   final Contact contact;
   final bool selected;
   final VoidCallback onTap;
+  final ValueChanged<bool> onSetTier;
 
-  const _ContactTile(
-      {required this.contact, required this.selected, required this.onTap});
+  const _ContactTile({
+    required this.contact,
+    required this.selected,
+    required this.onTap,
+    required this.onSetTier,
+  });
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
-      borderRadius: BorderRadius.circular(14),
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppColors.card,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: selected ? AppColors.navy : AppColors.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Top row: select-for-this-session (tap anywhere here to toggle).
+          InkWell(
+            borderRadius: BorderRadius.circular(10),
+            onTap: onTap,
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                CircleAvatar(
+                  radius: 18,
+                  backgroundColor: AppColors.navy.withValues(alpha: 0.1),
+                  child: Text(contact.initials,
+                      style: TextStyle(
+                          color: AppColors.navy,
+                          fontWeight: FontWeight.w700,
+                          fontSize: 12.5)),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(contact.fullName,
+                          style: const TextStyle(
+                              fontSize: 13.5, fontWeight: FontWeight.w700)),
+                      Text(
+                        contact.relationship.isEmpty
+                            ? ' '
+                            : contact.relationship,
+                        style: TextStyle(
+                            fontSize: 11.5, color: AppColors.textSecondary),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Icon(
+                  selected ? Icons.check_circle : Icons.radio_button_unchecked,
+                  color: selected ? AppColors.navy : AppColors.textMuted,
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 10),
+          // Tier toggle sits right under the select row — tapping a chip
+          // reassigns the contact's saved tier and moves the tile into the
+          // matching section immediately. This is its own gesture area, so
+          // it doesn't also toggle the session-selection above.
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _TierChip(
+                label: 'Main',
+                // Neither chip shows as selected until the contact has
+                // actually been tagged, so an unassigned tile doesn't
+                // look like it's already "Other" by default.
+                selected: contact.tierAssigned && contact.isMainContact,
+                onTap: () => onSetTier(true),
+              ),
+              const SizedBox(width: 6),
+              _TierChip(
+                label: 'Other',
+                selected: contact.tierAssigned && !contact.isMainContact,
+                onTap: () => onSetTier(false),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _TierChip extends StatelessWidget {
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _TierChip({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
       onTap: onTap,
+      behavior: HitTestBehavior.opaque,
       child: Container(
-        padding: const EdgeInsets.all(12),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
         decoration: BoxDecoration(
-          color: AppColors.card,
-          borderRadius: BorderRadius.circular(14),
+          color: selected ? AppColors.navy : AppColors.background,
+          borderRadius: BorderRadius.circular(20),
           border:
               Border.all(color: selected ? AppColors.navy : AppColors.border),
         ),
-        child: Row(
-          children: [
-            CircleAvatar(
-              radius: 18,
-              backgroundColor: AppColors.navy.withValues(alpha: 0.1),
-              child: Text(contact.initials,
-                  style: TextStyle(
-                      color: AppColors.navy,
-                      fontWeight: FontWeight.w700,
-                      fontSize: 12.5)),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(contact.fullName,
-                      style: const TextStyle(
-                          fontSize: 13.5, fontWeight: FontWeight.w700)),
-                  Text(
-                    contact.relationship.isEmpty ? ' ' : contact.relationship,
-                    style: TextStyle(
-                        fontSize: 11.5, color: AppColors.textSecondary),
-                  ),
-                ],
-              ),
-            ),
-            Icon(
-              selected ? Icons.check_circle : Icons.radio_button_unchecked,
-              color: selected ? AppColors.navy : AppColors.textMuted,
-            ),
-          ],
+        child: Text(
+          label,
+          style: TextStyle(
+              fontSize: 10.5,
+              fontWeight: FontWeight.w700,
+              color: selected ? Colors.white : AppColors.textSecondary),
         ),
       ),
     );
