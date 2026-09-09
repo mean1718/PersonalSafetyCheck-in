@@ -183,11 +183,13 @@ class _TrustedContactsScreenState extends State<TrustedContactsScreen> {
           ),
         ),
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _addContact,
-        backgroundColor: AppColors.navy,
-        shape: const CircleBorder(),
-        child: const Icon(Icons.add, color: Colors.white, size: 28),
+      floatingActionButton: isEmpty
+          ? null
+          :FloatingActionButton(
+            onPressed: _addContact,
+            backgroundColor: AppColors.navy,
+            shape: const CircleBorder(),
+            child: const Icon(Icons.add, color: Colors.white, size: 28),
       ),
       bottomNavigationBar:
           AppBottomNav(currentIndex: _navIndex, onTap: _onNavTap),

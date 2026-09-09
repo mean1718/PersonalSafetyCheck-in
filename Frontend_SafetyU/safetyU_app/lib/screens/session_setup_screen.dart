@@ -513,19 +513,18 @@ class _SessionSetupScreenState extends State<SessionSetupScreen> {
 
   @override
   Widget build(BuildContext context) {
-    const navyColor = Color(0xFF0D1B3E);
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF8FAFC),
+      backgroundColor: AppColors.background,
       appBar: AppBar(
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Color(0xFFFF8A71)),
+          icon: Icon(Icons.arrow_back, color: AppColors.danger),
           onPressed: () => Navigator.maybePop(context),
         ),
-        title: const Text(
+        title: Text(
           'New Safety Session',
           style: TextStyle(
-            color: navyColor,
+            color: AppColors.textPrimary,
             fontWeight: FontWeight.bold,
             fontSize: 18,
           ),
@@ -550,17 +549,17 @@ class _SessionSetupScreenState extends State<SessionSetupScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       if (_isSearching) ...[
-                        const Row(
+                         Row(
                           children: [
-                            SizedBox(
+                           const SizedBox(
                                 width: 14,
                                 height: 14,
                                 child:
                                     CircularProgressIndicator(strokeWidth: 2)),
-                            SizedBox(width: 8),
+                            const SizedBox(width: 8),
                             Text('Searching…',
                                 style: TextStyle(
-                                    fontSize: 12.5, color: Colors.grey)),
+                                    fontSize: 12.5, color: AppColors.textSecondary)),
                           ],
                         ),
                         const SizedBox(height: 10),
@@ -583,23 +582,23 @@ class _SessionSetupScreenState extends State<SessionSetupScreen> {
                         ),
                         const SizedBox(height: 10),
                       ],
-                      const Text(
+                      Text(
                         'Destination',
                         style: TextStyle(
                           fontWeight: FontWeight.bold,
                           fontSize: 13.5,
-                          color: navyColor,
+                          color: AppColors.textPrimary,
                         ),
                       ),
                       const SizedBox(height: 8),
                       _buildDestinationInputCard(),
                       const SizedBox(height: 16),
-                      const Text(
+                      Text(
                         'Expected Time',
                         style: TextStyle(
                           fontWeight: FontWeight.bold,
                           fontSize: 13.5,
-                          color: navyColor,
+                          color: AppColors.textPrimary,
                         ),
                       ),
                       const SizedBox(height: 8),
@@ -630,12 +629,12 @@ class _SessionSetupScreenState extends State<SessionSetupScreen> {
                         ),
                       ],
                       const SizedBox(height: 16),
-                      const Text(
+                      Text(
                         'Arrival Time',
                         style: TextStyle(
                           fontWeight: FontWeight.bold,
                           fontSize: 13.5,
-                          color: navyColor,
+                          color: AppColors.textPrimary,
                         ),
                       ),
                       const SizedBox(height: 8),
@@ -646,21 +645,21 @@ class _SessionSetupScreenState extends State<SessionSetupScreen> {
                           padding: const EdgeInsets.symmetric(
                               horizontal: 14, vertical: 12),
                           decoration: BoxDecoration(
-                            color: Colors.white,
+                            color: AppColors.card,
                             borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: const Color(0xFFE2E8F0)),
+                            border: Border.all(color: AppColors.border),
                           ),
                           child: Row(
                             children: [
-                              const Icon(Icons.access_time,
-                                  color: Colors.grey, size: 18),
+                              Icon(Icons.access_time,
+                                  color: AppColors.textMuted, size: 18),
                               const SizedBox(width: 8),
                               Text(
                                 _formatClock(_expectedArrival),
-                                style: const TextStyle(
+                                style: TextStyle(
                                   fontSize: 13.5,
                                   fontWeight: FontWeight.bold,
-                                  color: navyColor,
+                                  color: AppColors.textPrimary,
                                 ),
                               ),
                             ],
@@ -668,12 +667,12 @@ class _SessionSetupScreenState extends State<SessionSetupScreen> {
                         ),
                       ),
                       const SizedBox(height: 20),
-                      const Text(
+                      Text(
                         'Notify Contacts',
                         style: TextStyle(
                           fontWeight: FontWeight.bold,
                           fontSize: 13.5,
-                          color: navyColor,
+                          color: AppColors.textPrimary,
                         ),
                       ),
                       const SizedBox(height: 8),
@@ -684,11 +683,13 @@ class _SessionSetupScreenState extends State<SessionSetupScreen> {
                           padding: const EdgeInsets.symmetric(
                               horizontal: 16, vertical: 14),
                           decoration: BoxDecoration(
-                            color: const Color(0xFFE8EEF9),
+                            color: _contactsConfirmed
+                                 ? AppColors.card
+                                 : AppColors.dangerLight,
                             borderRadius: BorderRadius.circular(12),
                             border: Border.all(
                               color: _contactsConfirmed
-                                  ? Colors.transparent
+                                  ? AppColors.border
                                   : AppColors.danger,
                             ),
                           ),
@@ -700,7 +701,7 @@ class _SessionSetupScreenState extends State<SessionSetupScreen> {
                                     ? Icons.people_outline
                                     : Icons.warning_amber_rounded,
                                 color: _contactsConfirmed
-                                    ? navyColor
+                                    ? AppColors.textPrimary
                                     : AppColors.danger,
                                 size: 18,
                               ),
@@ -719,7 +720,7 @@ class _SessionSetupScreenState extends State<SessionSetupScreen> {
                                     fontSize: 13.5,
                                     fontWeight: FontWeight.w600,
                                     color: _contactsConfirmed
-                                        ? navyColor
+                                        ? AppColors.textPrimary
                                         : AppColors.danger,
                                   ),
                                 ),
@@ -743,9 +744,9 @@ class _SessionSetupScreenState extends State<SessionSetupScreen> {
                         child: ElevatedButton(
                           onPressed: _canStartSession ? _startSession : null,
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: navyColor,
+                            backgroundColor: AppColors.navy,
                             disabledBackgroundColor:
-                                navyColor.withValues(alpha: 0.35),
+                               AppColors.navy.withValues(alpha: 0.35),
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(26),
                             ),
@@ -819,7 +820,7 @@ class _SessionSetupScreenState extends State<SessionSetupScreen> {
                     Polyline(
                       points: [_currentPosition!, _destinationCoords!],
                       strokeWidth: 3,
-                      color: const Color(0xFF0D1B3E).withValues(alpha: 0.4),
+                      color: AppColors.navy.withValues(alpha: 0.4),
                     ),
                   ],
                 ),
@@ -859,7 +860,7 @@ class _SessionSetupScreenState extends State<SessionSetupScreen> {
                 Container(
                   height: 42,
                   decoration: BoxDecoration(
-                    color: Colors.white,
+                    color: AppColors.card,
                     borderRadius: BorderRadius.circular(21),
                     boxShadow: [
                       BoxShadow(
@@ -872,18 +873,21 @@ class _SessionSetupScreenState extends State<SessionSetupScreen> {
                   padding: const EdgeInsets.symmetric(horizontal: 14),
                   child: Row(
                     children: [
-                      const Icon(Icons.search, color: Colors.grey, size: 18),
+                      Icon(Icons.search, color: AppColors.textMuted, size: 18),
                       const SizedBox(width: 8),
                       Expanded(
                         child: TextFormField(
                           controller: _destinationController,
                           focusNode: _destinationFocusNode,
                           textInputAction: TextInputAction.search,
-                          style: const TextStyle(fontSize: 13),
-                          decoration: const InputDecoration(
+                          style: TextStyle(fontSize: 13, color: AppColors.textPrimary),
+                          decoration: InputDecoration(
                             hintText: 'Search location (e.g. CADT)',
+                            hintStyle: TextStyle(color: AppColors.textMuted),
                             border: InputBorder.none,
                             isDense: true,
+                            filled: false,
+                            fillColor: Colors.transparent,
                           ),
                           validator: (value) {
                             if (value == null || value.trim().isEmpty) {
@@ -906,8 +910,8 @@ class _SessionSetupScreenState extends State<SessionSetupScreen> {
                             });
                             _destinationFocusNode.requestFocus();
                           },
-                          child: const Icon(Icons.close,
-                              color: Colors.grey, size: 16),
+                          child: Icon(Icons.close,
+                              color: AppColors.textMuted, size: 16),
                         ),
                     ],
                   ),
@@ -917,7 +921,7 @@ class _SessionSetupScreenState extends State<SessionSetupScreen> {
                   Container(
                     constraints: const BoxConstraints(maxHeight: 210),
                     decoration: BoxDecoration(
-                      color: Colors.white,
+                      color: AppColors.card,
                       borderRadius: BorderRadius.circular(14),
                       boxShadow: [
                         BoxShadow(
@@ -932,7 +936,7 @@ class _SessionSetupScreenState extends State<SessionSetupScreen> {
                       padding: const EdgeInsets.symmetric(vertical: 4),
                       itemCount: _suggestions.length,
                       separatorBuilder: (_, __) =>
-                          const Divider(height: 1, indent: 14, endIndent: 14),
+                          Divider(height: 1, indent: 14, endIndent: 14, color: AppColors.border),
                       itemBuilder: (context, i) {
                         final s = _suggestions[i];
                         final parts = s.displayName.split(',');
@@ -945,8 +949,8 @@ class _SessionSetupScreenState extends State<SessionSetupScreen> {
                                 horizontal: 14, vertical: 10),
                             child: Row(
                               children: [
-                                const Icon(Icons.place_outlined,
-                                    size: 18, color: Color(0xFF0D1B3E)),
+                                Icon(Icons.place_outlined,
+                                    size: 18, color: AppColors.textPrimary),
                                 const SizedBox(width: 10),
                                 Expanded(
                                   child: Column(
@@ -956,17 +960,17 @@ class _SessionSetupScreenState extends State<SessionSetupScreen> {
                                       Text(primary,
                                           maxLines: 1,
                                           overflow: TextOverflow.ellipsis,
-                                          style: const TextStyle(
+                                          style: TextStyle(
                                               fontSize: 13,
                                               fontWeight: FontWeight.w700,
-                                              color: Color(0xFF0D1B3E))),
+                                              color: AppColors.textPrimary)),
                                       if (rest.isNotEmpty)
                                         Text(rest,
                                             maxLines: 1,
                                             overflow: TextOverflow.ellipsis,
-                                            style: const TextStyle(
+                                            style: TextStyle(
                                                 fontSize: 11,
-                                                color: Colors.grey)),
+                                                color: AppColors.textSecondary)),
                                     ],
                                   ),
                                 ),
@@ -994,7 +998,7 @@ class _SessionSetupScreenState extends State<SessionSetupScreen> {
                                     padding: const EdgeInsets.symmetric(
                                         horizontal: 10, vertical: 6),
                                     decoration: BoxDecoration(
-                                      color: Colors.white,
+                                      color: AppColors.card,
                                       borderRadius: BorderRadius.circular(16),
                                       boxShadow: [
                                         BoxShadow(
@@ -1008,14 +1012,14 @@ class _SessionSetupScreenState extends State<SessionSetupScreen> {
                                       children: [
                                         Icon(cat.icon,
                                             size: 14,
-                                            color: const Color(0xFF0D1B3E)),
+                                            color: AppColors.textPrimary),
                                         const SizedBox(width: 4),
                                         Text(
                                           cat.label,
-                                          style: const TextStyle(
+                                          style: TextStyle(
                                             fontSize: 11,
                                             fontWeight: FontWeight.w600,
-                                            color: Color(0xFF0D1B3E),
+                                            color: AppColors.textPrimary,
                                           ),
                                         ),
                                       ],
@@ -1031,6 +1035,7 @@ class _SessionSetupScreenState extends State<SessionSetupScreen> {
                       PopupMenuButton<String>(
                         tooltip: 'More options',
                         padding: EdgeInsets.zero,
+                        color: AppColors.card,
                         shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(12)),
                         onSelected: (value) {
@@ -1050,14 +1055,14 @@ class _SessionSetupScreenState extends State<SessionSetupScreen> {
                             });
                           }
                         },
-                        itemBuilder: (context) => const [
+                        itemBuilder: (context) => [
                           PopupMenuItem(
                             value: 'refresh',
                             child: Row(
                               children: [
-                                Icon(Icons.my_location, size: 18),
-                                SizedBox(width: 10),
-                                Text('Refresh my location'),
+                                Icon(Icons.my_location, size: 18, color: AppColors.textPrimary),
+                                const SizedBox(width: 10),
+                                Text('Refresh my location', style: TextStyle(color: AppColors.textPrimary)),
                               ],
                             ),
                           ),
@@ -1065,21 +1070,22 @@ class _SessionSetupScreenState extends State<SessionSetupScreen> {
                             value: 'clear',
                             child: Row(
                               children: [
-                                Icon(Icons.clear, size: 18),
-                                SizedBox(width: 10),
-                                Text('Clear destination'),
+                                Icon(Icons.clear, 
+                                size: 18, color: AppColors.textPrimary),
+                                const SizedBox(width: 10),
+                                Text('Clear destination', style: TextStyle(color: AppColors.textPrimary)),
                               ],
                             ),
                           ),
                         ],
                         child: Container(
                           padding: const EdgeInsets.all(6),
-                          decoration: const BoxDecoration(
-                            color: Colors.white,
+                          decoration: BoxDecoration(
+                            color: AppColors.card,
                             shape: BoxShape.circle,
                           ),
-                          child: const Icon(Icons.more_horiz,
-                              size: 16, color: Color(0xFF0D1B3E)),
+                          child: Icon(Icons.more_horiz,
+                              size: 16, color: AppColors.textPrimary),
                         ),
                       ),
                     ],
@@ -1111,7 +1117,7 @@ class _SessionSetupScreenState extends State<SessionSetupScreen> {
                 padding:
                     const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                 decoration: BoxDecoration(
-                  color: Colors.white,
+                  color: AppColors.card,
                   borderRadius: BorderRadius.circular(16),
                   boxShadow: [
                     BoxShadow(
@@ -1126,11 +1132,11 @@ class _SessionSetupScreenState extends State<SessionSetupScreen> {
                     Container(
                       padding: const EdgeInsets.all(8),
                       decoration: BoxDecoration(
-                        color: const Color(0xFFF1F5F9),
+                        color: AppColors.background,
                         borderRadius: BorderRadius.circular(10),
                       ),
-                      child: const Icon(Icons.place_outlined,
-                          color: Color(0xFF0D1B3E), size: 20),
+                      child: Icon(Icons.place_outlined,
+                          color: AppColors.textPrimary, size: 20),
                     ),
                     const SizedBox(width: 12),
                     Expanded(
@@ -1144,10 +1150,10 @@ class _SessionSetupScreenState extends State<SessionSetupScreen> {
                                 : _destinationController.text,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
+                            style: TextStyle(
                               fontWeight: FontWeight.bold,
                               fontSize: 14,
-                              color: Color(0xFF0D1B3E),
+                              color: AppColors.textPrimary,
                             ),
                           ),
                           if (_resolvedAddress != null)
@@ -1155,15 +1161,15 @@ class _SessionSetupScreenState extends State<SessionSetupScreen> {
                               _resolvedAddress!,
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
+                              style: TextStyle(
                                 fontSize: 11,
-                                color: Colors.grey,
+                                color: AppColors.textSecondary,
                               ),
                             ),
                         ],
                       ),
                     ),
-                    const Icon(Icons.chevron_right, color: Color(0xFF0D1B3E)),
+                  Icon(Icons.chevron_right, color: AppColors.textPrimary),
                   ],
                 ),
               ),
@@ -1180,13 +1186,13 @@ class _SessionSetupScreenState extends State<SessionSetupScreen> {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: AppColors.card,
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: const Color(0xFFE2E8F0)),
+          border: Border.all(color: AppColors.border),
         ),
         child: Row(
           children: [
-            const Icon(Icons.place_outlined, color: Colors.grey, size: 20),
+            Icon(Icons.place_outlined, color: AppColors.textMuted, size: 20),
             const SizedBox(width: 10),
             Expanded(
               child: Text(
@@ -1195,14 +1201,14 @@ class _SessionSetupScreenState extends State<SessionSetupScreen> {
                     : _destinationController.text,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 13.5,
                   fontWeight: FontWeight.bold,
-                  color: Color(0xFF0D1B3E),
+                  color: AppColors.textPrimary,
                 ),
               ),
             ),
-            const Icon(Icons.chevron_right, color: Colors.grey),
+            Icon(Icons.chevron_right, color: AppColors.textMuted),
           ],
         ),
       ),
@@ -1216,9 +1222,9 @@ class _SessionSetupScreenState extends State<SessionSetupScreen> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: AppColors.card,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0xFFE2E8F0)),
+        border: Border.all(color: AppColors.border),
       ),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -1227,14 +1233,16 @@ class _SessionSetupScreenState extends State<SessionSetupScreen> {
             child: TextFormField(
               controller: controller,
               keyboardType: TextInputType.number,
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 14,
                 fontWeight: FontWeight.bold,
-                color: Color(0xFF0D1B3E),
+                color: AppColors.textPrimary,
               ),
               decoration: const InputDecoration(
                 border: InputBorder.none,
                 isDense: true,
+                filled: false,
+                fillColor: Colors.transparent,
                 contentPadding: EdgeInsets.symmetric(vertical: 10),
               ),
               onChanged: (_) => _onDurationFieldChanged(),
@@ -1242,10 +1250,10 @@ class _SessionSetupScreenState extends State<SessionSetupScreen> {
           ),
           Text(
             unit,
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 12,
               fontWeight: FontWeight.w600,
-              color: Color(0xFF0D1B3E),
+              color: AppColors.textSecondary,
             ),
           ),
         ],
@@ -1260,7 +1268,7 @@ class _SessionSetupScreenState extends State<SessionSetupScreen> {
         width: 32,
         height: 32,
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: AppColors.card,
           shape: BoxShape.circle,
           boxShadow: [
             BoxShadow(
@@ -1269,7 +1277,7 @@ class _SessionSetupScreenState extends State<SessionSetupScreen> {
             ),
           ],
         ),
-        child: Icon(icon, size: 16, color: const Color(0xFF0D1B3E)),
+        child: Icon(icon, size: 16, color: AppColors.textPrimary),
       ),
     );
   }
