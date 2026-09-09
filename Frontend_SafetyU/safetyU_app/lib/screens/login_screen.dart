@@ -3,6 +3,9 @@ import 'package:geolocator/geolocator.dart';
 import '../theme/app_theme.dart';
 import '../models/user_role.dart';
 import '../services/app_session.dart';
+import '../services/auth_service.dart';
+import '../services/api_client.dart';
+import '../utils/validators.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -18,6 +21,9 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _obscurePassword = true;
   UserRole? _selectedRole;
   bool _roleError = false;
+  bool _isSubmitting = false;
+  String? _emailBackendError;
+  String? _passwordBackendError;
 
   @override
   void dispose() {
@@ -28,19 +34,34 @@ class _LoginScreenState extends State<LoginScreen> {
 
   String? _validateEmail(String? value) {
     final text = value?.trim() ?? '';
-    if (text.isEmpty) return 'Enter your email address';
-    final emailPattern = RegExp(r'^[\w\.\-]+@[\w\-]+\.[\w\-\.]+$');
-    if (!emailPattern.hasMatch(text)) return 'Enter a valid email address';
+    if (text.isEmpty) return 'Email is required.';
+    if (!isValidEmail(text)) return 'Please enter a valid email address.';
+    if (_emailBackendError != null) return _emailBackendError;
     return null;
   }
 
   String? _validatePassword(String? value) {
-    if (value == null || value.isEmpty) return 'Enter your password';
-    if (value.length < 6) return 'Password must be at least 6 characters';
+    if (value == null || value.isEmpty) return 'Password is required.';
+    if (_passwordBackendError != null) return _passwordBackendError;
     return null;
   }
 
+  void _showBackendFieldError(String message) {
+    setState(() {
+      if (message.toLowerCase().contains('email')) {
+        _emailBackendError = message;
+      } else {
+        _passwordBackendError = message;
+      }
+    });
+    _formKey.currentState?.validate();
+  }
+
   void _submit() async {
+    setState(() {
+      _emailBackendError = null;
+      _passwordBackendError = null;
+    });
     final formValid = _formKey.currentState?.validate() ?? false;
     setState(() => _roleError = _selectedRole == null);
 
@@ -56,25 +77,30 @@ class _LoginScreenState extends State<LoginScreen> {
     }
 
     final email = _emailController.text.trim();
-    // No backend is wired up in this build, so we derive a display name from
-    // the email the person actually typed rather than showing a placeholder.
-    final namePart =
-        email.split('@').first.replaceAll(RegExp(r'[._\-0-9]+'), ' ').trim();
-    final derivedName = namePart.isEmpty
-        ? 'Member'
-        : namePart
-            .split(' ')
-            .where((w) => w.isNotEmpty)
-            .map((w) => '${w[0].toUpperCase()}${w.substring(1)}')
-            .join(' ');
+    final password = _passwordController.text;
 
-    AppSession.instance.signIn(
-      fullName: derivedName,
-      email: email,
-      phone: AppSession.instance.phone,
-      role: _selectedRole!,
-    );
+    setState(() => _isSubmitting = true);
+    try {
+      await AuthService.login(
+        email: email,
+        password: password,
+        role: _selectedRole!,
+      );
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      setState(() => _isSubmitting = false);
+      _showBackendFieldError(e.message);
+      return;
+    } on ApiConnectionException catch (e) {
+      if (!mounted) return;
+      setState(() => _isSubmitting = false);
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(e.message)));
+      return;
+    }
 
+    if (!mounted) return;
+    setState(() => _isSubmitting = false);
     await _proceedAfterAuth(_selectedRole!.homeRoute);
   }
 
@@ -149,6 +175,11 @@ class _LoginScreenState extends State<LoginScreen> {
                   decoration:
                       const InputDecoration(hintText: 'you@example.com'),
                   validator: _validateEmail,
+                  onChanged: (_) {
+                    if (_emailBackendError != null) {
+                      setState(() => _emailBackendError = null);
+                    }
+                  },
                   autovalidateMode: AutovalidateMode.onUserInteraction,
                 ),
                 const SizedBox(height: 18),
@@ -172,6 +203,11 @@ class _LoginScreenState extends State<LoginScreen> {
                     ),
                   ),
                   validator: _validatePassword,
+                  onChanged: (_) {
+                    if (_passwordBackendError != null) {
+                      setState(() => _passwordBackendError = null);
+                    }
+                  },
                   autovalidateMode: AutovalidateMode.onUserInteraction,
                 ),
                 Align(
@@ -229,8 +265,15 @@ class _LoginScreenState extends State<LoginScreen> {
                 ],
                 const SizedBox(height: 20),
                 ElevatedButton(
-                  onPressed: _submit,
-                  child: const Text('Log In'),
+                  onPressed: _isSubmitting ? null : _submit,
+                  child: _isSubmitting
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(
+                              strokeWidth: 2, color: Colors.white),
+                        )
+                      : const Text('Log In'),
                 ),
                 const SizedBox(height: 20),
                 Center(

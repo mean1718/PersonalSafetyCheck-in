@@ -11,6 +11,8 @@ import '../models/app_notification.dart';
 import '../models/incident.dart';
 import '../services/app_session.dart';
 import '../services/alert_sound.dart';
+import '../services/check_in_service.dart';
+import '../services/emergency_service.dart';
 
 /// Immediate SOS screen reachable from the Home dashboard's
 /// "Emergency Assistant" action — for when someone needs help right now,
@@ -143,6 +145,7 @@ class _EmergencySosScreenState extends State<EmergencySosScreen> {
     AlertSoundService.playAlert(times: 5);
     final pos = _currentPosition;
     final contacts = AppSession.instance.friends;
+    _syncSosToBackend(pos);
 
     final locationLine = pos != null
         ? 'https://maps.google.com/?q=${pos.latitude},${pos.longitude}'
@@ -199,6 +202,36 @@ class _EmergencySosScreenState extends State<EmergencySosScreen> {
         backgroundColor: Colors.red,
       ),
     );
+  }
+
+  /// Best-effort mirror of a manual SOS to the backend: creates a
+  /// check-in, starts an Emergency on it, and immediately escalates that
+  /// Emergency straight to the final "emergency" tier — a manual SOS is
+  /// always maximally urgent, there's no main/secondary waiting period
+  /// for it locally either. Requires a primary trusted contact to exist
+  /// on the backend (see TrustedContactService); if one doesn't, or the
+  /// backend is unreachable, this fails silently and the local SOS flow
+  /// above is completely unaffected.
+  Future<void> _syncSosToBackend(LatLng? pos) async {
+    try {
+      final checkInId = await CheckInService.start(
+        message: 'Manual SOS',
+        latitude: pos?.latitude,
+        longitude: pos?.longitude,
+      );
+      if (checkInId == null) return;
+      final emergencyId = await EmergencyService.start(
+        checkInId: checkInId,
+        message: 'Manual SOS — needs immediate help',
+        latitude: pos?.latitude,
+        longitude: pos?.longitude,
+      );
+      if (emergencyId != null) {
+        await EmergencyService.escalateToEmergency(emergencyId);
+      }
+    } catch (e) {
+      debugPrint('SOS sync skipped: $e');
+    }
   }
 
   @override

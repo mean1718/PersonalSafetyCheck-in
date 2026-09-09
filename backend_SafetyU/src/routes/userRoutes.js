@@ -15,7 +15,14 @@ router.post("/login", loginUser);
 router.get("/profile", protect, (req, res) => {
     res.json({
         message: "Access granted",
-        user: req.user
+        user: {
+            id: req.authenticatedUser._id,
+            name: req.authenticatedUser.name,
+            email: req.authenticatedUser.email,
+            phone: req.authenticatedUser.phone,
+            role: req.authenticatedUser.role,
+            createdAt: req.authenticatedUser.createdAt,
+        }
     });
 });
 

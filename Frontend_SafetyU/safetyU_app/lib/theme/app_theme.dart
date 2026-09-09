@@ -75,6 +75,19 @@ class AppTheme {
           borderRadius: BorderRadius.circular(14),
           borderSide: BorderSide(color: AppColors.navy, width: 1.6),
         ),
+        errorBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: BorderSide(color: AppColors.danger),
+        ),
+        focusedErrorBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: BorderSide(color: AppColors.danger, width: 1.6),
+        ),
+        errorStyle: TextStyle(
+          color: AppColors.danger,
+          fontSize: 12,
+          fontWeight: FontWeight.w600,
+        ),
         hintStyle: TextStyle(color: AppColors.textMuted, fontSize: 14),
       ),
       elevatedButtonTheme: ElevatedButtonThemeData(

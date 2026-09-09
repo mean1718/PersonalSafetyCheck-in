@@ -3,6 +3,8 @@ import 'package:geolocator/geolocator.dart';
 import '../theme/app_theme.dart';
 import '../models/user_role.dart';
 import '../services/app_session.dart';
+import '../services/auth_service.dart';
+import '../services/api_client.dart';
 import '../utils/validators.dart';
 
 class SignUpScreen extends StatefulWidget {
@@ -24,6 +26,10 @@ class _SignUpScreenState extends State<SignUpScreen> {
   bool _obscureConfirm = true;
   UserRole? _selectedRole;
   bool _roleError = false;
+  bool _isSubmitting = false;
+  String? _emailBackendError;
+  String? _phoneBackendError;
+  String? _passwordBackendError;
 
   @override
   void dispose() {
@@ -37,6 +43,11 @@ class _SignUpScreenState extends State<SignUpScreen> {
   }
 
   void _submit() async {
+    setState(() {
+      _emailBackendError = null;
+      _phoneBackendError = null;
+      _passwordBackendError = null;
+    });
     final formValid = _formKey.currentState?.validate() ?? false;
     setState(() => _roleError = _selectedRole == null);
 
@@ -51,12 +62,40 @@ class _SignUpScreenState extends State<SignUpScreen> {
       return;
     }
 
-    AppSession.instance.signIn(
-      fullName: _fullNameController.text.trim(),
-      email: _emailController.text.trim(),
-      phone: _phoneController.text.trim(),
-      role: _selectedRole!,
-    );
+    setState(() => _isSubmitting = true);
+    try {
+      await AuthService.register(
+        fullName: _fullNameController.text.trim(),
+        email: _emailController.text.trim(),
+        password: _passwordController.text,
+        phone: _phoneController.text.trim(),
+        role: _selectedRole!,
+      );
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      setState(() => _isSubmitting = false);
+      final message = e.message;
+      setState(() {
+        if (message.toLowerCase().contains('phone')) {
+          _phoneBackendError = message;
+        } else if (message.toLowerCase().contains('password')) {
+          _passwordBackendError = message;
+        } else {
+          _emailBackendError = message;
+        }
+      });
+      _formKey.currentState?.validate();
+      return;
+    } on ApiConnectionException catch (e) {
+      if (!mounted) return;
+      setState(() => _isSubmitting = false);
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(e.message)));
+      return;
+    }
+
+    if (!mounted) return;
+    setState(() => _isSubmitting = false);
 
     if (_selectedRole == UserRole.emergencyResponder) {
       AppSession.instance.badgeId = _badgeIdController.text.trim();
@@ -142,14 +181,24 @@ class _SignUpScreenState extends State<SignUpScreen> {
                   _emailController,
                   hint: 'you@example.com',
                   keyboardType: TextInputType.emailAddress,
-                  validator: emailValidator,
+                  validator: (value) => emailValidator(value) ?? _emailBackendError,
+                  onChanged: (_) {
+                    if (_emailBackendError != null) {
+                      setState(() => _emailBackendError = null);
+                    }
+                  },
                 ),
                 _buildField(
                   'PHONE NUMBER',
                   _phoneController,
                   hint: '+1 (000) 000-0000',
                   keyboardType: TextInputType.phone,
-                  validator: phoneValidator,
+                  validator: (value) => phoneValidator(value) ?? _phoneBackendError,
+                  onChanged: (_) {
+                    if (_phoneBackendError != null) {
+                      setState(() => _phoneBackendError = null);
+                    }
+                  },
                 ),
                 _buildPasswordField(
                   'PASSWORD',
@@ -157,10 +206,17 @@ class _SignUpScreenState extends State<SignUpScreen> {
                   _obscurePassword,
                   () => setState(() => _obscurePassword = !_obscurePassword),
                   hint: 'Minimum 8 characters',
+                  onChanged: (_) {
+                    if (_passwordBackendError != null) {
+                      setState(() => _passwordBackendError = null);
+                    }
+                  },
                   validator: (v) {
                     if (v == null || v.isEmpty) return 'Password is required';
-                    if (v.length < 8) return 'Use at least 8 characters';
-                    return null;
+                    if (v.length < 8) {
+                      return 'Password must be at least 8 characters.';
+                    }
+                    return _passwordBackendError;
                   },
                 ),
                 _buildPasswordField(
@@ -246,8 +302,15 @@ class _SignUpScreenState extends State<SignUpScreen> {
                 ],
                 const SizedBox(height: 20),
                 ElevatedButton(
-                  onPressed: _submit,
-                  child: const Text('Create Account'),
+                  onPressed: _isSubmitting ? null : _submit,
+                  child: _isSubmitting
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(
+                              strokeWidth: 2, color: Colors.white),
+                        )
+                      : const Text('Create Account'),
                 ),
                 const SizedBox(height: 18),
                 Center(
@@ -286,6 +349,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
     String? hint,
     TextInputType? keyboardType,
     String? Function(String?)? validator,
+    ValueChanged<String>? onChanged,
   }) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 16),
@@ -306,6 +370,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
             keyboardType: keyboardType,
             decoration: InputDecoration(hintText: hint),
             validator: validator,
+            onChanged: onChanged,
             autovalidateMode: AutovalidateMode.onUserInteraction,
           ),
         ],
@@ -320,6 +385,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
     VoidCallback onToggle, {
     String? hint,
     String? Function(String?)? validator,
+    ValueChanged<String>? onChanged,
   }) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 16),
@@ -352,6 +418,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
               ),
             ),
             validator: validator,
+            onChanged: onChanged,
             autovalidateMode: AutovalidateMode.onUserInteraction,
           ),
         ],

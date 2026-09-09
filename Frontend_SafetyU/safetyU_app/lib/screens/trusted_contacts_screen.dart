@@ -1,8 +1,10 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_bottom_nav.dart';
 import '../models/contact.dart';
 import '../services/app_session.dart';
+import '../services/trusted_contact_service.dart';
 import 'add_contact_screen.dart';
 import 'alert_detail_screen.dart';
 
@@ -88,6 +90,12 @@ class _TrustedContactsScreenState extends State<TrustedContactsScreen> {
 
   void _delete(Contact contact) {
     setState(() => AppSession.instance.removeContact(contact.id));
+    if (contact.tierAssigned) {
+      // Only Main/Other contacts are ever mirrored to the backend — see
+      // TrustedContactService — so only try to remove those there.
+      TrustedContactService.removeByPhone(contact.phone)
+          .catchError((e) => debugPrint('Trusted contact sync skipped: $e'));
+    }
   }
 
   void _openChat(Contact contact) {

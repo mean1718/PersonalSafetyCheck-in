@@ -27,6 +27,16 @@ class AppSession extends ChangeNotifier {
   String phone = '';
   UserRole role = UserRole.user;
 
+  // ---- Backend auth (see services/auth_service.dart) ----
+  // Set once by AuthService.login after a successful /api/users/login
+  // call; sent as "Authorization: Bearer <authToken>" on every
+  // subsequent request by ApiClient. Null/empty means "not talking to
+  // the real backend right now" — every backend-facing service treats
+  // that as a signal to fail quietly rather than break the local demo
+  // experience.
+  String? authToken;
+  String? backendUserId;
+
     // Local file path to the picture the person chose from their own camera
   // or gallery. SafetyU has no backend/cloud storage in this build, so
   // this only points at a file already on the device — nothing is
@@ -249,6 +259,8 @@ class AppSession extends ChangeNotifier {
     email = '';
     phone = '';
     role = UserRole.user;
+    authToken = null;
+    backendUserId = null;
     contacts.clear();
     profilePhotoPath = null;
     // Session history, notifications, and incidents intentionally persist

@@ -16,6 +16,8 @@ import '../services/alert_sound.dart';
 import '../models/contact.dart';
 import '../models/chat_message.dart';
 import '../services/app_session.dart';
+import '../services/check_in_service.dart';
+import '../services/emergency_service.dart';
 import '../theme/app_theme.dart';
 import 'session_safe_screen.dart';
 
@@ -52,6 +54,16 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
   late DateTime _sessionStartedAt;
   bool _hadDelay = false;
   bool _historyLogged = false;
+
+  // ---- Backend sync (see services/check_in_service.dart and
+  // emergency_service.dart) ----
+  // Both are best-effort: every session in this screen already works
+  // fully offline/local, so a failed sync (backend not running, not
+  // logged in via the backend, etc.) is swallowed rather than shown —
+  // it never blocks or changes the local escalation flow above.
+  String? _checkInId;
+  String? _emergencyId;
+  bool _emergencyStartInFlight = false;
 
   // Contacts actually confirmed on the Setup screen for *this* session —
   // escalation must only ever notify these people, never the person's
@@ -163,6 +175,82 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
     _isInitialized = true;
     _startTimer();
     _initLocationTracking();
+    _startBackendCheckIn();
+  }
+
+  // =========================================================
+  // BACKEND SYNC — check-in + emergency escalation
+  // =========================================================
+
+  void _startBackendCheckIn() {
+    final pos = AppSession.instance.lastKnownPosition;
+    CheckInService.start(
+      message: 'Safety session to $_destination',
+      latitude: pos?.latitude,
+      longitude: pos?.longitude,
+    ).then((id) {
+      if (mounted) _checkInId = id;
+    }).catchError((e) {
+      debugPrint('CheckIn sync skipped: $e');
+    });
+  }
+
+  /// Creates the backend Emergency record the first time this session
+  /// actually escalates (main, secondary, or the final emergency tier —
+  /// whichever happens first). Safe to call more than once; only the
+  /// first call does anything.
+  Future<void> _ensureEmergencyStarted() async {
+    if (_emergencyId != null || _emergencyStartInFlight) return;
+    _emergencyStartInFlight = true;
+    try {
+      final pos = _currentPosition ?? AppSession.instance.lastKnownPosition;
+      final id = await EmergencyService.start(
+        checkInId: _checkInId ?? '',
+        message: 'Needs help near $_destination',
+        latitude: pos?.latitude,
+        longitude: pos?.longitude,
+      );
+      _emergencyId = id;
+    } catch (e) {
+      debugPrint('Emergency sync skipped: $e');
+    } finally {
+      _emergencyStartInFlight = false;
+    }
+  }
+
+  Future<void> _syncEscalationToBackend(_EscalationStage stage) async {
+    try {
+      await _ensureEmergencyStarted();
+      if (stage == _EscalationStage.secondary && _emergencyId != null) {
+        await EmergencyService.escalateToSecondary(_emergencyId!);
+      }
+    } catch (e) {
+      debugPrint('Emergency escalation sync skipped: $e');
+    }
+  }
+
+  Future<void> _syncFinalEscalationToBackend() async {
+    try {
+      await _ensureEmergencyStarted();
+      if (_emergencyId != null) {
+        await EmergencyService.escalateToEmergency(_emergencyId!);
+      }
+    } catch (e) {
+      debugPrint('Emergency escalation sync skipped: $e');
+    }
+  }
+
+  Future<void> _syncSessionEndToBackend() async {
+    try {
+      if (_emergencyId != null) {
+        await EmergencyService.resolve(_emergencyId!);
+      }
+      if (_checkInId != null) {
+        await CheckInService.complete(_checkInId!);
+      }
+    } catch (e) {
+      debugPrint('Session-end sync skipped: $e');
+    }
   }
 
   // =========================================================
@@ -191,6 +279,7 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
     _timer?.cancel();
     _stageTimer?.cancel();
     _logHistory(SessionOutcome.safe);
+    _syncSessionEndToBackend();
 
     // Tell every trusted contact who was actually alerted during this
     // session that the person is safe now — a real chat message, not just
@@ -266,6 +355,7 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
       return;
     }
 
+    _syncEscalationToBackend(stage);
     _stageTimer?.cancel();
     _stageTimer = Timer.periodic(const Duration(seconds: 1), (Timer timer) {
       if (!mounted) {
@@ -362,6 +452,7 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
     _emergencyTriggered = true;
     _stageTimer?.cancel();
     _logHistory(SessionOutcome.sos);
+    _syncFinalEscalationToBackend();
 
     final position = _currentPosition ??
         AppSession.instance.lastKnownPosition ??

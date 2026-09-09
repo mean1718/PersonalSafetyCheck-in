@@ -1,7 +1,9 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
 import '../models/contact.dart';
 import '../services/app_session.dart';
+import '../services/trusted_contact_service.dart';
 import '../widgets/paywall_dialogs.dart';
 import 'add_contact_screen.dart';
 
@@ -107,6 +109,16 @@ class _SelectContactsScreenState extends State<SelectContactsScreen> {
     }
     AppSession.instance.upsertContact(
         contact.copyWith(isMainContact: isMain, tierAssigned: true));
+
+    // Best-effort mirror to the backend — see TrustedContactService for
+    // why only Main/Other (not every contact) is synced. Never blocks or
+    // errors onto this screen if the backend is offline.
+    TrustedContactService.upsertPriorityContact(
+      priority: isMain ? 'primary' : 'secondary',
+      name: contact.fullName,
+      phone: contact.phone,
+      relationship: contact.relationship,
+    ).catchError((e) => debugPrint('Trusted contact sync skipped: $e'));
   }
 
   Future<void> _addFriend() async {

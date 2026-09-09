@@ -1,6 +1,7 @@
 const express = require("express");
 const dotenv = require("dotenv");
 const path = require("path");
+const cors = require("cors");
 
 // Load .env from src/config/.env
 dotenv.config({
@@ -19,6 +20,7 @@ const emergencyRoutes = require("./routes/emergencyRoutes");
 const app = express();
 
 // Middleware
+app.use(cors());
 app.use(express.json());
 
 // Connect MongoDB
