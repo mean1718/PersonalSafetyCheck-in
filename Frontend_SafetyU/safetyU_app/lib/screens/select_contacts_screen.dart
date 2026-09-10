@@ -118,6 +118,10 @@ class _SelectContactsScreenState extends State<SelectContactsScreen> {
   int get _selectedOtherCount =>
       _otherFriends.where((c) => _selectedIds.contains(c.id)).length;
 
+  bool get _hasUnassignedSelectedContacts => AppSession.instance.friends.any(
+        (c) => _selectedIds.contains(c.id) && !c.tierAssigned,
+      );
+
   bool get _overMainLimit =>
       _selectedMainCount > AppSession.instance.maxMainContacts;
   bool get _overOtherLimit =>
@@ -180,6 +184,16 @@ class _SelectContactsScreenState extends State<SelectContactsScreen> {
       );
       return;
     }
+    if (_hasUnassignedSelectedContacts) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text(
+          'Please assign every selected contact as Main or Other before confirming.',
+        ),
+      ),
+    );
+    return;
+  }
 
     if (!_overMainLimit && !_overOtherLimit) {
       final selected = AppSession.instance.friends
@@ -202,31 +216,26 @@ class _SelectContactsScreenState extends State<SelectContactsScreen> {
         const SnackBar(
             content: Text("You're on Pro now — unlimited contacts.")),
       );
-      setState(() {});
+
+      final selected = AppSession.instance.friends
+          .where((c) => _selectedIds.contains(c.id))
+          .toList();
+      Navigator.pop(context, selected);
       return;
     }
 
     if (choice == 'pay') {
-      final extraMain =
-          (_selectedMainCount - AppSession.instance.maxMainContacts)
-              .clamp(0, 999);
-      final extraOther =
-          (_selectedOtherCount - AppSession.instance.maxOtherContacts)
-              .clamp(0, 999);
-      final purchased = await showAddExtraContactsDialog(
-        context,
-        extraMain: extraMain,
-        extraOther: extraOther,
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Extra contact added.'),
+        ),
       );
-      if (!mounted) return;
-      if (purchased) {
-        AppSession.instance
-            .purchaseExtraSlots(extraMain: extraMain, extraOther: extraOther);
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Extra contact slots added.')),
-        );
-        setState(() {});
-      }
+
+      final selected = AppSession.instance.friends
+          .where((c) => _selectedIds.contains(c.id))
+          .toList();
+      Navigator.pop(context, selected);
+      return;
     }
   }
 
@@ -414,12 +423,39 @@ class _SelectContactsScreenState extends State<SelectContactsScreen> {
               padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
               child: Column(
                 children: [
+                  if (_selectedIds.isNotEmpty && _hasUnassignedSelectedContacts) ...[
+                    const SizedBox(height: 12),
+                    Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                   Icon(
+                      Icons.info_outline,
+                      size: 16,
+                      color: AppColors.danger,
+                   ),
+                     const SizedBox(width: 6),
+                     Expanded(
+                       child: Text(
+                    'Please assign every selected contact as Main or Other before confirming.',
+                       style: TextStyle(
+                       fontSize: 12,
+                       color: AppColors.danger,
+                       fontWeight: FontWeight.w600,
+                       ),
+                      ),
+                    ),
+                 ],
+                    ),
+                  ],
                   if (hasFriends)
                     SizedBox(
                       width: double.infinity,
                       height: 50,
                       child: ElevatedButton(
-                        onPressed: _selectedIds.isEmpty ? null : _onConfirm,
+                        onPressed: _selectedIds.isNotEmpty && 
+                                  !_hasUnassignedSelectedContacts
+                                  ? _onConfirm
+                                  : null,
                         style: ElevatedButton.styleFrom(
                             backgroundColor: AppColors.navy,
                             disabledBackgroundColor:

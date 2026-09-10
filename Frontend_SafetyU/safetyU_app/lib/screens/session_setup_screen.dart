@@ -27,13 +27,13 @@ class _SessionSetupScreenState extends State<SessionSetupScreen> {
   final MapController _mapController = MapController();
   final ScrollController _scrollController = ScrollController();
 
-  int _durationMinutes = 30;
-  final TextEditingController _hourController =
-      TextEditingController(text: '0');
-  final TextEditingController _minuteController =
-      TextEditingController(text: '30');
+  int _durationMinutes = 0;
+  final TextEditingController _hourController = TextEditingController();
+  final TextEditingController _minuteController = TextEditingController();
   List<Contact> _notifyContacts = [];
   bool _contactsConfirmed = false;
+  bool _showDestinationError = false;
+  String? _durationError;
 
   // Real place search — hits OpenStreetMap's Nominatim search API directly
   // (the same open database Google-competitor map apps use), instead of the
@@ -113,8 +113,16 @@ class _SessionSetupScreenState extends State<SessionSetupScreen> {
   void _onDurationFieldChanged() {
     final hours = int.tryParse(_hourController.text.trim()) ?? 0;
     final minutes = int.tryParse(_minuteController.text.trim()) ?? 0;
-    final total = (hours * 60 + minutes).clamp(1, 720);
-    setState(() => _durationMinutes = total);
+
+    final total = hours * 60 + minutes;
+
+    setState(() {
+      _durationMinutes = total.clamp(0, 720).toInt();
+
+      if (total > 0) {
+        _durationError = null;
+      }
+    });
   }
 
   void _syncDurationFields() {
@@ -246,21 +254,28 @@ class _SessionSetupScreenState extends State<SessionSetupScreen> {
       _suppressNextSearch = false;
       return;
     }
-    _searchDebounce?.cancel();
-    final text = _destinationController.text.trim();
-    if (text.isEmpty) {
+    if (_destinationController.text.trim().isNotEmpty &&
+        _showDestinationError) {
       setState(() {
-        _suggestions = [];
-        _resolvedAddress = null;
-        _destinationCoords = null;
-        _previewFailed = false;
-        _isSearching = false;
+        _showDestinationError = false;
       });
-      return;
+
+      _searchDebounce?.cancel();
+      final text = _destinationController.text.trim();
+      if (text.isEmpty) {
+        setState(() {
+          _suggestions = [];
+          _resolvedAddress = null;
+          _destinationCoords = null;
+          _previewFailed = false;
+          _isSearching = false;
+        });
+        return;
+      }
+      setState(() => _isSearching = true);
+      _searchDebounce =
+          Timer(const Duration(milliseconds: 500), () => _searchPlaces(text));
     }
-    setState(() => _isSearching = true);
-    _searchDebounce =
-        Timer(const Duration(milliseconds: 500), () => _searchPlaces(text));
   }
 
   /// Calls Nominatim's public search endpoint directly (OpenStreetMap's
@@ -466,23 +481,52 @@ class _SessionSetupScreenState extends State<SessionSetupScreen> {
     if (!_contactsConfirmed || _notifyContacts.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-            content: Text(
-                'Select at least one trusted friend to notify before starting your session.')),
+          content: Text(
+            'Select at least one trusted friend to notify before starting your session.',
+          ),
+        ),
       );
       return;
     }
+
+    final destination = _destinationController.text.trim();
+
+    if (destination.isEmpty) {
+      setState(() {
+        _showDestinationError = true;
+      });
+
+      // Scroll back to the map/search area so the user can see
+      // exactly where the problem is.
+      if (_scrollController.hasClients) {
+        await _scrollController.animateTo(
+          0,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeOut,
+        );
+      }
+
+      _destinationFocusNode.requestFocus();
+      return;
+    }
+
     if (!(_formKey.currentState?.validate() ?? false)) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-            content: Text(
-                'Please enter a destination before starting your session.')),
-      );
       return;
     }
+
+    if (_durationMinutes <= 0) {
+      setState(() {
+        _durationError = 'Please enter the expected time.';
+      });
+      return;
+    }
+
     if (_isLookingUpAddress) return;
 
-    final String destination = _destinationController.text.trim();
-    setState(() => _isLookingUpAddress = true);
+    setState(() {
+      _durationError = null;
+      _isLookingUpAddress = true;
+    });
 
     double latitude = _defaultCenter.latitude;
     double longitude = _defaultCenter.longitude;
@@ -496,6 +540,7 @@ class _SessionSetupScreenState extends State<SessionSetupScreen> {
       foundRealLocation = true;
     } else {
       final match = await _fetchFirstMatch(destination);
+
       if (match != null) {
         latitude = match.lat;
         longitude = match.lon;
@@ -504,6 +549,7 @@ class _SessionSetupScreenState extends State<SessionSetupScreen> {
     }
 
     if (!mounted) return;
+
     setState(() => _isLookingUpAddress = false);
 
     if (!foundRealLocation) {
@@ -532,18 +578,108 @@ class _SessionSetupScreenState extends State<SessionSetupScreen> {
     );
   }
 
+  Widget _buildNotifyContactsContent() {
+    final mainContacts = _notifyContacts
+        .where((c) => c.tierAssigned && c.isMainContact)
+        .toList();
+
+    final otherContacts = _notifyContacts
+        .where((c) => c.tierAssigned && !c.isMainContact)
+        .toList();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (mainContacts.isNotEmpty) ...[
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(
+                Icons.star_outline,
+                size: 16,
+                color: AppColors.textSecondary,
+              ),
+              const SizedBox(width: 6),
+              Expanded(
+                child: RichText(
+                  text: TextSpan(
+                    children: [
+                      TextSpan(
+                        text: 'Main: ',
+                        style: TextStyle(
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.textSecondary,
+                        ),
+                      ),
+                      TextSpan(
+                        text: mainContacts.map((c) => c.fullName).join(', '),
+                        style: TextStyle(
+                          fontSize: 13.5,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.textPrimary,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+        if (mainContacts.isNotEmpty && otherContacts.isNotEmpty)
+          const SizedBox(height: 7),
+        if (otherContacts.isNotEmpty) ...[
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(
+                Icons.people_outline,
+                size: 16,
+                color: AppColors.textSecondary,
+              ),
+              const SizedBox(width: 6),
+              Expanded(
+                child: RichText(
+                  text: TextSpan(
+                    children: [
+                      TextSpan(
+                        text: 'Other: ',
+                        style: TextStyle(
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.textSecondary,
+                        ),
+                      ),
+                      TextSpan(
+                        text: otherContacts.map((c) => c.fullName).join(', '),
+                        style: TextStyle(
+                          fontSize: 13.5,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.textPrimary,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ],
+    );
+  }
   // =========================================================
   // BUILD
   // =========================================================
 
   @override
   Widget build(BuildContext context) {
-
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(
         leading: IconButton(
-          icon: Icon(Icons.arrow_back, color: AppColors.danger),
+          icon: Icon(Icons.arrow_back, color: AppColors.navy),
           onPressed: () => Navigator.maybePop(context),
         ),
         title: Text(
@@ -574,9 +710,9 @@ class _SessionSetupScreenState extends State<SessionSetupScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       if (_isSearching) ...[
-                         Row(
+                        Row(
                           children: [
-                           const SizedBox(
+                            const SizedBox(
                                 width: 14,
                                 height: 14,
                                 child:
@@ -584,7 +720,8 @@ class _SessionSetupScreenState extends State<SessionSetupScreen> {
                             const SizedBox(width: 8),
                             Text('Searching…',
                                 style: TextStyle(
-                                    fontSize: 12.5, color: AppColors.textSecondary)),
+                                    fontSize: 12.5,
+                                    color: AppColors.textSecondary)),
                           ],
                         ),
                         const SizedBox(height: 10),
@@ -616,7 +753,7 @@ class _SessionSetupScreenState extends State<SessionSetupScreen> {
                         ),
                       ),
                       const SizedBox(height: 8),
-                      _buildDestinationInputCard(),
+                      //  _buildDestinationInputCard(),
                       const SizedBox(height: 16),
                       Text(
                         'Expected Time',
@@ -644,6 +781,20 @@ class _SessionSetupScreenState extends State<SessionSetupScreen> {
                           ),
                         ],
                       ),
+                      if (_durationError != null) ...[
+                        const SizedBox(height: 4),
+                        Padding(
+                          padding: const EdgeInsets.only(left: 12),
+                          child: Text(
+                            _durationError!,
+                            style: TextStyle(
+                              fontSize: 11.5,
+                              color: AppColors.danger,
+                            ),
+                          ),
+                        ),
+                      ],
+
                       if (_destinationCoords != null &&
                           _currentPosition != null) ...[
                         const SizedBox(height: 6),
@@ -709,8 +860,8 @@ class _SessionSetupScreenState extends State<SessionSetupScreen> {
                               horizontal: 16, vertical: 14),
                           decoration: BoxDecoration(
                             color: _contactsConfirmed
-                                 ? AppColors.card
-                                 : AppColors.dangerLight,
+                                ? AppColors.card
+                                : AppColors.dangerLight,
                             borderRadius: BorderRadius.circular(12),
                             border: Border.all(
                               color: _contactsConfirmed
@@ -718,40 +869,49 @@ class _SessionSetupScreenState extends State<SessionSetupScreen> {
                                   : AppColors.danger,
                             ),
                           ),
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Icon(
-                                _contactsConfirmed
-                                    ? Icons.people_outline
-                                    : Icons.warning_amber_rounded,
-                                color: _contactsConfirmed
-                                    ? AppColors.textPrimary
-                                    : AppColors.danger,
-                                size: 18,
-                              ),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: Text(
-                                  !_contactsConfirmed
-                                      ? 'Select Contacts'
-                                      : _notifyContacts
-                                          .map((c) => c.fullName)
-                                          .join(', '),
-                                  textAlign: TextAlign.center,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: TextStyle(
-                                    fontSize: 13.5,
-                                    fontWeight: FontWeight.w600,
-                                    color: _contactsConfirmed
-                                        ? AppColors.textPrimary
-                                        : AppColors.danger,
-                                  ),
+                          child: !_contactsConfirmed
+                              ? Row(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    Icon(
+                                      Icons.warning_amber_rounded,
+                                      color: AppColors.danger,
+                                      size: 18,
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Expanded(
+                                      child: Text(
+                                        'Select Contacts',
+                                        textAlign: TextAlign.center,
+                                        style: TextStyle(
+                                          fontSize: 13.5,
+                                          fontWeight: FontWeight.w600,
+                                          color: AppColors.danger,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                )
+                              : Row(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Icon(
+                                      Icons.people_outline,
+                                      color: AppColors.textPrimary,
+                                      size: 20,
+                                    ),
+                                    const SizedBox(width: 10),
+                                    Expanded(
+                                      child: _buildNotifyContactsContent(),
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Icon(
+                                      Icons.chevron_right,
+                                      color: AppColors.textMuted,
+                                      size: 20,
+                                    ),
+                                  ],
                                 ),
-                              ),
-                            ],
-                          ),
                         ),
                       ),
                       if (!_contactsConfirmed) ...[
@@ -771,7 +931,7 @@ class _SessionSetupScreenState extends State<SessionSetupScreen> {
                           style: ElevatedButton.styleFrom(
                             backgroundColor: AppColors.navy,
                             disabledBackgroundColor:
-                               AppColors.navy.withValues(alpha: 0.35),
+                                AppColors.navy.withValues(alpha: 0.35),
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(26),
                             ),
@@ -905,22 +1065,25 @@ class _SessionSetupScreenState extends State<SessionSetupScreen> {
                           controller: _destinationController,
                           focusNode: _destinationFocusNode,
                           textInputAction: TextInputAction.search,
-                          style: TextStyle(fontSize: 13, color: AppColors.textPrimary),
+                          style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w500,
+                              color: AppColors.textPrimary),
+                          cursorColor: AppColors.navy,
                           decoration: InputDecoration(
                             hintText: 'Search location (e.g. CADT)',
-                            hintStyle: TextStyle(color: AppColors.textMuted),
+                            hintStyle: TextStyle(
+                                color: AppColors.textMuted,
+                                fontWeight: FontWeight.w400,
+                                fontSize: 14),
                             border: InputBorder.none,
+                            enabledBorder: InputBorder.none,
+                            focusedBorder: InputBorder.none,
+                            focusedErrorBorder: InputBorder.none,
                             isDense: true,
                             filled: false,
                             fillColor: Colors.transparent,
                           ),
-                          validator: (value) {
-                            if (value == null || value.trim().isEmpty) {
-                              return 'Destination is required';
-                            }
-                            return null;
-                          },
-                          autovalidateMode: AutovalidateMode.onUserInteraction,
                         ),
                       ),
                       if (_destinationController.text.isNotEmpty)
@@ -932,6 +1095,7 @@ class _SessionSetupScreenState extends State<SessionSetupScreen> {
                               _destinationCoords = null;
                               _resolvedAddress = null;
                               _previewFailed = false;
+                              _showDestinationError = false;
                             });
                             _destinationFocusNode.requestFocus();
                           },
@@ -941,6 +1105,19 @@ class _SessionSetupScreenState extends State<SessionSetupScreen> {
                     ],
                   ),
                 ),
+                if (_showDestinationError) ...[
+                  const SizedBox(height: 4),
+                  Padding(
+                    padding: const EdgeInsets.only(left: 70),
+                    child: Text(
+                      'Destination is required',
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        color: AppColors.danger,
+                      ),
+                    ),
+                  ),
+                ],
                 if (_suggestions.isNotEmpty) ...[
                   const SizedBox(height: 6),
                   Container(
@@ -960,8 +1137,11 @@ class _SessionSetupScreenState extends State<SessionSetupScreen> {
                       shrinkWrap: true,
                       padding: const EdgeInsets.symmetric(vertical: 4),
                       itemCount: _suggestions.length,
-                      separatorBuilder: (_, __) =>
-                          Divider(height: 1, indent: 14, endIndent: 14, color: AppColors.border),
+                      separatorBuilder: (_, __) => Divider(
+                          height: 1,
+                          indent: 14,
+                          endIndent: 14,
+                          color: AppColors.border),
                       itemBuilder: (context, i) {
                         final s = _suggestions[i];
                         final parts = s.displayName.split(',');
@@ -995,7 +1175,8 @@ class _SessionSetupScreenState extends State<SessionSetupScreen> {
                                             overflow: TextOverflow.ellipsis,
                                             style: TextStyle(
                                                 fontSize: 11,
-                                                color: AppColors.textSecondary)),
+                                                color:
+                                                    AppColors.textSecondary)),
                                     ],
                                   ),
                                 ),
@@ -1085,9 +1266,12 @@ class _SessionSetupScreenState extends State<SessionSetupScreen> {
                             value: 'refresh',
                             child: Row(
                               children: [
-                                Icon(Icons.my_location, size: 18, color: AppColors.textPrimary),
+                                Icon(Icons.my_location,
+                                    size: 18, color: AppColors.textPrimary),
                                 const SizedBox(width: 10),
-                                Text('Refresh my location', style: TextStyle(color: AppColors.textPrimary)),
+                                Text('Refresh my location',
+                                    style: TextStyle(
+                                        color: AppColors.textPrimary)),
                               ],
                             ),
                           ),
@@ -1095,10 +1279,12 @@ class _SessionSetupScreenState extends State<SessionSetupScreen> {
                             value: 'clear',
                             child: Row(
                               children: [
-                                Icon(Icons.clear, 
-                                size: 18, color: AppColors.textPrimary),
+                                Icon(Icons.clear,
+                                    size: 18, color: AppColors.textPrimary),
                                 const SizedBox(width: 10),
-                                Text('Clear destination', style: TextStyle(color: AppColors.textPrimary)),
+                                Text('Clear destination',
+                                    style: TextStyle(
+                                        color: AppColors.textPrimary)),
                               ],
                             ),
                           ),
@@ -1194,7 +1380,7 @@ class _SessionSetupScreenState extends State<SessionSetupScreen> {
                         ],
                       ),
                     ),
-                  Icon(Icons.chevron_right, color: AppColors.textPrimary),
+                    Icon(Icons.chevron_right, color: AppColors.textPrimary),
                   ],
                 ),
               ),
@@ -1205,84 +1391,77 @@ class _SessionSetupScreenState extends State<SessionSetupScreen> {
     );
   }
 
-  Widget _buildDestinationInputCard() {
-    return GestureDetector(
-      onTap: _focusDestinationSearch,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
-        decoration: BoxDecoration(
-          color: AppColors.card,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: AppColors.border),
-        ),
-        child: Row(
-          children: [
-            Icon(Icons.place_outlined, color: AppColors.textMuted, size: 20),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Text(
-                _destinationController.text.isEmpty
-                    ? 'Enter destination'
-                    : _destinationController.text,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontSize: 13.5,
-                  fontWeight: FontWeight.bold,
-                  color: AppColors.textPrimary,
-                ),
-              ),
-            ),
-            Icon(Icons.chevron_right, color: AppColors.textMuted),
-          ],
-        ),
-      ),
-    );
-  }
-
   Widget _buildTimeInputBox({
     required TextEditingController controller,
     required String unit,
   }) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-      decoration: BoxDecoration(
-        color: AppColors.card,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppColors.border),
+    return TextFormField(
+      controller: controller,
+      keyboardType: TextInputType.number,
+      style: TextStyle(
+        fontSize: 14,
+        fontWeight: FontWeight.bold,
+        color: AppColors.textPrimary,
       ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Expanded(
-            child: TextFormField(
-              controller: controller,
-              keyboardType: TextInputType.number,
-              style: TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.bold,
-                color: AppColors.textPrimary,
-              ),
-              decoration: const InputDecoration(
-                border: InputBorder.none,
-                isDense: true,
-                filled: false,
-                fillColor: Colors.transparent,
-                contentPadding: EdgeInsets.symmetric(vertical: 10),
-              ),
-              onChanged: (_) => _onDurationFieldChanged(),
-            ),
-          ),
-          Text(
-            unit,
-            style: TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-              color: AppColors.textSecondary,
-            ),
-          ),
-        ],
+      decoration: InputDecoration(
+        filled: true,
+        fillColor: AppColors.card,
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: AppColors.border),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: AppColors.border),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: AppColors.navy, width: 1.2),
+        ),
+        errorBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: AppColors.danger),
+        ),
+        focusedErrorBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: AppColors.danger, width: 1.2),
+        ),
+        isDense: true,
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 16,
+          vertical: 14,
+        ),
+        suffixText: unit,
+        suffixStyle: TextStyle(
+          fontSize: 12,
+          fontWeight: FontWeight.w600,
+          color: AppColors.textSecondary,
+        ),
+        errorStyle: TextStyle(
+          color: AppColors.danger,
+          fontSize: 11.5,
+        ),
       ),
+      validator: (value) {
+        final text = value?.trim() ?? '';
+
+        if (text.isEmpty) {
+          return null;
+        }
+
+        final number = int.tryParse(text);
+
+        if (number == null) {
+          return 'Enter a number';
+        }
+
+        if (number < 0) {
+          return 'Cannot be negative';
+        }
+
+        return null;
+      },
+      onChanged: (_) => _onDurationFieldChanged(),
     );
   }
 
