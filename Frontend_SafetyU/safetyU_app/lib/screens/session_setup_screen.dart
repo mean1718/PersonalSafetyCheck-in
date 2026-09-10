@@ -9,6 +9,7 @@ import 'package:latlong2/latlong.dart';
 import '../theme/app_theme.dart';
 import '../models/contact.dart';
 import '../services/app_session.dart';
+import '../services/check_in_service.dart';
 
 class SessionSetupScreen extends StatefulWidget {
   const SessionSetupScreen({super.key});
@@ -410,6 +411,30 @@ class _SessionSetupScreenState extends State<SessionSetupScreen> {
   /// person to the Friends screen to add one first, instead of opening a
   /// picker with nothing in it.
   Future<void> _pickContacts() async {
+    // The session selector must use accepted TrustRequest relationships, not
+    // the old local friend-request demo state.
+    try {
+      final contacts = await CheckInService.trustedContacts();
+      for (final contact in contacts) {
+        final userId = contact['userId']?.toString();
+        if (userId == null || userId.isEmpty) continue;
+        AppSession.instance.upsertContact(Contact(
+          id: userId,
+          fullName: contact['name']?.toString() ?? 'SafetyU user',
+          phone: contact['phone']?.toString() ?? '',
+          email: contact['email']?.toString() ?? '',
+          relationship: 'Trusted Contact',
+          status: ContactStatus.friend,
+        ));
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not load trusted contacts.')),
+        );
+      }
+      return;
+    }
     if (AppSession.instance.friends.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(

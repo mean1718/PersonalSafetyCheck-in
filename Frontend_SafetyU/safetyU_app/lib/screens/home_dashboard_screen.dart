@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_bottom_nav.dart';
 import '../services/app_session.dart';
+import '../services/check_in_service.dart';
 import '../models/contact_response_state.dart';
 import 'dart:io';
 
@@ -14,6 +15,27 @@ class HomeDashboardScreen extends StatefulWidget {
 
 class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
   int _navIndex = 0;
+  bool _loadingAlertStatus = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadAlertStatus();
+  }
+
+  Future<void> _loadAlertStatus() async {
+    final checkInId = AppSession.instance.activeCheckInId;
+    if (checkInId == null || _loadingAlertStatus) return;
+    _loadingAlertStatus = true;
+    try {
+      final contacts = await CheckInService.alertStatus(checkInId);
+      if (mounted) AppSession.instance.replaceAlertResponsesFromBackend(contacts);
+    } catch (_) {
+      // The local state remains available while an offline backend reconnects.
+    } finally {
+      _loadingAlertStatus = false;
+    }
+  }
 
   void _onNavTap(int index) {
     if (index == _navIndex) return;
@@ -235,7 +257,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                 ],
               ),
               const SizedBox(height: 20),
-              _ContactResponsesPanel(),
+              _ContactResponsesPanel(onRefresh: _loadAlertStatus),
               const SizedBox(height: 24),
             ],
           ),
@@ -298,6 +320,8 @@ class _QuickActionCard extends StatelessWidget {
 /// out with no response, so the person immediately knows to expect the
 /// next contact (or Emergency Responders) to pick it up instead.
 class _ContactResponsesPanel extends StatelessWidget {
+  final Future<void> Function() onRefresh;
+  const _ContactResponsesPanel({required this.onRefresh});
   String _initials(String name) {
     final parts =
         name.trim().split(RegExp(r'\s+')).where((p) => p.isNotEmpty).toList();
@@ -326,7 +350,9 @@ class _ContactResponsesPanel extends StatelessWidget {
         final respondedCount = responses
             .where((r) => r.status != ContactResponseStatus.pending)
             .length;
-        return Container(
+        return GestureDetector(
+          onTap: onRefresh,
+          child: Container(
           width: double.infinity,
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
@@ -420,6 +446,7 @@ class _ContactResponsesPanel extends StatelessWidget {
                 ),
               ],
             ],
+          ),
           ),
         );
       },

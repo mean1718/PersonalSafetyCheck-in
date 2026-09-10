@@ -3,6 +3,7 @@ import '../theme/app_theme.dart';
 import '../models/app_notification.dart';
 import '../models/contact.dart';
 import '../services/app_session.dart';
+import '../services/notification_service.dart';
 import 'alert_detail_screen.dart';
 
 class NotificationsScreen extends StatefulWidget {
@@ -13,6 +14,8 @@ class NotificationsScreen extends StatefulWidget {
 }
 
 class _NotificationsScreenState extends State<NotificationsScreen> {
+  List<Map<String, dynamic>> _backendNotifications = [];
+
   @override
   void initState() {
     super.initState();
@@ -21,6 +24,37 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       AppSession.instance.markAllNotificationsRead();
     });
+    _loadBackendNotifications();
+  }
+
+  Future<void> _loadBackendNotifications() async {
+    try {
+      final notifications = await NotificationService.fetchAll();
+      if (mounted) setState(() => _backendNotifications = notifications);
+    } catch (_) {}
+  }
+
+  Future<void> _respondToSafetyAlert(
+      Map<String, dynamic> notification, String responseStatus) async {
+    final id = notification['_id']?.toString();
+    if (id == null) return;
+    try {
+      await NotificationService.respondToSafetyAlert(id, responseStatus);
+      await _loadBackendNotifications();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(responseStatus == 'can_help'
+              ? 'Your response was sent.'
+              : "Your response was sent."),
+        ));
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Unable to send your response.')),
+        );
+      }
+    }
   }
 
   Color _tagColor(NotificationKind kind) {
@@ -79,8 +113,56 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
         ],
       ),
       body: SafeArea(
-        child: notifications.isEmpty
-            ? const _EmptyNotifications()
+          child: notifications.isEmpty
+            ? (_backendNotifications.isEmpty
+                ? const _EmptyNotifications()
+                : ListView.separated(
+                    padding: const EdgeInsets.all(16),
+                    itemCount: _backendNotifications.length,
+                    separatorBuilder: (_, __) => const SizedBox(height: 10),
+                    itemBuilder: (context, index) {
+                      final notification = _backendNotifications[index];
+                      return InkWell(
+                        onTap: () async {
+                          final id = notification['_id']?.toString();
+                          if (id != null) await NotificationService.markRead(id);
+                          await _loadBackendNotifications();
+                        },
+                        child: Container(
+                          padding: const EdgeInsets.all(14),
+                          decoration: BoxDecoration(color: AppColors.card, borderRadius: BorderRadius.circular(14), border: Border.all(color: AppColors.border)),
+                          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                            Text(notification['title']?.toString() ?? 'SafetyU Alert', style: TextStyle(fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+                            const SizedBox(height: 6),
+                            Text(notification['message']?.toString() ?? '', style: TextStyle(color: AppColors.textSecondary)),
+                            if (notification['type'] == 'safety_alert' &&
+                                notification['responseStatus'] == 'pending') ...[
+                              const SizedBox(height: 12),
+                              Row(children: [
+                                Expanded(child: OutlinedButton(
+                                  onPressed: () => _respondToSafetyAlert(notification, 'cannot_help'),
+                                  child: const Text("I can't help"),
+                                )),
+                                const SizedBox(width: 8),
+                                Expanded(child: ElevatedButton(
+                                  onPressed: () => _respondToSafetyAlert(notification, 'can_help'),
+                                  child: const Text('I can help'),
+                                )),
+                              ]),
+                            ] else if (notification['type'] == 'safety_alert') ...[
+                              const SizedBox(height: 8),
+                              Text(
+                                notification['responseStatus'] == 'can_help'
+                                    ? 'You responded: I can help'
+                                    : "You responded: I can't help",
+                                style: TextStyle(color: AppColors.textSecondary),
+                              ),
+                            ],
+                          ]),
+                        ),
+                      );
+                    },
+                  ))
             : ListView.separated(
                 padding: const EdgeInsets.all(16),
                 itemCount: notifications.length,

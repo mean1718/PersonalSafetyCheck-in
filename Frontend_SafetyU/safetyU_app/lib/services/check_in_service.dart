@@ -9,12 +9,19 @@ import 'api_client.dart';
 /// else about a CheckIn is currently read back by the app, so there's no
 /// separate Dart model for it.
 class CheckInService {
+  static Future<List<Map<String, dynamic>>> trustedContacts() async {
+    final data = await ApiClient.get('/checkins/trusted-contacts');
+    return (data['contacts'] as List<dynamic>? ?? []).cast<Map<String, dynamic>>();
+  }
+
   static Future<String?> start({
+    List<String> contactUserIds = const [],
     String message = '',
     double? latitude,
     double? longitude,
   }) async {
     final data = await ApiClient.post('/checkins', {
+      if (contactUserIds.isNotEmpty) 'contactUserIds': contactUserIds,
       'message': message,
       if (latitude != null) 'latitude': latitude,
       if (longitude != null) 'longitude': longitude,
@@ -25,5 +32,11 @@ class CheckInService {
 
   static Future<void> complete(String checkInId) async {
     await ApiClient.put('/checkins/$checkInId/complete', {});
+  }
+
+  static Future<List<Map<String, dynamic>>> alertStatus(String checkInId) async {
+    final data = await ApiClient.get('/checkins/$checkInId/alert-status');
+    return (data['notifiedContacts'] as List<dynamic>? ?? [])
+        .cast<Map<String, dynamic>>();
   }
 }

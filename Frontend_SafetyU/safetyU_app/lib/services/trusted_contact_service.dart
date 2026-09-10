@@ -1,67 +1,133 @@
 import 'api_client.dart';
 
-/// Mirrors trusted contacts to the backend's TrustedContact collection.
-///
-/// IMPORTANT LIMITATION — read before changing this file: the backend only
-/// supports ONE active "primary" and ONE active "secondary" contact per
-/// account (see backend_SafetyU/src/controllers/trustedContactController.js
-/// — adding a second contact at a priority that's already taken is
-/// rejected with a 400). The Flutter app supports unlimited contacts plus
-/// a friend-request flow the backend has no concept of at all. So:
-///   - Every contact the person adds still lives fully in AppSession,
-///     exactly as before — nothing about the local experience changes.
-///   - Only whichever contact is currently tagged Main ("primary" on the
-///     backend) and the one after it ("secondary") are mirrored to the
-///     server, since that's genuinely all it can store. Everyone else
-///     stays local-only.
-/// This is called from the screens that assign/remove a contact's tier
-/// (select_contacts_screen.dart) or delete a contact (trusted_contacts_
-/// screen.dart), always fire-and-forget: a failed sync (backend offline,
-/// not logged in via the backend, etc.) never blocks or breaks the local
-/// UI, which is the whole point of keeping AppSession as the source of
-/// truth.
+/// Protected API wrapper for the current user's private trusted contacts.
 class TrustedContactService {
-  static Future<List<Map<String, dynamic>>> fetchAll() async {
-    final data = await ApiClient.get('/trusted-contacts');
-    final list = data['contacts'] as List<dynamic>? ?? [];
-    return list.cast<Map<String, dynamic>>();
+  static Future<void> sendTrustRequest({
+    required String phone,
+    required String relationship,
+  }) async {
+    await ApiClient.post('/trust-requests', {
+      'phone': phone,
+      'relationship': relationship,
+    });
   }
 
-  /// Replaces whichever backend contact currently holds [priority]
-  /// ("primary" or "secondary") with the given details.
+  static Future<List<Map<String, dynamic>>> receivedTrustRequests() async {
+    final data = await ApiClient.get('/trust-requests/received');
+    return (data['requests'] as List<dynamic>? ?? []).cast<Map<String, dynamic>>();
+  }
+
+  static Future<void> respondToTrustRequest(String id, {required bool accept}) =>
+      ApiClient.post('/trust-requests/$id/${accept ? 'accept' : 'reject'}', {});
+
+  static Future<List<Map<String, dynamic>>> fetchAll() async {
+    final data = await ApiClient.get('/trusted-contacts');
+    return (data['contacts'] as List<dynamic>? ?? []).cast<Map<String, dynamic>>();
+  }
+
+  static Future<Map<String, dynamic>> create({
+    required String name,
+    required String phone,
+    required String email,
+    required String relationship,
+    required String priority,
+    required bool isAvailable,
+  }) async {
+    final data = await ApiClient.post('/trusted-contacts', {
+      'name': name,
+      'phone': phone,
+      'email': email,
+      'relationship': relationship,
+      'priority': priority,
+      'availability': isAvailable ? 'available' : 'unavailable',
+    });
+    return data['contact'] as Map<String, dynamic>;
+  }
+
+  // Compatibility bridge for the existing Add Contact screen. New contacts
+  // begin as secondary; the edit/tier flow can promote them to main later.
+  static Future<void> createContact({
+    required String name,
+    required String phone,
+    required String email,
+    required String relationship,
+    required bool isAvailable,
+  }) async {
+    await create(
+      name: name,
+      phone: phone,
+      email: email,
+      relationship: relationship,
+      priority: 'secondary',
+      isAvailable: isAvailable,
+    );
+  }
+
+  static Future<Map<String, dynamic>> update(String id, {
+    required String name,
+    required String phone,
+    required String email,
+    required String relationship,
+    required String priority,
+    required bool isAvailable,
+  }) async {
+    final data = await ApiClient.put('/trusted-contacts/$id', {
+      'name': name,
+      'phone': phone,
+      'email': email,
+      'relationship': relationship,
+      'priority': priority,
+      'availability': isAvailable ? 'available' : 'unavailable',
+    });
+    return data['contact'] as Map<String, dynamic>;
+  }
+
+  /// Compatibility method used by the existing Main/Other tier selector.
+  /// It updates this contact when it has already been saved, or creates it
+  /// once when it is first assigned a tier.
   static Future<void> upsertPriorityContact({
     required String priority,
     required String name,
     required String phone,
+    required String email,
     required String relationship,
+    required bool isAvailable,
   }) async {
-    final existing = await fetchAll();
-    for (final c in existing) {
-      if (c['priority'] == priority) {
-        final id = c['_id']?.toString();
-        if (id != null) {
-          await ApiClient.delete('/trusted-contacts/$id');
-        }
+    Map<String, dynamic>? existing;
+    for (final contact in await fetchAll()) {
+      if (contact['phone'] == phone) {
+        existing = contact;
+        break;
       }
     }
-    await ApiClient.post('/trusted-contacts', {
-      'name': name,
-      'phone': phone,
-      'relationship': relationship.isEmpty ? 'Contact' : relationship,
-      'priority': priority,
-    });
+    if (existing?['_id'] != null) {
+      await update(
+        existing!['_id'].toString(),
+        name: name,
+        phone: phone,
+        email: email,
+        relationship: relationship,
+        priority: priority,
+        isAvailable: isAvailable,
+      );
+      return;
+    }
+    await create(
+      name: name,
+      phone: phone,
+      email: email,
+      relationship: relationship,
+      priority: priority,
+      isAvailable: isAvailable,
+    );
   }
 
-  /// Removes whichever backend contact matches [phone] (any priority) —
-  /// used when a contact is deleted from the app.
+  static Future<void> remove(String id) => ApiClient.delete('/trusted-contacts/$id');
+
   static Future<void> removeByPhone(String phone) async {
-    final existing = await fetchAll();
-    for (final c in existing) {
-      if (c['phone'] == phone) {
-        final id = c['_id']?.toString();
-        if (id != null) {
-          await ApiClient.delete('/trusted-contacts/$id');
-        }
+    for (final contact in await fetchAll()) {
+      if (contact['phone'] == phone && contact['_id'] != null) {
+        await remove(contact['_id'].toString());
       }
     }
   }

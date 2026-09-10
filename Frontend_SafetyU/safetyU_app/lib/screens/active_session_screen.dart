@@ -185,11 +185,20 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
   void _startBackendCheckIn() {
     final pos = AppSession.instance.lastKnownPosition;
     CheckInService.start(
+      contactUserIds: _confirmedNotifyContactIds,
       message: 'Safety session to $_destination',
       latitude: pos?.latitude,
       longitude: pos?.longitude,
     ).then((id) {
-      if (mounted) _checkInId = id;
+      if (mounted) {
+        _checkInId = id;
+        AppSession.instance.activeCheckInId = id;
+        if (id != null) {
+          CheckInService.alertStatus(id).then(
+            AppSession.instance.replaceAlertResponsesFromBackend,
+          ).catchError((e) => debugPrint('Alert status sync skipped: $e'));
+        }
+      }
     }).catchError((e) {
       debugPrint('CheckIn sync skipped: $e');
     });
@@ -211,6 +220,13 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
         longitude: pos?.longitude,
       );
       _emergencyId = id;
+      // Replace the temporary local rows with the backend's notification
+      // recipients. This is the point where the actual notified account is
+      // known, so Home can never substitute the session owner.
+      if (_checkInId != null) {
+        final contacts = await CheckInService.alertStatus(_checkInId!);
+        AppSession.instance.replaceAlertResponsesFromBackend(contacts);
+      }
     } catch (e) {
       debugPrint('Emergency sync skipped: $e');
     } finally {

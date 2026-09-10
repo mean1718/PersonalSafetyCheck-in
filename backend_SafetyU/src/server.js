@@ -15,7 +15,9 @@ const connectDB = require("./config/db");
 const userRoutes = require("./routes/userRoutes");
 const checkInRoutes = require("./routes/checkInRoutes");
 const trustedContactRoutes = require("./routes/trustedContactRoutes");
+const trustRequestRoutes = require("./routes/trustRequestRoutes");
 const emergencyRoutes = require("./routes/emergencyRoutes");
+const notificationRoutes = require("./routes/notificationRoutes");
 
 const app = express();
 
@@ -30,7 +32,9 @@ connectDB();
 app.use("/api/users", userRoutes);
 app.use("/api/checkins", checkInRoutes);
 app.use("/api/trusted-contacts", trustedContactRoutes);
+app.use("/api/trust-requests", trustRequestRoutes);
 app.use("/api/emergency", emergencyRoutes);
+app.use("/api/notifications", notificationRoutes);
 
 // Test route
 app.get("/", (req, res) => {

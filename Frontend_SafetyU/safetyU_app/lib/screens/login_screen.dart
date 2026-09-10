@@ -48,10 +48,15 @@ class _LoginScreenState extends State<LoginScreen> {
 
   void _showBackendFieldError(String message) {
     setState(() {
-      if (message.toLowerCase().contains('email')) {
+      final normalized = message.toLowerCase();
+      if (normalized.contains('incorrect email or password') ||
+          normalized.contains('invalid credentials') ||
+          normalized.contains('invalid password')) {
+        _passwordBackendError = 'Incorrect password.';
+      } else if (normalized.contains('email')) {
         _emailBackendError = message;
       } else {
-        _passwordBackendError = message;
+        _passwordBackendError = 'Incorrect password.';
       }
     });
     _formKey.currentState?.validate();

@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
-import '../models/contact.dart';
 import '../services/app_session.dart';
 import '../utils/validators.dart';
+import '../services/trusted_contact_service.dart';
+import '../services/api_client.dart';
 
 /// "Add Contact" — sends a friend request. There's no backend to actually
 /// deliver it, so the new contact is saved as [ContactStatus.pending] and
@@ -25,36 +26,48 @@ class _AddContactScreenState extends State<AddContactScreen> {
   final _nameController = TextEditingController();
   final _phoneController = TextEditingController();
   final _emailController = TextEditingController();
-  final _relationshipController = TextEditingController();
+  String? _relationship;
+  bool _isSubmitting = false;
+  String? _phoneBackendError;
 
   @override
   void dispose() {
     _nameController.dispose();
     _phoneController.dispose();
     _emailController.dispose();
-    _relationshipController.dispose();
     super.dispose();
   }
 
-  void _sendRequest() {
+  Future<void> _sendRequest() async {
+    setState(() => _phoneBackendError = null);
     if (!(_formKey.currentState?.validate() ?? false)) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-            content: Text('Please fill in all required contact details.')),
-      );
       return;
     }
 
-    final contact = Contact(
-      id: DateTime.now().millisecondsSinceEpoch.toString(),
-      fullName: _nameController.text.trim(),
-      phone: _phoneController.text.trim(),
-      email: _emailController.text.trim(),
-      relationship: _relationshipController.text.trim(),
-      status: ContactStatus.pending,
-    );
+    setState(() => _isSubmitting = true);
+    try {
+      await TrustedContactService.sendTrustRequest(
+        phone: _phoneController.text.trim(),
+        relationship: _relationship!,
+      );
+    } on ApiException catch (error) {
+      if (!mounted) return;
+      setState(() { _isSubmitting = false; _phoneBackendError = error.message; });
+      _formKey.currentState?.validate();
+      return;
+    } on ApiConnectionException catch (error) {
+      if (!mounted) return;
+      setState(() => _isSubmitting = false);
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error.message)));
+      return;
+    }
+    if (!mounted) return;
+    setState(() => _isSubmitting = false);
 
-    Navigator.pop(context, contact);
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Trust request sent.')),
+    );
+    Navigator.pop(context);
   }
 
   @override
@@ -91,7 +104,7 @@ class _AddContactScreenState extends State<AddContactScreen> {
                   hint: 'e.g. Sophea Chan',
                   validator: (v) {
                     final text = v?.trim() ?? '';
-                    if (text.isEmpty) return 'Name is required';
+                    if (text.isEmpty) return null;
                     if (AppSession.instance.isContactNameTaken(text)) {
                       return 'This name is already used by another contact';
                     }
@@ -104,13 +117,14 @@ class _AddContactScreenState extends State<AddContactScreen> {
                   hint: '+855 12 345 678',
                   keyboardType: TextInputType.phone,
                   validator: (v) {
-                    final err = phoneValidator(v);
+                    final err = phoneValidator(v) ?? _phoneBackendError;
                     if (err != null) return err;
                     if (AppSession.instance.isContactPhoneTaken(v!.trim())) {
                       return 'This phone number is already used by another contact';
                     }
                     return null;
                   },
+                  onChanged: (_) { if (_phoneBackendError != null) setState(() => _phoneBackendError = null); },
                 ),
                 _buildField(
                   'EMAIL ADDRESS',
@@ -118,6 +132,8 @@ class _AddContactScreenState extends State<AddContactScreen> {
                   hint: 'name@example.com',
                   keyboardType: TextInputType.emailAddress,
                   validator: (v) {
+                    final text = v?.trim() ?? '';
+                    if (text.isEmpty) return null;
                     final err = emailValidator(v);
                     if (err != null) return err;
                     if (AppSession.instance.isContactEmailTaken(v!.trim())) {
@@ -126,26 +142,39 @@ class _AddContactScreenState extends State<AddContactScreen> {
                     return null;
                   },
                 ),
-                _buildField(
-                  'RELATIONSHIP',
-                  _relationshipController,
-                  hint: 'e.g. Sister, Roommate, Friend',
-                  validator: (v) => (v == null || v.trim().isEmpty)
-                      ? 'Relationship is required'
-                      : null,
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('RELATIONSHIP', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: AppColors.textSecondary, letterSpacing: 0.4)),
+                      const SizedBox(height: 8),
+                      DropdownButtonFormField<String>(
+                        value: _relationship,
+                        decoration: InputDecoration(
+                          hintText: 'Select relationship',
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: AppColors.border)),
+                        ),
+                        items: const ['Parent', 'Sibling', 'Friend', 'Partner', 'Other'].map((value) => DropdownMenuItem(value: value, child: Text(value))).toList(),
+                        onChanged: (value) => setState(() => _relationship = value),
+                        validator: (value) => value == null ? 'Please select a relationship.' : null,
+                      ),
+                    ],
+                  ),
                 ),
                 const SizedBox(height: 16),
                 SizedBox(
                   width: double.infinity,
                   height: 50,
                   child: ElevatedButton(
-                    onPressed: _sendRequest,
+                    onPressed: _isSubmitting ? null : _sendRequest,
                     style: ElevatedButton.styleFrom(
                       backgroundColor: AppColors.navy,
                       shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(25)),
                     ),
-                    child: const Text(
+                    child: _isSubmitting ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)) : const Text(
                       'Send Request',
                       style: TextStyle(
                           color: Colors.white,
@@ -178,6 +207,7 @@ class _AddContactScreenState extends State<AddContactScreen> {
     String? hint,
     TextInputType? keyboardType,
     String? Function(String?)? validator,
+    ValueChanged<String>? onChanged,
   }) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 16),
@@ -205,6 +235,7 @@ class _AddContactScreenState extends State<AddContactScreen> {
                   borderSide: BorderSide(color: AppColors.border)),
             ),
             validator: validator,
+            onChanged: onChanged,
             autovalidateMode: AutovalidateMode.onUserInteraction,
           ),
         ],

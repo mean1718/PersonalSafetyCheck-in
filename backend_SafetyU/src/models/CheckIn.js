@@ -8,6 +8,21 @@ const checkInSchema = new mongoose.Schema(
             required: true
         },
 
+        trustedContactUser: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: "User",
+            required: false
+        },
+
+        // The accounts selected for this particular session.  Keep the
+        // singular field above for existing records, but use this list for
+        // all newly-created sessions so every selected contact can be
+        // notified and tracked independently.
+        trustedContactUsers: [{
+            type: mongoose.Schema.Types.ObjectId,
+            ref: "User"
+        }],
+
         status: {
             type: String,
             enum: ["active", "completed", "emergency"],

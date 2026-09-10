@@ -4,6 +4,7 @@ import '../theme/app_theme.dart';
 import '../models/contact.dart';
 import '../services/app_session.dart';
 import '../services/trusted_contact_service.dart';
+import '../services/check_in_service.dart';
 import '../widgets/paywall_dialogs.dart';
 import 'add_contact_screen.dart';
 
@@ -51,6 +52,33 @@ class _SelectContactsScreenState extends State<SelectContactsScreen> {
     // "add a friend" empty state update the moment that happens, without
     // needing another tap.
     AppSession.instance.addListener(_onSessionChanged);
+    _loadConfirmedTrustContacts();
+  }
+
+  Future<void> _loadConfirmedTrustContacts() async {
+    try {
+      final contacts = await CheckInService.trustedContacts();
+      for (final contact in contacts) {
+        final userId = contact['userId']?.toString();
+        if (userId == null || userId.isEmpty) continue;
+        AppSession.instance.upsertContact(Contact(
+          id: userId,
+          fullName: contact['name']?.toString() ?? 'SafetyU user',
+          phone: contact['phone']?.toString() ?? '',
+          email: contact['email']?.toString() ?? '',
+          relationship: 'Trusted Contact',
+          status: ContactStatus.friend,
+          tierAssigned: false,
+        ));
+      }
+      if (mounted) setState(() {
+        if (_selectedIds.isEmpty) {
+          _selectedIds.addAll(AppSession.instance.friends.map((c) => c.id));
+        }
+      });
+    } catch (error) {
+      debugPrint('Could not load confirmed trust contacts: $error');
+    }
   }
 
   void _onSessionChanged() {
@@ -117,7 +145,9 @@ class _SelectContactsScreenState extends State<SelectContactsScreen> {
       priority: isMain ? 'primary' : 'secondary',
       name: contact.fullName,
       phone: contact.phone,
+      email: contact.email,
       relationship: contact.relationship,
+      isAvailable: contact.isAvailable,
     ).catchError((e) => debugPrint('Trusted contact sync skipped: $e'));
   }
 

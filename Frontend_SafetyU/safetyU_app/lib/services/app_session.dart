@@ -36,6 +36,9 @@ class AppSession extends ChangeNotifier {
   // experience.
   String? authToken;
   String? backendUserId;
+  // Backend identifier for the session currently being displayed on Home.
+  // It lets the owner reload actual notification recipients and responses.
+  String? activeCheckInId;
 
     // Local file path to the picture the person chose from their own camera
   // or gallery. SafetyU has no backend/cloud storage in this build, so
@@ -217,7 +220,7 @@ class AppSession extends ChangeNotifier {
   // session: up to 2 Main and 2 Other. Going over that shows the upgrade /
   // pay-per-contact paywall instead of silently notifying everyone.
   static const int freeMainContactLimit = 2;
-  static const int freeOtherContactLimit = 2;
+  static const int freeOtherContactLimit = 1;
 
   bool isPro = false;
   int purchasedExtraMainSlots = 0;
@@ -261,6 +264,7 @@ class AppSession extends ChangeNotifier {
     role = UserRole.user;
     authToken = null;
     backendUserId = null;
+    activeCheckInId = null;
     contacts.clear();
     profilePhotoPath = null;
     // Session history, notifications, and incidents intentionally persist
@@ -384,6 +388,26 @@ class AppSession extends ChangeNotifier {
 
   void clearCurrentAlertResponses() {
     currentAlertResponses.clear();
+    notifyListeners();
+  }
+
+  void replaceAlertResponsesFromBackend(List<Map<String, dynamic>> contacts) {
+    currentAlertResponses
+      ..clear()
+      ..addAll(contacts.map((contact) {
+        final status = switch (contact['responseStatus']?.toString()) {
+          'can_help' => ContactResponseStatus.canHelp,
+          'cannot_help' => ContactResponseStatus.cantHelp,
+          _ => ContactResponseStatus.pending,
+        };
+        final notifiedAt = DateTime.tryParse(contact['notifiedAt']?.toString() ?? '') ?? DateTime.now();
+        return ContactResponseState(
+          contactId: contact['userId']?.toString() ?? '',
+          contactName: contact['name']?.toString() ?? 'Unknown contact',
+          status: status,
+          notifiedAt: notifiedAt,
+        );
+      }));
     notifyListeners();
   }
 

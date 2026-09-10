@@ -5,8 +5,10 @@ import '../widgets/app_bottom_nav.dart';
 import '../models/contact.dart';
 import '../services/app_session.dart';
 import '../services/trusted_contact_service.dart';
+import '../services/notification_service.dart';
 import 'add_contact_screen.dart';
 import 'alert_detail_screen.dart';
+import 'incoming_trust_request_card.dart';
 
 /// "Friends" tab — the people who'll actually be notified in an emergency.
 /// A sent request sits under Requests as [ContactStatus.pending] until the
@@ -21,8 +23,14 @@ class TrustedContactsScreen extends StatefulWidget {
 
 class _TrustedContactsScreenState extends State<TrustedContactsScreen> {
   final int _navIndex = 1;
+  List<Map<String, dynamic>> _incomingRequests = [];
+  List<Contact> _confirmedContacts = [];
+  List<Map<String, dynamic>> _safetyAlerts = [];
+  bool _loadingRequests = true;
+  bool _loadingContacts = true;
+  String? _requestLoadError;
 
-  List<Contact> get _friends => AppSession.instance.friends;
+  List<Contact> get _friends => _confirmedContacts;
   List<Contact> get _requests => AppSession.instance.pendingRequests;
 
   @override
@@ -33,6 +41,9 @@ class _TrustedContactsScreenState extends State<TrustedContactsScreen> {
     // on this screen), so this screen needs to listen for that instead of
     // only relying on setState after its own button presses.
     AppSession.instance.addListener(_onSessionChanged);
+    _loadIncomingRequests();
+    _loadConfirmedContacts();
+    _loadSafetyAlerts();
   }
 
   @override
@@ -43,6 +54,97 @@ class _TrustedContactsScreenState extends State<TrustedContactsScreen> {
 
   void _onSessionChanged() {
     if (mounted) setState(() {});
+  }
+
+  Future<void> _loadIncomingRequests() async {
+    try {
+      final requests = await TrustedContactService.receivedTrustRequests();
+      if (mounted) {
+        setState(() {
+          _incomingRequests = requests;
+          _requestLoadError = null;
+          _loadingRequests = false;
+        });
+      }
+    } catch (error) {
+      if (mounted) {
+        setState(() {
+          _requestLoadError = 'Could not load Trust Requests.';
+          _loadingRequests = false;
+        });
+      }
+    }
+  }
+
+  Contact _contactFromApi(Map<String, dynamic> value) => Contact(
+        id: value['_id']?.toString() ?? '',
+        fullName: value['name']?.toString() ?? 'SafetyU user',
+        phone: value['phone']?.toString() ?? '',
+        email: value['email']?.toString() ?? '',
+        relationship: value['relationship']?.toString() ?? 'Trusted Contact',
+        isMainContact: value['priority'] == 'primary',
+        isAvailable: value['availability'] != 'unavailable',
+        status: ContactStatus.friend,
+        tierAssigned: true,
+      );
+
+  Future<void> _loadConfirmedContacts() async {
+    try {
+      final contacts = await TrustedContactService.fetchAll();
+      if (mounted) setState(() {
+        _confirmedContacts = contacts.map(_contactFromApi).toList();
+        _loadingContacts = false;
+      });
+    } catch (_) {
+      if (mounted) setState(() => _loadingContacts = false);
+    }
+  }
+
+  Future<void> _loadSafetyAlerts() async {
+    try {
+      final alerts = await NotificationService.activeSafetyAlerts();
+      if (mounted) setState(() => _safetyAlerts = alerts);
+    } catch (error) {
+      debugPrint('Safety alert load skipped: $error');
+    }
+  }
+
+  Future<void> _respondToSafetyAlert(
+      Map<String, dynamic> alert, String responseStatus) async {
+    final notificationId = alert['notificationId']?.toString();
+    if (notificationId == null) return;
+    try {
+      await NotificationService.respondToSafetyAlert(notificationId, responseStatus);
+      await _loadSafetyAlerts();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Safety alert response sent.')),
+        );
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Unable to send the safety alert response.')),
+        );
+      }
+    }
+  }
+
+  Future<void> _respondToRequest(String id, bool accept) async {
+    try {
+      await TrustedContactService.respondToTrustRequest(id, accept: accept);
+      await _loadIncomingRequests();
+      if (accept) await _loadConfirmedContacts();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(accept ? 'Trust request accepted.' : 'Trust request rejected.')),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Could not update the Trust request.')),
+      );
+    }
   }
 
   void _onNavTap(int index) {
@@ -66,7 +168,19 @@ class _TrustedContactsScreenState extends State<TrustedContactsScreen> {
       MaterialPageRoute(builder: (context) => const AddContactScreen()),
     );
     if (result is Contact) {
-      setState(() => AppSession.instance.sendFriendRequest(result));
+      try {
+        await TrustedContactService.sendTrustRequest(
+        phone: result.phone,
+        relationship: result.relationship,
+        );
+      } catch (_) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Could not send the Trust request.')),
+          );
+        }
+        return;
+      }
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -116,7 +230,7 @@ class _TrustedContactsScreenState extends State<TrustedContactsScreen> {
   Widget build(BuildContext context) {
     final friends = _friends;
     final requests = _requests;
-    final isEmpty = friends.isEmpty && requests.isEmpty;
+    final isEmpty = friends.isEmpty && requests.isEmpty && !_loadingRequests && !_loadingContacts && _incomingRequests.isEmpty && _safetyAlerts.isEmpty;
 
     return Scaffold(
       backgroundColor: AppColors.background,
@@ -145,6 +259,49 @@ class _TrustedContactsScreenState extends State<TrustedContactsScreen> {
                     : ListView(
                         padding: const EdgeInsets.only(bottom: 20),
                         children: [
+                          if (_safetyAlerts.isNotEmpty) ...[
+                            Text('Safety Alerts', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: AppColors.textPrimary)),
+                            const SizedBox(height: 10),
+                            ..._safetyAlerts.map((alert) => Padding(
+                              padding: const EdgeInsets.only(bottom: 12),
+                              child: _SafetyAlertCard(
+                                alert: alert,
+                                onCanHelp: () => _respondToSafetyAlert(alert, 'can_help'),
+                                onCannotHelp: () => _respondToSafetyAlert(alert, 'cannot_help'),
+                              ),
+                            )),
+                          ],
+                          if (_loadingRequests || _loadingContacts)
+                            const Padding(
+                              padding: EdgeInsets.all(20),
+                              child: Center(child: CircularProgressIndicator()),
+                            )
+                          else if (_requestLoadError != null)
+                            Padding(
+                              padding: const EdgeInsets.only(bottom: 12),
+                              child: TextButton(
+                                onPressed: _loadIncomingRequests,
+                                child: Text('Retry loading Trust Requests', style: TextStyle(color: AppColors.danger)),
+                              ),
+                            )
+                          else ...[
+                            Text('Trust Requests', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: AppColors.textPrimary)),
+                            const SizedBox(height: 10),
+                            if (_incomingRequests.isEmpty)
+                              Padding(
+                                padding: const EdgeInsets.only(bottom: 14),
+                                child: Text('No pending Trust Requests', style: TextStyle(fontSize: 12, color: AppColors.textSecondary)),
+                              )
+                            else
+                              ..._incomingRequests.map((request) => Padding(
+                                padding: const EdgeInsets.only(bottom: 12),
+                                child: IncomingTrustRequestCard(
+                                  request: request,
+                                  onConfirm: () => _respondToRequest(request['_id'].toString(), true),
+                                  onReject: () => _respondToRequest(request['_id'].toString(), false),
+                                ),
+                              )),
+                          ],
                           if (requests.isNotEmpty) ...[
                             Text(
                               'Requests',
@@ -193,14 +350,77 @@ class _TrustedContactsScreenState extends State<TrustedContactsScreen> {
       ),
       floatingActionButton: isEmpty
           ? null
-          :FloatingActionButton(
-            onPressed: _addContact,
-            backgroundColor: AppColors.navy,
-            shape: const CircleBorder(),
-            child: const Icon(Icons.add, color: Colors.white, size: 28),
-      ),
+          : FloatingActionButton(
+              onPressed: _addContact,
+              backgroundColor: AppColors.navy,
+              shape: const CircleBorder(),
+              child: const Icon(Icons.add, color: Colors.white, size: 28),
+            ),
       bottomNavigationBar:
           AppBottomNav(currentIndex: _navIndex, onTap: _onNavTap),
+    );
+  }
+}
+
+class _SafetyAlertCard extends StatelessWidget {
+  final Map<String, dynamic> alert;
+  final VoidCallback onCanHelp;
+  final VoidCallback onCannotHelp;
+
+  const _SafetyAlertCard({
+    required this.alert,
+    required this.onCanHelp,
+    required this.onCannotHelp,
+  });
+
+  String _notifiedTime() {
+    final at = DateTime.tryParse(alert['notifiedAt']?.toString() ?? '');
+    if (at == null) return 'Just now';
+    final difference = DateTime.now().difference(at.toLocal());
+    if (difference.inMinutes < 1) return 'Just now';
+    if (difference.inHours < 1) return '${difference.inMinutes}m ago';
+    if (difference.inDays < 1) return '${difference.inHours}h ago';
+    return '${difference.inDays}d ago';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final ownerName = alert['ownerName']?.toString() ?? 'A trusted contact';
+    final status = alert['responseStatus']?.toString() ?? 'pending';
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppColors.dangerLight,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: AppColors.danger.withValues(alpha: 0.35)),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          Icon(Icons.warning_amber_rounded, color: AppColors.danger),
+          const SizedBox(width: 8),
+          Text('Safety Alert', style: TextStyle(fontWeight: FontWeight.w800, color: AppColors.textPrimary)),
+        ]),
+        const SizedBox(height: 8),
+        Text('$ownerName may need your help.', style: TextStyle(color: AppColors.textPrimary)),
+        const SizedBox(height: 3),
+        Text('Started ${_notifiedTime()}', style: TextStyle(fontSize: 11.5, color: AppColors.textSecondary)),
+        if ((alert['message']?.toString() ?? '').isNotEmpty) ...[
+          const SizedBox(height: 4),
+          Text(alert['message'].toString(), style: TextStyle(fontSize: 12, color: AppColors.textSecondary)),
+        ],
+        const SizedBox(height: 12),
+        if (status == 'pending')
+          Row(children: [
+            Expanded(child: OutlinedButton(onPressed: onCannotHelp, child: const Text("I Can't Help"))),
+            const SizedBox(width: 10),
+            Expanded(child: ElevatedButton(onPressed: onCanHelp, child: const Text('I Can Help'))),
+          ])
+        else
+          Text(
+            status == 'can_help' ? 'You responded: I Can Help' : "You responded: I Can't Help",
+            style: TextStyle(fontWeight: FontWeight.w700, color: AppColors.textSecondary),
+          ),
+      ]),
     );
   }
 }
