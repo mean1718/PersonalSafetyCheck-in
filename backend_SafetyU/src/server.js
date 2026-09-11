@@ -5,7 +5,7 @@ const cors = require("cors");
 
 // Load .env from src/config/.env
 dotenv.config({
-    path: path.join(__dirname, "config", ".env")
+  path: path.join(__dirname, "config", ".env"),
 });
 
 // Check if MongoDB URI is loaded
@@ -18,6 +18,8 @@ const trustedContactRoutes = require("./routes/trustedContactRoutes");
 const trustRequestRoutes = require("./routes/trustRequestRoutes");
 const emergencyRoutes = require("./routes/emergencyRoutes");
 const notificationRoutes = require("./routes/notificationRoutes");
+const locationRoutes = require("./routes/locationRoutes");
+const paymentRoutes = require("./routes/paymentRoutes");
 
 const app = express();
 
@@ -35,17 +37,19 @@ app.use("/api/trusted-contacts", trustedContactRoutes);
 app.use("/api/trust-requests", trustRequestRoutes);
 app.use("/api/emergency", emergencyRoutes);
 app.use("/api/notifications", notificationRoutes);
+app.use("/api/location", locationRoutes);
+app.use("/api/payments", paymentRoutes);
 
 // Test route
 app.get("/", (req, res) => {
-    res.json({
-        message: "Personal Safety Check-In API is running"
-    });
+  res.json({
+    message: "Personal Safety Check-In API is running",
+  });
 });
 
 // Server
 const PORT = process.env.PORT || 5000;
 
 app.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
+  console.log(`Server running on port ${PORT}`);
 });
