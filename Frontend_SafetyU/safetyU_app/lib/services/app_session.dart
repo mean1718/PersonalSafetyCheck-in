@@ -267,9 +267,20 @@ class AppSession extends ChangeNotifier {
     activeCheckInId = null;
     contacts.clear();
     profilePhotoPath = null;
-    // Session history, notifications, and incidents intentionally persist
-    // across sign-out in this local-only build so nothing the person did
-    // is lost just from logging out again during testing.
+    // Everything below is per-account state. It used to intentionally
+    // survive sign-out for local-only demo testing, but that meant the
+    // next person who logged in on the same device — e.g. a trusted
+    // contact signing into their own account — would still see the
+    // previous account's alert panel, history, and notifications. Clear
+    // it all so each login starts from a clean slate; real data is always
+    // reloaded from the backend for whoever is actually signed in.
+    currentAlertResponses.clear();
+    sessionHistory.clear();
+    notifications.clear();
+    _chatThreads.clear();
+    activeIncidents.clear();
+    _backendPendingAlertCount = 0;
+    pendingTrustRequestCount = 0;
     notifyListeners();
   }
 
@@ -348,8 +359,33 @@ class AppSession extends ChangeNotifier {
     notifyListeners();
   }
 
+  // Real, unresolved safety alerts from the backend that this account
+  // hasn't responded to yet (Home's "You were notified" card). Kept
+  // separate from the local `notifications` list's isRead tracking since
+  // backend alerts don't have a local read/unread flag of their own —
+  // "unresolved" (pending) is what actually matters for the badge.
+  int _backendPendingAlertCount = 0;
+  void setBackendPendingAlertCount(int count) {
+    if (_backendPendingAlertCount == count) return;
+    _backendPendingAlertCount = count;
+    notifyListeners();
+  }
+
+  // Pending Trust requests sent *to* this account — feeds the Friends
+  // bottom-nav tab badge and the bell badge. Kept as a simple settable
+  // count (not re-fetched here) since it's cheap to refresh from
+  // whichever screen already calls TrustedContactService.receivedTrustRequests().
+  int pendingTrustRequestCount = 0;
+  void setPendingTrustRequestCount(int count) {
+    if (pendingTrustRequestCount == count) return;
+    pendingTrustRequestCount = count;
+    notifyListeners();
+  }
+
   int get unreadNotificationCount =>
-      notifications.where((n) => !n.isRead).length;
+      notifications.where((n) => !n.isRead).length +
+      _backendPendingAlertCount +
+      pendingTrustRequestCount;
 
   void markAllNotificationsRead() {
     if (notifications.isEmpty) return;

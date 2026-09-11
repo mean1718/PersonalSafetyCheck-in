@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_bottom_nav.dart';
 import '../models/contact.dart';
+import '../models/help_request.dart';
 import '../services/app_session.dart';
 import '../services/trusted_contact_service.dart';
 import '../services/notification_service.dart';
@@ -60,6 +61,7 @@ class _TrustedContactsScreenState extends State<TrustedContactsScreen> {
   Future<void> _loadIncomingRequests() async {
     try {
       final requests = await TrustedContactService.receivedTrustRequests();
+      AppSession.instance.setPendingTrustRequestCount(requests.length);
       if (mounted) {
         setState(() {
           _incomingRequests = requests;
@@ -104,7 +106,7 @@ class _TrustedContactsScreenState extends State<TrustedContactsScreen> {
 
   Future<void> _loadSafetyAlerts() async {
     try {
-      final alerts = await NotificationService.activeSafetyAlerts();
+      final alerts = await NotificationService.pendingSafetyAlerts();
       if (mounted) setState(() => _safetyAlerts = alerts);
     } catch (error) {
       debugPrint('Safety alert load skipped: $error');
@@ -233,13 +235,48 @@ class _TrustedContactsScreenState extends State<TrustedContactsScreen> {
   }
 
   void _openRespondFlow(Contact contact) {
-    final request = AppSession.instance.buildHelpRequestFor(contact);
+    // AppSession.buildHelpRequestFor was building this from the signed-in
+    // person's OWN last session — meaning it showed your own name/session
+    // instead of an alert from the friend you tapped. Use that friend's
+    // actual pending alert (already loaded into _safetyAlerts) instead.
+    final matches = _safetyAlerts
+        .where((a) => a['ownerUserId']?.toString() == contact.id)
+        .toList();
+    if (matches.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+            content: Text(
+                'No active safety alert from ${contact.fullName} right now.')),
+      );
+      return;
+    }
+    final alert = matches.first;
+    final request = HelpRequest(
+      requesterName: contact.fullName,
+      requesterPhone: contact.phone,
+      destination: alert['message']?.toString() ?? 'their destination',
+      location: null,
+      distanceKm: null,
+      requestedAt: DateTime.tryParse(alert['notifiedAt']?.toString() ?? '') ??
+          DateTime.now(),
+    );
+    final thisId = alert['notificationId']?.toString();
+    final siblingIds = matches
+        .where((a) => a['notificationId']?.toString() != thisId)
+        .map((a) => a['notificationId']?.toString())
+        .whereType<String>()
+        .toList();
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (_) => AlertDetailScreen(contact: contact, request: request),
+        builder: (_) => AlertDetailScreen(
+          contact: contact,
+          request: request,
+          notificationId: thisId,
+          siblingNotificationIds: siblingIds,
+        ),
       ),
-    );
+    ).then((_) => _loadSafetyAlerts());
   }
 
   @override
@@ -280,24 +317,6 @@ class _TrustedContactsScreenState extends State<TrustedContactsScreen> {
                     : ListView(
                         padding: const EdgeInsets.only(bottom: 20),
                         children: [
-                          if (_safetyAlerts.isNotEmpty) ...[
-                            Text('Safety Alerts',
-                                style: TextStyle(
-                                    fontSize: 13,
-                                    fontWeight: FontWeight.w800,
-                                    color: AppColors.textPrimary)),
-                            const SizedBox(height: 10),
-                            ..._safetyAlerts.map((alert) => Padding(
-                                  padding: const EdgeInsets.only(bottom: 12),
-                                  child: _SafetyAlertCard(
-                                    alert: alert,
-                                    onCanHelp: () => _respondToSafetyAlert(
-                                        alert, 'can_help'),
-                                    onCannotHelp: () => _respondToSafetyAlert(
-                                        alert, 'cannot_help'),
-                                  ),
-                                )),
-                          ],
                           if (_loadingRequests || _loadingContacts)
                             const Padding(
                               padding: EdgeInsets.all(20),
@@ -371,6 +390,11 @@ class _TrustedContactsScreenState extends State<TrustedContactsScreen> {
                                   padding: const EdgeInsets.only(bottom: 12),
                                   child: _FriendCard(
                                     contact: c,
+                                    alertCount: _safetyAlerts
+                                        .where((a) =>
+                                            a['ownerUserId']?.toString() ==
+                                            c.id)
+                                        .length,
                                     onUnfriend: () => _delete(c),
                                     onOpenChat: () => _openChat(c),
                                     onOpenRespond: () => _openRespondFlow(c),
@@ -533,6 +557,7 @@ class _EmptyFriendsState extends StatelessWidget {
 
 class _FriendCard extends StatelessWidget {
   final Contact contact;
+  final int alertCount;
   final VoidCallback onUnfriend;
   final VoidCallback onOpenChat;
   final VoidCallback onOpenRespond;
@@ -541,6 +566,7 @@ class _FriendCard extends StatelessWidget {
 
   const _FriendCard({
     required this.contact,
+    this.alertCount = 0,
     required this.onUnfriend,
     required this.onOpenChat,
     required this.onOpenRespond,
@@ -642,15 +668,46 @@ class _FriendCard extends StatelessWidget {
               const SizedBox(width: 8),
               GestureDetector(
                 onTap: onOpenRespond,
-                child: Container(
-                  width: 34,
-                  height: 34,
-                  decoration: const BoxDecoration(
-                    color: Color(0xFFF5F7FA),
-                    shape: BoxShape.circle,
-                  ),
-                  child: Icon(Icons.notifications_active_outlined,
-                      size: 16, color: AppColors.navy),
+                child: Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    Container(
+                      width: 34,
+                      height: 34,
+                      decoration: const BoxDecoration(
+                        color: Color(0xFFF5F7FA),
+                        shape: BoxShape.circle,
+                      ),
+                      child: Icon(Icons.notifications_active_outlined,
+                          size: 16, color: AppColors.navy),
+                    ),
+                    if (alertCount > 0)
+                      Positioned(
+                        top: -4,
+                        right: -4,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 5, vertical: 1),
+                          constraints:
+                              const BoxConstraints(minWidth: 16, minHeight: 16),
+                          decoration: BoxDecoration(
+                            color: AppColors.danger,
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(color: AppColors.card, width: 2),
+                          ),
+                          child: Text(
+                            alertCount > 9 ? '9+' : '$alertCount',
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 9,
+                              fontWeight: FontWeight.w800,
+                              height: 1.2,
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
                 ),
               ),
               const SizedBox(width: 8),

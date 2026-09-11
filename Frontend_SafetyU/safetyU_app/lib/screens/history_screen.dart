@@ -3,6 +3,7 @@ import '../theme/app_theme.dart';
 import '../widgets/app_bottom_nav.dart';
 import '../models/session_record.dart';
 import '../services/app_session.dart';
+import '../services/check_in_service.dart';
 
 class HistoryScreen extends StatefulWidget {
   const HistoryScreen({super.key});
@@ -14,6 +15,59 @@ class HistoryScreen extends StatefulWidget {
 class _HistoryScreenState extends State<HistoryScreen> {
   final int _navIndex = 2;
   SessionOutcome? _filter; // null = All
+  bool _loadingBackendHistory = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadBackendHistory();
+  }
+
+  Future<void> _loadBackendHistory() async {
+    if (_loadingBackendHistory) return;
+    _loadingBackendHistory = true;
+    try {
+      final checkIns = await CheckInService.myCheckIns();
+      final existingIds =
+          AppSession.instance.sessionHistory.map((r) => r.id).toSet();
+      for (final checkIn in checkIns) {
+        final id = checkIn['_id']?.toString();
+        if (id == null || existingIds.contains(id)) continue;
+        final status = checkIn['status']?.toString();
+        // Still in progress — not a resolved outcome yet, so it doesn't
+        // belong in the Safe/Delay/SOS history list.
+        if (status == 'active') continue;
+        final outcome =
+            status == 'emergency' ? SessionOutcome.sos : SessionOutcome.safe;
+        final rawMessage = checkIn['message']?.toString() ?? '';
+        const prefix = 'Safety session to ';
+        final destination = rawMessage.startsWith(prefix)
+            ? rawMessage.substring(prefix.length)
+            : (rawMessage.isNotEmpty ? rawMessage : 'Unknown destination');
+        final startedAt =
+            DateTime.tryParse(checkIn['startedAt']?.toString() ?? '');
+        if (startedAt == null) continue;
+        final endedAt =
+            DateTime.tryParse(checkIn['completedAt']?.toString() ?? '');
+        AppSession.instance.addSessionRecord(SessionRecord(
+          id: id,
+          destination: destination,
+          startedAt: startedAt,
+          endedAt: endedAt,
+          outcome: outcome,
+        ));
+      }
+      // Newest first, regardless of local vs. just-fetched ordering.
+      AppSession.instance.sessionHistory
+          .sort((a, b) => b.startedAt.compareTo(a.startedAt));
+      if (mounted) setState(() {});
+    } catch (_) {
+      // Offline / not reachable — local-only history (this login session's
+      // own activity) still shows.
+    } finally {
+      _loadingBackendHistory = false;
+    }
+  }
 
   void _onNavTap(int index) {
     if (index == _navIndex) return;

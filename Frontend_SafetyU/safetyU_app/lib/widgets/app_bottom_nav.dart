@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
+import '../services/app_session.dart';
 
 class _NavItem {
   final IconData icon;
@@ -55,11 +56,61 @@ class AppBottomNav extends StatelessWidget {
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Icon(
-                        item.icon,
-                        size: 24,
-                        color: active ? AppColors.navy : AppColors.textMuted,
-                      ),
+                      i == 1
+                          ? AnimatedBuilder(
+                              animation: AppSession.instance,
+                              builder: (context, _) {
+                                final count = AppSession
+                                    .instance.pendingTrustRequestCount;
+                                return Stack(
+                                  clipBehavior: Clip.none,
+                                  children: [
+                                    Icon(
+                                      item.icon,
+                                      size: 24,
+                                      color: active
+                                          ? AppColors.navy
+                                          : AppColors.textMuted,
+                                    ),
+                                    if (count > 0)
+                                      Positioned(
+                                        top: -4,
+                                        right: -6,
+                                        child: Container(
+                                          padding: const EdgeInsets.symmetric(
+                                              horizontal: 5, vertical: 1),
+                                          constraints: const BoxConstraints(
+                                              minWidth: 16, minHeight: 16),
+                                          decoration: BoxDecoration(
+                                            color: AppColors.danger,
+                                            borderRadius:
+                                                BorderRadius.circular(10),
+                                            border: Border.all(
+                                                color: AppColors.card,
+                                                width: 2),
+                                          ),
+                                          child: Text(
+                                            count > 9 ? '9+' : '$count',
+                                            textAlign: TextAlign.center,
+                                            style: const TextStyle(
+                                              color: Colors.white,
+                                              fontSize: 9,
+                                              fontWeight: FontWeight.w800,
+                                              height: 1.2,
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                  ],
+                                );
+                              },
+                            )
+                          : Icon(
+                              item.icon,
+                              size: 24,
+                              color:
+                                  active ? AppColors.navy : AppColors.textMuted,
+                            ),
                       const SizedBox(height: 4),
                       Text(
                         item.label,

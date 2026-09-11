@@ -3,6 +3,8 @@ import '../theme/app_theme.dart';
 import '../models/app_notification.dart';
 import '../services/app_session.dart';
 import '../services/notification_service.dart';
+import '../services/trusted_contact_service.dart';
+import 'incoming_trust_request_card.dart';
 
 class NotificationsScreen extends StatefulWidget {
   const NotificationsScreen({super.key});
@@ -13,6 +15,7 @@ class NotificationsScreen extends StatefulWidget {
 
 class _NotificationsScreenState extends State<NotificationsScreen> {
   List<Map<String, dynamic>> _backendNotifications = [];
+  List<Map<String, dynamic>> _trustRequests = [];
 
   @override
   void initState() {
@@ -23,6 +26,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
       AppSession.instance.markAllNotificationsRead();
     });
     _loadBackendNotifications();
+    _loadTrustRequests();
   }
 
   Future<void> _loadBackendNotifications() async {
@@ -30,6 +34,35 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
       final notifications = await NotificationService.fetchAll();
       if (mounted) setState(() => _backendNotifications = notifications);
     } catch (_) {}
+  }
+
+  Future<void> _loadTrustRequests() async {
+    try {
+      final requests = await TrustedContactService.receivedTrustRequests();
+      AppSession.instance.setPendingTrustRequestCount(requests.length);
+      if (mounted) setState(() => _trustRequests = requests);
+    } catch (_) {}
+  }
+
+  Future<void> _respondToTrustRequest(String id, bool accept) async {
+    try {
+      await TrustedContactService.respondToTrustRequest(id, accept: accept);
+      await _loadTrustRequests();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+              content: Text(accept
+                  ? 'Trust request accepted.'
+                  : 'Trust request rejected.')),
+        );
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not update the Trust request.')),
+        );
+      }
+    }
   }
 
   Future<void> _respondToSafetyAlert(
@@ -53,6 +86,16 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
         );
       }
     }
+  }
+
+  String _relativeTime(String? iso) {
+    final at = DateTime.tryParse(iso ?? '');
+    if (at == null) return '';
+    final diff = DateTime.now().difference(at);
+    if (diff.inSeconds < 60) return 'Just now';
+    if (diff.inMinutes < 60) return '${diff.inMinutes} min ago';
+    if (diff.inHours < 24) return '${diff.inHours} h ago';
+    return '${diff.inDays} d ago';
   }
 
   Color _tagColor(NotificationKind kind) {
@@ -79,6 +122,14 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // These two lists come from different places and must never hide one
+    // another: `notifications` is this device's local activity log (e.g.
+    // "panha can help" shown to the session owner), while
+    // `_backendNotifications` is this account's real, per-user alerts from
+    // the server (e.g. "Dan started a safety session" shown to panha).
+    // Previously whichever list was non-empty first won, which meant a
+    // signed-in contact with zero local activity but a real pending alert
+    // would silently see nothing once *any* local entry existed.
     final notifications = AppSession.instance.notifications;
 
     return Scaffold(
@@ -111,125 +162,199 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
         ],
       ),
       body: SafeArea(
-          child: notifications.isEmpty
-            ? (_backendNotifications.isEmpty
-                ? const _EmptyNotifications()
-                : ListView.separated(
-                    padding: const EdgeInsets.all(16),
-                    itemCount: _backendNotifications.length,
-                    separatorBuilder: (_, __) => const SizedBox(height: 10),
-                    itemBuilder: (context, index) {
-                      final notification = _backendNotifications[index];
-                      return InkWell(
+        child: (notifications.isEmpty &&
+                _backendNotifications.isEmpty &&
+                _trustRequests.isEmpty)
+            ? const _EmptyNotifications()
+            : ListView(
+                padding: const EdgeInsets.all(16),
+                children: [
+                  if (_trustRequests.isNotEmpty) ...[
+                    Text('Friend requests',
+                        style: TextStyle(
+                            fontSize: 12.5,
+                            fontWeight: FontWeight.w800,
+                            color: AppColors.textSecondary)),
+                    const SizedBox(height: 10),
+                    for (final request in _trustRequests) ...[
+                      IncomingTrustRequestCard(
+                        request: request,
+                        onConfirm: () => _respondToTrustRequest(
+                            request['_id'].toString(), true),
+                        onReject: () => _respondToTrustRequest(
+                            request['_id'].toString(), false),
+                      ),
+                      const SizedBox(height: 10),
+                    ],
+                    const SizedBox(height: 8),
+                  ],
+                  if (_backendNotifications.isNotEmpty) ...[
+                    Text('Your alerts',
+                        style: TextStyle(
+                            fontSize: 12.5,
+                            fontWeight: FontWeight.w800,
+                            color: AppColors.textSecondary)),
+                    const SizedBox(height: 10),
+                    for (final notification in _backendNotifications) ...[
+                      InkWell(
                         onTap: () async {
                           final id = notification['_id']?.toString();
-                          if (id != null) await NotificationService.markRead(id);
+                          if (id != null) {
+                            await NotificationService.markRead(id);
+                          }
                           await _loadBackendNotifications();
                         },
                         child: Container(
                           padding: const EdgeInsets.all(14),
-                          decoration: BoxDecoration(color: AppColors.card, borderRadius: BorderRadius.circular(14), border: Border.all(color: AppColors.border)),
-                          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                            Text(notification['title']?.toString() ?? 'SafetyU Alert', style: TextStyle(fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
-                            const SizedBox(height: 6),
-                            Text(notification['message']?.toString() ?? '', style: TextStyle(color: AppColors.textSecondary)),
-                            if (notification['type'] == 'safety_alert' &&
-                                notification['responseStatus'] == 'pending') ...[
-                              const SizedBox(height: 12),
-                              Row(children: [
-                                Expanded(child: OutlinedButton(
-                                  onPressed: () => _respondToSafetyAlert(notification, 'cannot_help'),
-                                  child: const Text("I can't help"),
-                                )),
-                                const SizedBox(width: 8),
-                                Expanded(child: ElevatedButton(
-                                  onPressed: () => _respondToSafetyAlert(notification, 'can_help'),
-                                  child: const Text('I can help'),
-                                )),
+                          decoration: BoxDecoration(
+                              color: AppColors.card,
+                              borderRadius: BorderRadius.circular(14),
+                              border: Border.all(color: AppColors.border)),
+                          child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                    notification['title']?.toString() ??
+                                        'SafetyU Alert',
+                                    style: TextStyle(
+                                        fontWeight: FontWeight.w700,
+                                        color: AppColors.textPrimary)),
+                                const SizedBox(height: 6),
+                                Text(notification['message']?.toString() ?? '',
+                                    style: TextStyle(
+                                        color: AppColors.textSecondary)),
+                                const SizedBox(height: 6),
+                                Text(
+                                  _relativeTime(
+                                      notification['createdAt']?.toString()),
+                                  style: TextStyle(
+                                      fontSize: 11, color: AppColors.textMuted),
+                                ),
+                                if ((notification['checkIn']
+                                        as Map<String, dynamic>?)?['status'] ==
+                                    'completed') ...[
+                                  const SizedBox(height: 8),
+                                  Row(children: [
+                                    Icon(Icons.check_circle,
+                                        size: 15, color: AppColors.success),
+                                    const SizedBox(width: 6),
+                                    Text(
+                                      '${(notification['sender'] as Map<String, dynamic>?)?['name'] ?? 'They'} confirmed they\'re safe now.',
+                                      style: TextStyle(
+                                          color: AppColors.textSecondary),
+                                    ),
+                                  ]),
+                                ] else if (notification['type'] ==
+                                        'safety_alert' &&
+                                    notification['responseStatus'] ==
+                                        'pending') ...[
+                                  const SizedBox(height: 12),
+                                  Row(children: [
+                                    Expanded(
+                                        child: OutlinedButton(
+                                      onPressed: () => _respondToSafetyAlert(
+                                          notification, 'cannot_help'),
+                                      child: const Text("I can't help"),
+                                    )),
+                                    const SizedBox(width: 8),
+                                    Expanded(
+                                        child: ElevatedButton(
+                                      onPressed: () => _respondToSafetyAlert(
+                                          notification, 'can_help'),
+                                      child: const Text('I can help'),
+                                    )),
+                                  ]),
+                                ] else if (notification['type'] ==
+                                    'safety_alert') ...[
+                                  const SizedBox(height: 8),
+                                  Text(
+                                    notification['responseStatus'] == 'can_help'
+                                        ? 'You responded: I can help'
+                                        : "You responded: I can't help",
+                                    style: TextStyle(
+                                        color: AppColors.textSecondary),
+                                  ),
+                                ],
                               ]),
-                            ] else if (notification['type'] == 'safety_alert') ...[
-                              const SizedBox(height: 8),
-                              Text(
-                                notification['responseStatus'] == 'can_help'
-                                    ? 'You responded: I can help'
-                                    : "You responded: I can't help",
-                                style: TextStyle(color: AppColors.textSecondary),
-                              ),
-                            ],
-                          ]),
                         ),
-                      );
-                    },
-                  ))
-            : ListView.separated(
-                padding: const EdgeInsets.all(16),
-                itemCount: notifications.length,
-                separatorBuilder: (_, __) => const SizedBox(height: 10),
-                itemBuilder: (context, index) {
-                  final n = notifications[index];
-                  // These notifications live on the *alerter's* own device —
-                  // they're updates about what a trusted contact did
-                  // ("accepted your request", "can help"), not an alert for
-                  // that contact to respond to. Opening AlertDetailScreen
-                  // here would show the alerter the screen meant for the
-                  // *contact* to decide whether they can help — backwards.
-                  // So these tiles are informational only; nothing to tap.
-                  return Container(
-                      padding: const EdgeInsets.all(14),
-                      decoration: BoxDecoration(
-                        color: AppColors.card,
-                        borderRadius: BorderRadius.circular(14),
-                        border: Border.all(color: AppColors.border),
                       ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              Expanded(
-                                child: Text(
-                                  n.title,
-                                  style: TextStyle(
-                                      fontSize: 13.5,
-                                      fontWeight: FontWeight.w700,
-                                      color: AppColors.textPrimary),
+                      const SizedBox(height: 10),
+                    ],
+                    const SizedBox(height: 8),
+                  ],
+                  if (notifications.isNotEmpty) ...[
+                    Text('Activity',
+                        style: TextStyle(
+                            fontSize: 12.5,
+                            fontWeight: FontWeight.w800,
+                            color: AppColors.textSecondary)),
+                    const SizedBox(height: 10),
+                    for (final n in notifications) ...[
+                      // These notifications live on the *alerter's* own
+                      // device — they're updates about what a trusted
+                      // contact did ("accepted your request", "can
+                      // help"), not an alert for that contact to respond
+                      // to. So these tiles are informational only;
+                      // nothing to tap.
+                      Container(
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          color: AppColors.card,
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(color: AppColors.border),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    n.title,
+                                    style: TextStyle(
+                                        fontSize: 13.5,
+                                        fontWeight: FontWeight.w700,
+                                        color: AppColors.textPrimary),
+                                  ),
                                 ),
-                              ),
-                              Container(
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 8, vertical: 3),
-                                decoration: BoxDecoration(
-                                  color: _tagBg(n.kind),
-                                  borderRadius: BorderRadius.circular(20),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 8, vertical: 3),
+                                  decoration: BoxDecoration(
+                                    color: _tagBg(n.kind),
+                                    borderRadius: BorderRadius.circular(20),
+                                  ),
+                                  child: Text(
+                                    n.kind.tagLabel,
+                                    style: TextStyle(
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.w700,
+                                        color: _tagColor(n.kind)),
+                                  ),
                                 ),
-                                child: Text(
-                                  n.kind.tagLabel,
-                                  style: TextStyle(
-                                      fontSize: 10,
-                                      fontWeight: FontWeight.w700,
-                                      color: _tagColor(n.kind)),
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 6),
-                          Text(
-                            n.body,
-                            style: TextStyle(
-                                fontSize: 12.5,
-                                color: AppColors.textSecondary,
-                                height: 1.35),
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            n.relativeTime,
-                            style: TextStyle(
-                                fontSize: 11, color: AppColors.textMuted),
-                          ),
-                        ],
+                              ],
+                            ),
+                            const SizedBox(height: 6),
+                            Text(
+                              n.body,
+                              style: TextStyle(
+                                  fontSize: 12.5,
+                                  color: AppColors.textSecondary,
+                                  height: 1.35),
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              n.relativeTime,
+                              style: TextStyle(
+                                  fontSize: 11, color: AppColors.textMuted),
+                            ),
+                          ],
+                        ),
                       ),
-                  );
-                },
+                      const SizedBox(height: 10),
+                    ],
+                  ],
+                ],
               ),
       ),
     );

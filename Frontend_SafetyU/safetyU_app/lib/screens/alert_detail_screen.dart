@@ -6,20 +6,39 @@ import '../models/contact.dart';
 import '../models/help_request.dart';
 import '../models/contact_response_state.dart';
 import '../services/app_session.dart';
+import '../services/notification_service.dart';
 import 'alert_response_result_screen.dart';
 
 /// "Alert detail" — what a trusted contact sees when they open a safety
 /// session alert. They decide right here whether they can help — there's
 /// no separate "Can you Help?" middle screen anymore.
-class AlertDetailScreen extends StatelessWidget {
+class AlertDetailScreen extends StatefulWidget {
   final Contact contact;
   final HelpRequest request;
+  // Set when this screen was opened from a real backend alert (Home's
+  // incoming-alert card). When present, responding here actually calls
+  // PUT /notifications/:id/response so the session owner sees the real
+  // response — not just a local-only update on this device.
+  final String? notificationId;
+  // Other still-pending alerts from the same sender (repeated/duplicate
+  // test sessions pile these up fast) — resolved with the same outcome
+  // the moment this one is, so she never has to tap through each one.
+  final List<String> siblingNotificationIds;
 
   const AlertDetailScreen({
     super.key,
     required this.contact,
     required this.request,
+    this.notificationId,
+    this.siblingNotificationIds = const [],
   });
+
+  @override
+  State<AlertDetailScreen> createState() => _AlertDetailScreenState();
+}
+
+class _AlertDetailScreenState extends State<AlertDetailScreen> {
+  bool _sending = false;
 
   String _formatClock(DateTime t) {
     final hour24 = t.hour;
@@ -29,9 +48,39 @@ class AlertDetailScreen extends StatelessWidget {
     return '$hour12:$minute $period';
   }
 
-  void _respond(BuildContext context, AlertResponseOutcome outcome) {
+  Future<void> _respond(
+      BuildContext context, AlertResponseOutcome outcome) async {
+    if (_sending) return;
+    final notificationId = widget.notificationId;
+    if (notificationId != null) {
+      setState(() => _sending = true);
+      final responseStatus =
+          outcome == AlertResponseOutcome.canHelp ? 'can_help' : 'cannot_help';
+      try {
+        await NotificationService.respondToSafetyAlert(
+            notificationId, responseStatus);
+      } catch (_) {
+        if (mounted) {
+          setState(() => _sending = false);
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+                content: Text('Could not send your response. Try again.')),
+          );
+        }
+        return;
+      }
+      // Best-effort — if one of these fails, it just stays pending and
+      // she can resolve it normally later; it doesn't block this response.
+      for (final siblingId in widget.siblingNotificationIds) {
+        try {
+          await NotificationService.respondToSafetyAlert(
+              siblingId, responseStatus);
+        } catch (_) {}
+      }
+    }
+
     AppSession.instance.recordContactOutcome(
-      contact.id,
+      widget.contact.id,
       outcome == AlertResponseOutcome.canHelp
           ? ContactResponseStatus.canHelp
           : ContactResponseStatus.cantHelp,
@@ -39,14 +88,16 @@ class AlertDetailScreen extends StatelessWidget {
     if (outcome == AlertResponseOutcome.canHelp) {
       // Let every other contact who was also alerted (and hasn't answered
       // yet) know someone's already on it, so they don't all show up too.
-      AppSession.instance.notifyOthersHelping(contact.id, contact.fullName);
+      AppSession.instance
+          .notifyOthersHelping(widget.contact.id, widget.contact.fullName);
     }
-    Navigator.push(
+    if (!mounted) return;
+    Navigator.pushReplacement(
       context,
       MaterialPageRoute(
         builder: (_) => AlertResponseResultScreen(
-          contact: contact,
-          request: request,
+          contact: widget.contact,
+          request: widget.request,
           outcome: outcome,
         ),
       ),
@@ -55,6 +106,8 @@ class AlertDetailScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final contact = widget.contact;
+    final request = widget.request;
     final location = request.location;
     final distanceLabel = request.distanceKm != null
         ? '${request.distanceKm!.toStringAsFixed(1)} km'
