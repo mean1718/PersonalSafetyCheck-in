@@ -9,6 +9,7 @@ import '../services/notification_service.dart';
 import 'add_contact_screen.dart';
 import 'alert_detail_screen.dart';
 import 'incoming_trust_request_card.dart';
+import 'live_location_map_screen.dart';
 
 /// "Friends" tab — the people who'll actually be notified in an emergency.
 /// A sent request sits under Requests as [ContactStatus.pending] until the
@@ -91,10 +92,11 @@ class _TrustedContactsScreenState extends State<TrustedContactsScreen> {
   Future<void> _loadConfirmedContacts() async {
     try {
       final contacts = await TrustedContactService.fetchAll();
-      if (mounted) setState(() {
-        _confirmedContacts = contacts.map(_contactFromApi).toList();
-        _loadingContacts = false;
-      });
+      if (mounted)
+        setState(() {
+          _confirmedContacts = contacts.map(_contactFromApi).toList();
+          _loadingContacts = false;
+        });
     } catch (_) {
       if (mounted) setState(() => _loadingContacts = false);
     }
@@ -114,7 +116,8 @@ class _TrustedContactsScreenState extends State<TrustedContactsScreen> {
     final notificationId = alert['notificationId']?.toString();
     if (notificationId == null) return;
     try {
-      await NotificationService.respondToSafetyAlert(notificationId, responseStatus);
+      await NotificationService.respondToSafetyAlert(
+          notificationId, responseStatus);
       await _loadSafetyAlerts();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -124,7 +127,8 @@ class _TrustedContactsScreenState extends State<TrustedContactsScreen> {
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Unable to send the safety alert response.')),
+          const SnackBar(
+              content: Text('Unable to send the safety alert response.')),
         );
       }
     }
@@ -137,7 +141,10 @@ class _TrustedContactsScreenState extends State<TrustedContactsScreen> {
       if (accept) await _loadConfirmedContacts();
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(accept ? 'Trust request accepted.' : 'Trust request rejected.')),
+        SnackBar(
+            content: Text(accept
+                ? 'Trust request accepted.'
+                : 'Trust request rejected.')),
       );
     } catch (_) {
       if (!mounted) return;
@@ -170,8 +177,8 @@ class _TrustedContactsScreenState extends State<TrustedContactsScreen> {
     if (result is Contact) {
       try {
         await TrustedContactService.sendTrustRequest(
-        phone: result.phone,
-        relationship: result.relationship,
+          phone: result.phone,
+          relationship: result.relationship,
         );
       } catch (_) {
         if (mounted) {
@@ -202,6 +209,15 @@ class _TrustedContactsScreenState extends State<TrustedContactsScreen> {
     }
   }
 
+  void _openLiveLocation(Contact contact) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => LiveLocationMapScreen(focusContactId: contact.id),
+      ),
+    );
+  }
+
   void _delete(Contact contact) {
     setState(() => AppSession.instance.removeContact(contact.id));
     if (contact.tierAssigned) {
@@ -230,7 +246,12 @@ class _TrustedContactsScreenState extends State<TrustedContactsScreen> {
   Widget build(BuildContext context) {
     final friends = _friends;
     final requests = _requests;
-    final isEmpty = friends.isEmpty && requests.isEmpty && !_loadingRequests && !_loadingContacts && _incomingRequests.isEmpty && _safetyAlerts.isEmpty;
+    final isEmpty = friends.isEmpty &&
+        requests.isEmpty &&
+        !_loadingRequests &&
+        !_loadingContacts &&
+        _incomingRequests.isEmpty &&
+        _safetyAlerts.isEmpty;
 
     return Scaffold(
       backgroundColor: AppColors.background,
@@ -260,16 +281,22 @@ class _TrustedContactsScreenState extends State<TrustedContactsScreen> {
                         padding: const EdgeInsets.only(bottom: 20),
                         children: [
                           if (_safetyAlerts.isNotEmpty) ...[
-                            Text('Safety Alerts', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: AppColors.textPrimary)),
+                            Text('Safety Alerts',
+                                style: TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w800,
+                                    color: AppColors.textPrimary)),
                             const SizedBox(height: 10),
                             ..._safetyAlerts.map((alert) => Padding(
-                              padding: const EdgeInsets.only(bottom: 12),
-                              child: _SafetyAlertCard(
-                                alert: alert,
-                                onCanHelp: () => _respondToSafetyAlert(alert, 'can_help'),
-                                onCannotHelp: () => _respondToSafetyAlert(alert, 'cannot_help'),
-                              ),
-                            )),
+                                  padding: const EdgeInsets.only(bottom: 12),
+                                  child: _SafetyAlertCard(
+                                    alert: alert,
+                                    onCanHelp: () => _respondToSafetyAlert(
+                                        alert, 'can_help'),
+                                    onCannotHelp: () => _respondToSafetyAlert(
+                                        alert, 'cannot_help'),
+                                  ),
+                                )),
                           ],
                           if (_loadingRequests || _loadingContacts)
                             const Padding(
@@ -281,26 +308,36 @@ class _TrustedContactsScreenState extends State<TrustedContactsScreen> {
                               padding: const EdgeInsets.only(bottom: 12),
                               child: TextButton(
                                 onPressed: _loadIncomingRequests,
-                                child: Text('Retry loading Trust Requests', style: TextStyle(color: AppColors.danger)),
+                                child: Text('Retry loading Trust Requests',
+                                    style: TextStyle(color: AppColors.danger)),
                               ),
                             )
                           else ...[
-                            Text('Trust Requests', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: AppColors.textPrimary)),
+                            Text('Trust Requests',
+                                style: TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w800,
+                                    color: AppColors.textPrimary)),
                             const SizedBox(height: 10),
                             if (_incomingRequests.isEmpty)
                               Padding(
                                 padding: const EdgeInsets.only(bottom: 14),
-                                child: Text('No pending Trust Requests', style: TextStyle(fontSize: 12, color: AppColors.textSecondary)),
+                                child: Text('No pending Trust Requests',
+                                    style: TextStyle(
+                                        fontSize: 12,
+                                        color: AppColors.textSecondary)),
                               )
                             else
                               ..._incomingRequests.map((request) => Padding(
-                                padding: const EdgeInsets.only(bottom: 12),
-                                child: IncomingTrustRequestCard(
-                                  request: request,
-                                  onConfirm: () => _respondToRequest(request['_id'].toString(), true),
-                                  onReject: () => _respondToRequest(request['_id'].toString(), false),
-                                ),
-                              )),
+                                    padding: const EdgeInsets.only(bottom: 12),
+                                    child: IncomingTrustRequestCard(
+                                      request: request,
+                                      onConfirm: () => _respondToRequest(
+                                          request['_id'].toString(), true),
+                                      onReject: () => _respondToRequest(
+                                          request['_id'].toString(), false),
+                                    ),
+                                  )),
                           ],
                           if (requests.isNotEmpty) ...[
                             Text(
@@ -338,6 +375,7 @@ class _TrustedContactsScreenState extends State<TrustedContactsScreen> {
                                     onOpenChat: () => _openChat(c),
                                     onOpenRespond: () => _openRespondFlow(c),
                                     onEdit: () => _openEditScreen(c),
+                                    onLocate: () => _openLiveLocation(c),
                                   ),
                                 )),
                           ],
@@ -398,27 +436,40 @@ class _SafetyAlertCard extends StatelessWidget {
         Row(children: [
           Icon(Icons.warning_amber_rounded, color: AppColors.danger),
           const SizedBox(width: 8),
-          Text('Safety Alert', style: TextStyle(fontWeight: FontWeight.w800, color: AppColors.textPrimary)),
+          Text('Safety Alert',
+              style: TextStyle(
+                  fontWeight: FontWeight.w800, color: AppColors.textPrimary)),
         ]),
         const SizedBox(height: 8),
-        Text('$ownerName may need your help.', style: TextStyle(color: AppColors.textPrimary)),
+        Text('$ownerName may need your help.',
+            style: TextStyle(color: AppColors.textPrimary)),
         const SizedBox(height: 3),
-        Text('Started ${_notifiedTime()}', style: TextStyle(fontSize: 11.5, color: AppColors.textSecondary)),
+        Text('Started ${_notifiedTime()}',
+            style: TextStyle(fontSize: 11.5, color: AppColors.textSecondary)),
         if ((alert['message']?.toString() ?? '').isNotEmpty) ...[
           const SizedBox(height: 4),
-          Text(alert['message'].toString(), style: TextStyle(fontSize: 12, color: AppColors.textSecondary)),
+          Text(alert['message'].toString(),
+              style: TextStyle(fontSize: 12, color: AppColors.textSecondary)),
         ],
         const SizedBox(height: 12),
         if (status == 'pending')
           Row(children: [
-            Expanded(child: OutlinedButton(onPressed: onCannotHelp, child: const Text("I Can't Help"))),
+            Expanded(
+                child: OutlinedButton(
+                    onPressed: onCannotHelp,
+                    child: const Text("I Can't Help"))),
             const SizedBox(width: 10),
-            Expanded(child: ElevatedButton(onPressed: onCanHelp, child: const Text('I Can Help'))),
+            Expanded(
+                child: ElevatedButton(
+                    onPressed: onCanHelp, child: const Text('I Can Help'))),
           ])
         else
           Text(
-            status == 'can_help' ? 'You responded: I Can Help' : "You responded: I Can't Help",
-            style: TextStyle(fontWeight: FontWeight.w700, color: AppColors.textSecondary),
+            status == 'can_help'
+                ? 'You responded: I Can Help'
+                : "You responded: I Can't Help",
+            style: TextStyle(
+                fontWeight: FontWeight.w700, color: AppColors.textSecondary),
           ),
       ]),
     );
@@ -486,6 +537,7 @@ class _FriendCard extends StatelessWidget {
   final VoidCallback onOpenChat;
   final VoidCallback onOpenRespond;
   final VoidCallback onEdit;
+  final VoidCallback onLocate;
 
   const _FriendCard({
     required this.contact,
@@ -493,6 +545,7 @@ class _FriendCard extends StatelessWidget {
     required this.onOpenChat,
     required this.onOpenRespond,
     required this.onEdit,
+    required this.onLocate,
   });
 
   @override
@@ -612,6 +665,20 @@ class _FriendCard extends StatelessWidget {
                   ),
                   child:
                       Icon(Icons.edit_square, size: 16, color: AppColors.navy),
+                ),
+              ),
+              const SizedBox(width: 8),
+              GestureDetector(
+                onTap: onLocate,
+                child: Container(
+                  width: 34,
+                  height: 34,
+                  decoration: const BoxDecoration(
+                    color: Color(0xFFF5F7FA),
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(Icons.location_on_outlined,
+                      size: 16, color: AppColors.navy),
                 ),
               ),
               const Spacer(),
