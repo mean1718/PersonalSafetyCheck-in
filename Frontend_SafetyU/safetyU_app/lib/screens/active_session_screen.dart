@@ -1022,8 +1022,8 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
                         children: [
                           Text(
                             _stage == _EscalationStage.main
-                                ? 'Escalates to other contacts in'
-                                : 'Escalates to Emergency Responders in',
+                                ? 'We will alert your other contacts in'
+                                : 'We will alert Emergency Responders in',
                             style: TextStyle(
                                 fontSize: 12,
                                 color: AppColors.textSecondary,
@@ -1082,9 +1082,9 @@ class _EscalationBanner extends StatelessWidget {
       title = 'Time is up!';
       subtitle = 'Are you safe? Your main contacts have been notified.';
     } else {
-      title = 'Escalating';
+      title = 'Still no response';
       subtitle =
-          'No confirmation yet — your other contacts have been notified.';
+          "You haven't confirmed you're safe yet — your other contacts have been told.";
     }
 
     return Container(

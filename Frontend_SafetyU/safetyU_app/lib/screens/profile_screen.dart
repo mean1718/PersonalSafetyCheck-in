@@ -302,7 +302,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               value: session.language,
               onTap: () => _pickOption(
                   'Language',
-                  const ['English', 'Khmer'],
+                  const ['English'],
                   session.language,
                   (v) => setState(() => session.language = v)),
             ),

@@ -1,10 +1,8 @@
 import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
 import '../models/app_notification.dart';
-import '../models/contact.dart';
 import '../services/app_session.dart';
 import '../services/notification_service.dart';
-import 'alert_detail_screen.dart';
 
 class NotificationsScreen extends StatefulWidget {
   const NotificationsScreen({super.key});
@@ -169,28 +167,14 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                 separatorBuilder: (_, __) => const SizedBox(height: 10),
                 itemBuilder: (context, index) {
                   final n = notifications[index];
-                  final matchedContact =
-                      n.kind == NotificationKind.trustedContact
-                          ? _findContactByName(n.title)
-                          : null;
-                  return GestureDetector(
-                    behavior: HitTestBehavior.opaque,
-                    onTap: matchedContact == null
-                        ? null
-                        : () {
-                            final request = AppSession.instance
-                                .buildHelpRequestFor(matchedContact);
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) => AlertDetailScreen(
-                                  contact: matchedContact,
-                                  request: request,
-                                ),
-                              ),
-                            );
-                          },
-                    child: Container(
+                  // These notifications live on the *alerter's* own device —
+                  // they're updates about what a trusted contact did
+                  // ("accepted your request", "can help"), not an alert for
+                  // that contact to respond to. Opening AlertDetailScreen
+                  // here would show the alerter the screen meant for the
+                  // *contact* to decide whether they can help — backwards.
+                  // So these tiles are informational only; nothing to tap.
+                  return Container(
                       padding: const EdgeInsets.all(14),
                       decoration: BoxDecoration(
                         color: AppColors.card,
@@ -244,24 +228,11 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                           ),
                         ],
                       ),
-                    ),
                   );
                 },
               ),
       ),
     );
-  }
-
-  /// Best-effort match from a notification's title back to a real trusted
-  /// contact, so tapping a "your contact was alerted" notification can open
-  /// the same respond flow that contact would see. Returns null (no tap
-  /// action) when nothing matches rather than guessing.
-  Contact? _findContactByName(String name) {
-    final contacts = AppSession.instance.friends;
-    for (final c in contacts) {
-      if (c.fullName == name) return c;
-    }
-    return null;
   }
 }
 
