@@ -24,5 +24,10 @@ dev_dependencies:
     sdk: flutter
   flutter_lints: ^3.0.0
 
+
 flutter:
   uses-material-design: true
+  assets:
+    - assets/images/login_illustration.png
+    - assets/images/account_type_illustration.png
+    - assets/images/add_contact_background.png

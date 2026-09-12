@@ -29,12 +29,52 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
   bool _loadingIncomingAlerts = false;
   List<Map<String, dynamic>> _incomingAlerts = [];
 
+  // "X is safe now" cards — shown once the owner confirms Safe, then
+  // auto-dismissed 2 minutes after the person has actually seen it here,
+  // rather than disappearing the instant it resolves or lingering forever.
+  List<Map<String, dynamic>> _resolvedAlerts = [];
+  final Set<String> _resolvedAlertsWithDismissTimerStarted = {};
+
   @override
   void initState() {
     super.initState();
     _loadAlertStatus();
     _loadIncomingAlerts();
+    _loadResolvedAlerts();
     _loadPendingTrustRequestCount();
+  }
+
+  Future<void> _loadResolvedAlerts() async {
+    try {
+      final resolved = await NotificationService.recentlyResolvedSafetyAlerts();
+      if (!mounted) return;
+      setState(() => _resolvedAlerts = resolved);
+      // Give each newly-seen card 40 seconds on screen before it goes away.
+      for (final alert in resolved) {
+        final id = alert['notificationId']?.toString();
+        if (id == null || _resolvedAlertsWithDismissTimerStarted.contains(id)) {
+          continue;
+        }
+        _resolvedAlertsWithDismissTimerStarted.add(id);
+        // Mark it read right away, not just after the 40s window — this is
+        // what stops it from showing again on a future login. Waiting
+        // until dismissal would leave it "unread" (and so re-fetchable) if
+        // the person logs out before the timer finishes.
+        NotificationService.markRead(id).catchError((e) {
+          debugPrint('Mark resolved-alert read skipped: $e');
+        });
+        Future.delayed(const Duration(seconds: 40), () {
+          if (!mounted) return;
+          setState(() {
+            _resolvedAlerts = _resolvedAlerts
+                .where((a) => a['notificationId'] != id)
+                .toList();
+          });
+        });
+      }
+    } catch (_) {
+      // Offline / not reachable — leave whatever was last loaded in place.
+    }
   }
 
   Future<void> _loadPendingTrustRequestCount() async {
@@ -350,6 +390,10 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                 ],
               ),
               const SizedBox(height: 20),
+              if (_resolvedAlerts.isNotEmpty) ...[
+                _ResolvedSafeAlertsPanel(alerts: _resolvedAlerts),
+                const SizedBox(height: 20),
+              ],
               if (_incomingAlerts.isNotEmpty) ...[
                 _IncomingAlertsPanel(
                   alerts: _incomingAlerts,
@@ -419,6 +463,47 @@ class _QuickActionCard extends StatelessWidget {
 /// they alerted. This is where the trust/contact side actually confirms
 /// ("Confirm" = Can Help) instead of passively seeing a "Waiting…" chip
 /// meant for the person who started the session.
+class _ResolvedSafeAlertsPanel extends StatelessWidget {
+  final List<Map<String, dynamic>> alerts;
+  const _ResolvedSafeAlertsPanel({required this.alerts});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.success.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: AppColors.success.withValues(alpha: 0.35)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          for (int i = 0; i < alerts.length; i++) ...[
+            if (i > 0) const SizedBox(height: 10),
+            Row(
+              children: [
+                Icon(Icons.check_circle, size: 18, color: AppColors.success),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    '${alerts[i]['ownerName'] ?? 'They'} is safe now',
+                    style: TextStyle(
+                        fontSize: 13.5,
+                        fontWeight: FontWeight.w800,
+                        color: AppColors.success),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
 class _IncomingAlertsPanel extends StatelessWidget {
   final List<Map<String, dynamic>> alerts;
   final void Function(Map<String, dynamic> alert) onOpenDetail;
@@ -535,32 +620,18 @@ class _IncomingAlertRow extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 8),
-          Row(
-            children: [
-              Expanded(
-                child: OutlinedButton(
-                  onPressed: onTap,
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: AppColors.textSecondary,
-                    side: BorderSide(color: AppColors.border),
-                    padding: const EdgeInsets.symmetric(vertical: 10),
-                  ),
-                  child: const Text("Can't Help"),
-                ),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton.icon(
+              onPressed: onTap,
+              icon: const Icon(Icons.location_on_outlined, size: 17),
+              label: const Text('View Location'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.navy,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 10),
               ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: ElevatedButton(
-                  onPressed: onTap,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.navy,
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 10),
-                  ),
-                  child: const Text('Confirm'),
-                ),
-              ),
-            ],
+            ),
           ),
         ],
       ),

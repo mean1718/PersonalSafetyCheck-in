@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
+import '../widgets/safety_illustration.dart';
 
 class ChangePasswordScreen extends StatefulWidget {
   const ChangePasswordScreen({super.key});
@@ -49,57 +50,72 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
             style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700)),
       ),
       body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(20),
-          child: Form(
-            key: _formKey,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _passwordField(
-                    'CURRENT PASSWORD',
-                    _currentController,
-                    _obscureCurrent,
-                    () => setState(() => _obscureCurrent = !_obscureCurrent),
-                    validator: (v) => (v == null || v.isEmpty)
-                        ? 'Enter your current password'
-                        : null),
-                _passwordField('NEW PASSWORD', _newController, _obscureNew,
-                    () => setState(() => _obscureNew = !_obscureNew),
-                    validator: (v) {
-                  if (v == null || v.isEmpty) return 'Enter a new password';
-                  if (v.length < 8) return 'Use at least 8 characters';
-                  return null;
-                }),
-                _passwordField(
-                    'CONFIRM NEW PASSWORD',
-                    _confirmController,
-                    _obscureConfirm,
-                    () => setState(() => _obscureConfirm = !_obscureConfirm),
-                    validator: (v) {
-                  if (v == null || v.isEmpty)
-                    return 'Please confirm your new password';
-                  if (v != _newController.text) return 'Passwords do not match';
-                  return null;
-                }),
-                const SizedBox(height: 12),
-                SizedBox(
-                  width: double.infinity,
-                  height: 52,
-                  child: ElevatedButton(
-                    onPressed: _submit,
-                    style: ElevatedButton.styleFrom(
-                        backgroundColor: AppColors.navy,
-                        shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(26))),
-                    child: const Text('Update Password',
-                        style: TextStyle(
-                            color: Colors.white, fontWeight: FontWeight.w700)),
+        child: Column(
+          children: [
+            Expanded(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(20, 20, 20, 8),
+                child: Form(
+                  key: _formKey,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _passwordField(
+                          'CURRENT PASSWORD',
+                          _currentController,
+                          _obscureCurrent,
+                          () => setState(
+                              () => _obscureCurrent = !_obscureCurrent),
+                          validator: (v) => (v == null || v.isEmpty)
+                              ? 'Enter your current password'
+                              : null),
+                      _passwordField(
+                          'NEW PASSWORD',
+                          _newController,
+                          _obscureNew,
+                          () => setState(() => _obscureNew = !_obscureNew),
+                          validator: (v) {
+                        if (v == null || v.isEmpty)
+                          return 'Enter a new password';
+                        if (v.length < 8) return 'Use at least 8 characters';
+                        return null;
+                      }),
+                      _passwordField(
+                          'CONFIRM NEW PASSWORD',
+                          _confirmController,
+                          _obscureConfirm,
+                          () => setState(
+                              () => _obscureConfirm = !_obscureConfirm),
+                          validator: (v) {
+                        if (v == null || v.isEmpty)
+                          return 'Please confirm your new password';
+                        if (v != _newController.text)
+                          return 'Passwords do not match';
+                        return null;
+                      }),
+                      const SizedBox(height: 12),
+                    ],
                   ),
                 ),
-              ],
+              ),
             ),
-          ),
+            SkylineBottomBar(
+              child: SizedBox(
+                width: double.infinity,
+                height: 52,
+                child: ElevatedButton(
+                  onPressed: _submit,
+                  style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.navy,
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(26))),
+                  child: const Text('Update Password',
+                      style: TextStyle(
+                          color: Colors.white, fontWeight: FontWeight.w700)),
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );

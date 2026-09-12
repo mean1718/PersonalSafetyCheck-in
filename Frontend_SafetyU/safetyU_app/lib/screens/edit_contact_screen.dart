@@ -3,6 +3,7 @@ import '../theme/app_theme.dart';
 import '../models/contact.dart';
 import '../services/app_session.dart';
 import '../utils/validators.dart';
+import '../widgets/safety_illustration.dart';
 
 class EditContactScreen extends StatefulWidget {
   final Contact? contact;
@@ -75,136 +76,146 @@ class _EditContactScreenState extends State<EditContactScreen> {
 
     return Scaffold(
       body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-          child: Form(
-            key: _formKey,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    IconButton(
-                      onPressed: () => Navigator.pop(context),
-                      icon:
-                          Icon(Icons.arrow_back, color: AppColors.textPrimary),
-                    ),
-                    Text(
-                      isEditing ? 'Edit Contact' : 'Add Contact',
-                      style: TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.w800,
-                          color: AppColors.textPrimary),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 16),
-                _buildField(
-                  'FULL NAME',
-                  _nameController,
-                  hint: 'e.g. Sophea Chan',
-                  validator: (v) {
-                    final text = v?.trim() ?? '';
-                    if (text.isEmpty) return 'Name is required';
-                    if (AppSession.instance.isContactNameTaken(text,
-                        excludingId: widget.contact?.id)) {
-                      return 'This name is already used by another contact';
-                    }
-                    return null;
-                  },
-                ),
-                _buildField(
-                  'PHONE NUMBER',
-                  _phoneController,
-                  hint: '+855 12 345 678',
-                  keyboardType: TextInputType.phone,
-                  validator: (v) {
-                    final err = phoneValidator(v);
-                    if (err != null) return err;
-                    if (AppSession.instance.isContactPhoneTaken(v!.trim(),
-                        excludingId: widget.contact?.id)) {
-                      return 'This phone number is already used by another contact';
-                    }
-                    return null;
-                  },
-                ),
-                _buildField(
-                  'EMAIL ADDRESS',
-                  _emailController,
-                  hint: 'name@example.com',
-                  keyboardType: TextInputType.emailAddress,
-                  validator: (v) {
-                    final err = emailValidator(v);
-                    if (err != null) return err;
-                    if (AppSession.instance.isContactEmailTaken(v!.trim(),
-                        excludingId: widget.contact?.id)) {
-                      return 'This email is already used by another contact';
-                    }
-                    return null;
-                  },
-                ),
-                _buildField(
-                  'RELATIONSHIP',
-                  _relationshipController,
-                  hint: 'e.g. Sister, Roommate, Friend',
-                  validator: (v) => (v == null || v.trim().isEmpty)
-                      ? 'Relationship is required'
-                      : null,
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  'CONTACT PRIORITY TIER',
-                  style: TextStyle(
-                      fontSize: 11.5,
-                      fontWeight: FontWeight.w700,
-                      color: AppColors.textSecondary,
-                      letterSpacing: 0.4),
-                ),
-                const SizedBox(height: 10),
-                Row(
-                  children: [
-                    Expanded(
-                      child: _PriorityOption(
-                        label: 'Main Contact',
-                        sublabel: 'Notified first',
-                        selected: _isMainContact,
-                        onTap: () => setState(() => _isMainContact = true),
+        child: Column(
+          children: [
+            Expanded(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(20, 12, 20, 8),
+                child: Form(
+                  key: _formKey,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          IconButton(
+                            onPressed: () => Navigator.pop(context),
+                            icon: Icon(Icons.arrow_back,
+                                color: AppColors.textPrimary),
+                          ),
+                          Text(
+                            isEditing ? 'Edit Contact' : 'Add Contact',
+                            style: TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.w800,
+                                color: AppColors.textPrimary),
+                          ),
+                        ],
                       ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: _PriorityOption(
-                        label: 'Other Contact',
-                        sublabel: 'Backup notification',
-                        selected: !_isMainContact,
-                        onTap: () => setState(() => _isMainContact = false),
+                      const SizedBox(height: 16),
+                      _buildField(
+                        'FULL NAME',
+                        _nameController,
+                        hint: 'e.g. Sophea Chan',
+                        validator: (v) {
+                          final text = v?.trim() ?? '';
+                          if (text.isEmpty) return 'Name is required';
+                          if (AppSession.instance.isContactNameTaken(text,
+                              excludingId: widget.contact?.id)) {
+                            return 'This name is already used by another contact';
+                          }
+                          return null;
+                        },
                       ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 32),
-                SizedBox(
-                  width: double.infinity,
-                  height: 50,
-                  child: ElevatedButton(
-                    onPressed: _saveContact,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppColors.navy,
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(25)),
-                    ),
-                    child: Text(
-                      isEditing ? 'Save Edit' : 'Add Contact',
-                      style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 15,
-                          fontWeight: FontWeight.w700),
-                    ),
+                      _buildField(
+                        'PHONE NUMBER',
+                        _phoneController,
+                        hint: '+855 12 345 678',
+                        keyboardType: TextInputType.phone,
+                        validator: (v) {
+                          final err = phoneValidator(v);
+                          if (err != null) return err;
+                          if (AppSession.instance.isContactPhoneTaken(v!.trim(),
+                              excludingId: widget.contact?.id)) {
+                            return 'This phone number is already used by another contact';
+                          }
+                          return null;
+                        },
+                      ),
+                      _buildField(
+                        'EMAIL ADDRESS',
+                        _emailController,
+                        hint: 'name@example.com',
+                        keyboardType: TextInputType.emailAddress,
+                        validator: (v) {
+                          final err = emailValidator(v);
+                          if (err != null) return err;
+                          if (AppSession.instance.isContactEmailTaken(v!.trim(),
+                              excludingId: widget.contact?.id)) {
+                            return 'This email is already used by another contact';
+                          }
+                          return null;
+                        },
+                      ),
+                      _buildField(
+                        'RELATIONSHIP',
+                        _relationshipController,
+                        hint: 'e.g. Sister, Roommate, Friend',
+                        validator: (v) => (v == null || v.trim().isEmpty)
+                            ? 'Relationship is required'
+                            : null,
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'CONTACT PRIORITY TIER',
+                        style: TextStyle(
+                            fontSize: 11.5,
+                            fontWeight: FontWeight.w700,
+                            color: AppColors.textSecondary,
+                            letterSpacing: 0.4),
+                      ),
+                      const SizedBox(height: 10),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: _PriorityOption(
+                              label: 'Main Contact',
+                              sublabel: 'Notified first',
+                              selected: _isMainContact,
+                              onTap: () =>
+                                  setState(() => _isMainContact = true),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: _PriorityOption(
+                              label: 'Other Contact',
+                              sublabel: 'Backup notification',
+                              selected: !_isMainContact,
+                              onTap: () =>
+                                  setState(() => _isMainContact = false),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 32),
+                    ],
                   ),
                 ),
-              ],
+              ),
             ),
-          ),
+            SkylineBottomBar(
+              child: SizedBox(
+                width: double.infinity,
+                height: 50,
+                child: ElevatedButton(
+                  onPressed: _saveContact,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.navy,
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(25)),
+                  ),
+                  child: Text(
+                    isEditing ? 'Save Edit' : 'Add Contact',
+                    style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 15,
+                        fontWeight: FontWeight.w700),
+                  ),
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );

@@ -58,4 +58,30 @@ class NotificationService {
     }
     return merged;
   }
+
+  /// Alerts whose session the owner has since marked Safe — used for the
+  // calm "X is safe now" card on Home, shown for a short while after
+  // resolution rather than just vanishing the moment it's no longer
+  // actionable.
+  static Future<List<Map<String, dynamic>>>
+      recentlyResolvedSafetyAlerts() async {
+    final all = await fetchAll();
+    final resolved = <Map<String, dynamic>>[];
+    for (final n in all) {
+      if (n['type'] != 'safety_alert') continue;
+      final checkIn = n['checkIn'] as Map<String, dynamic>?;
+      if (checkIn?['status'] != 'completed') continue;
+      // Already shown once before (marked read) — this is what stops the
+      // same "is safe now" card from reappearing on every future login.
+      if (n['isRead'] == true) continue;
+      final sender = n['sender'] as Map<String, dynamic>?;
+      resolved.add({
+        'notificationId': n['_id']?.toString(),
+        'ownerUserId': sender?['_id']?.toString(),
+        'ownerName': sender?['name']?.toString() ?? 'A trusted contact',
+        'notifiedAt': n['createdAt']?.toString(),
+      });
+    }
+    return resolved;
+  }
 }

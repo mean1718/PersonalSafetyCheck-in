@@ -1,10 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:geolocator/geolocator.dart';
 import '../theme/app_theme.dart';
-import '../models/user_role.dart';
-import '../services/app_session.dart';
-import '../services/auth_service.dart';
-import '../services/api_client.dart';
 import '../utils/validators.dart';
 
 class SignUpScreen extends StatefulWidget {
@@ -21,11 +16,8 @@ class _SignUpScreenState extends State<SignUpScreen> {
   final _phoneController = TextEditingController();
   final _passwordController = TextEditingController();
   final _confirmPasswordController = TextEditingController();
-  final _badgeIdController = TextEditingController();
   bool _obscurePassword = true;
   bool _obscureConfirm = true;
-  UserRole? _selectedRole;
-  bool _roleError = false;
   bool _isSubmitting = false;
   String? _emailBackendError;
   String? _phoneBackendError;
@@ -38,7 +30,6 @@ class _SignUpScreenState extends State<SignUpScreen> {
     _phoneController.dispose();
     _passwordController.dispose();
     _confirmPasswordController.dispose();
-    _badgeIdController.dispose();
     super.dispose();
   }
 
@@ -49,78 +40,17 @@ class _SignUpScreenState extends State<SignUpScreen> {
       _passwordBackendError = null;
     });
     final formValid = _formKey.currentState?.validate() ?? false;
-    setState(() => _roleError = _selectedRole == null);
+    if (!formValid) return;
 
-    if (!formValid || _selectedRole == null) {
-      if (_selectedRole == null) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-              content: Text(
-                  'Please choose an account type — User or Emergency Responder.')),
-        );
-      }
-      return;
-    }
-
-    setState(() => _isSubmitting = true);
-    try {
-      await AuthService.register(
-        fullName: _fullNameController.text.trim(),
-        email: _emailController.text.trim(),
-        password: _passwordController.text,
-        phone: _phoneController.text.trim(),
-        role: _selectedRole!,
-      );
-    } on ApiException catch (e) {
-      if (!mounted) return;
-      setState(() => _isSubmitting = false);
-      final message = e.message;
-      setState(() {
-        if (message.toLowerCase().contains('phone')) {
-          _phoneBackendError = message;
-        } else if (message.toLowerCase().contains('password')) {
-          _passwordBackendError = message;
-        } else {
-          _emailBackendError = message;
-        }
-      });
-      _formKey.currentState?.validate();
-      return;
-    } on ApiConnectionException catch (e) {
-      if (!mounted) return;
-      setState(() => _isSubmitting = false);
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(e.message)));
-      return;
-    }
-
-    if (!mounted) return;
-    setState(() => _isSubmitting = false);
-
-    if (_selectedRole == UserRole.emergencyResponder) {
-      AppSession.instance.badgeId = _badgeIdController.text.trim();
-      if (!mounted) return;
-      // Responders go through phone verification before landing on the
-      // dashboard — which itself gates on responderStatus until approved.
-      Navigator.pushNamed(context, '/verify-phone',
-          arguments: _selectedRole!.homeRoute);
-      return;
-    }
-
-    await _proceedAfterAuth(_selectedRole!.homeRoute);
-  }
-
-  Future<void> _proceedAfterAuth(String targetRoute) async {
-    if (!mounted) return;
-    final permission = await Geolocator.checkPermission();
-    final needsPrompt = permission == LocationPermission.denied;
-    if (!mounted) return;
-    if (needsPrompt) {
-      Navigator.pushReplacementNamed(context, '/location-permission',
-          arguments: targetRoute);
-    } else {
-      Navigator.pushReplacementNamed(context, targetRoute);
-    }
+    // Registration itself (and the account-type choice it needs) now
+    // happens on the next screen — this form's job is just collecting and
+    // validating these fields.
+    Navigator.pushNamed(context, '/account-type', arguments: {
+      'fullName': _fullNameController.text.trim(),
+      'email': _emailController.text.trim(),
+      'phone': _phoneController.text.trim(),
+      'password': _passwordController.text,
+    });
   }
 
   @override
@@ -151,7 +81,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
                     ],
                   ),
                 ),
-                const SizedBox(height: 20),
+                const SizedBox(height: 16),
                 Text(
                   'Create Safety Account',
                   style: TextStyle(
@@ -171,6 +101,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
                 _buildField(
                   'FULL NAME',
                   _fullNameController,
+                  icon: Icons.person_outline,
                   hint: 'Enter your full name',
                   validator: (v) => (v == null || v.trim().isEmpty)
                       ? 'Full name is required'
@@ -179,9 +110,11 @@ class _SignUpScreenState extends State<SignUpScreen> {
                 _buildField(
                   'EMAIL ADDRESS',
                   _emailController,
+                  icon: Icons.mail_outline,
                   hint: 'you@example.com',
                   keyboardType: TextInputType.emailAddress,
-                  validator: (value) => emailValidator(value) ?? _emailBackendError,
+                  validator: (value) =>
+                      emailValidator(value) ?? _emailBackendError,
                   onChanged: (_) {
                     if (_emailBackendError != null) {
                       setState(() => _emailBackendError = null);
@@ -191,9 +124,11 @@ class _SignUpScreenState extends State<SignUpScreen> {
                 _buildField(
                   'PHONE NUMBER',
                   _phoneController,
+                  icon: Icons.phone_outlined,
                   hint: '+1 (000) 000-0000',
                   keyboardType: TextInputType.phone,
-                  validator: (value) => phoneValidator(value) ?? _phoneBackendError,
+                  validator: (value) =>
+                      phoneValidator(value) ?? _phoneBackendError,
                   onChanged: (_) {
                     if (_phoneBackendError != null) {
                       setState(() => _phoneBackendError = null);
@@ -205,6 +140,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
                   _passwordController,
                   _obscurePassword,
                   () => setState(() => _obscurePassword = !_obscurePassword),
+                  icon: Icons.lock_outline,
                   hint: 'Minimum 8 characters',
                   onChanged: (_) {
                     if (_passwordBackendError != null) {
@@ -224,6 +160,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
                   _confirmPasswordController,
                   _obscureConfirm,
                   () => setState(() => _obscureConfirm = !_obscureConfirm),
+                  icon: Icons.lock_outline,
                   hint: 'Repeat password',
                   validator: (v) {
                     if (v == null || v.isEmpty)
@@ -233,73 +170,6 @@ class _SignUpScreenState extends State<SignUpScreen> {
                     return null;
                   },
                 ),
-                const SizedBox(height: 6),
-                Text(
-                  'ACCOUNT TYPE',
-                  style: TextStyle(
-                      fontSize: 11.5,
-                      fontWeight: FontWeight.w700,
-                      color: AppColors.textSecondary,
-                      letterSpacing: 0.4),
-                ),
-                const SizedBox(height: 8),
-                _RoleTile(
-                  icon: Icons.person_outline,
-                  title: 'User',
-                  subtitle: 'Start safety sessions and alert trusted contacts.',
-                  selected: _selectedRole == UserRole.user,
-                  onTap: () => setState(() {
-                    _selectedRole = UserRole.user;
-                    _roleError = false;
-                  }),
-                ),
-                const SizedBox(height: 10),
-                _RoleTile(
-                  icon: Icons.local_hospital_outlined,
-                  title: 'Emergency Responder',
-                  subtitle:
-                      'Monitor active sessions and respond to SOS alerts.',
-                  selected: _selectedRole == UserRole.emergencyResponder,
-                  onTap: () => setState(() {
-                    _selectedRole = UserRole.emergencyResponder;
-                    _roleError = false;
-                  }),
-                ),
-                if (_roleError) ...[
-                  const SizedBox(height: 6),
-                  Text(
-                    'Please select an account type to continue',
-                    style: TextStyle(
-                        color: AppColors.danger,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600),
-                  ),
-                ],
-                if (_selectedRole == UserRole.emergencyResponder) ...[
-                  const SizedBox(height: 16),
-                  _buildField(
-                    'BADGE / OFFICER ID',
-                    _badgeIdController,
-                    hint: 'e.g. PP-4471',
-                    validator: (v) => (v == null || v.trim().isEmpty)
-                        ? 'Badge ID is required for responder accounts'
-                        : null,
-                  ),
-                  Container(
-                    padding: const EdgeInsets.all(10),
-                    margin: const EdgeInsets.only(bottom: 8),
-                    decoration: BoxDecoration(
-                        color: AppColors.dangerLight,
-                        borderRadius: BorderRadius.circular(10)),
-                    child: Text(
-                      'Responder accounts require phone verification and manual review before you can access real cases.',
-                      style: TextStyle(
-                          fontSize: 11,
-                          color: AppColors.danger,
-                          fontWeight: FontWeight.w600),
-                    ),
-                  ),
-                ],
                 const SizedBox(height: 20),
                 ElevatedButton(
                   onPressed: _isSubmitting ? null : _submit,
@@ -310,7 +180,15 @@ class _SignUpScreenState extends State<SignUpScreen> {
                           child: CircularProgressIndicator(
                               strokeWidth: 2, color: Colors.white),
                         )
-                      : const Text('Create Account'),
+                      : const Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Text('Continue'),
+                            SizedBox(width: 6),
+                            Icon(Icons.arrow_forward,
+                                size: 18, color: Colors.white),
+                          ],
+                        ),
                 ),
                 const SizedBox(height: 18),
                 Center(
@@ -350,6 +228,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
     TextInputType? keyboardType,
     String? Function(String?)? validator,
     ValueChanged<String>? onChanged,
+    IconData? icon,
   }) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 16),
@@ -368,7 +247,16 @@ class _SignUpScreenState extends State<SignUpScreen> {
           TextFormField(
             controller: controller,
             keyboardType: keyboardType,
-            decoration: InputDecoration(hintText: hint),
+            decoration: InputDecoration(
+              hintText: hint,
+              prefixIcon: icon == null
+                  ? null
+                  : Icon(icon, size: 19, color: AppColors.textMuted),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(14),
+                borderSide: BorderSide(color: AppColors.navy, width: 1.6),
+              ),
+            ),
             validator: validator,
             onChanged: onChanged,
             autovalidateMode: AutovalidateMode.onUserInteraction,
@@ -384,6 +272,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
     bool obscure,
     VoidCallback onToggle, {
     String? hint,
+    IconData? icon,
     String? Function(String?)? validator,
     ValueChanged<String>? onChanged,
   }) {
@@ -406,6 +295,13 @@ class _SignUpScreenState extends State<SignUpScreen> {
             obscureText: obscure,
             decoration: InputDecoration(
               hintText: hint,
+              prefixIcon: icon == null
+                  ? null
+                  : Icon(icon, size: 19, color: AppColors.textMuted),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(14),
+                borderSide: BorderSide(color: AppColors.navy, width: 1.6),
+              ),
               suffixIcon: IconButton(
                 icon: Icon(
                   obscure
@@ -422,78 +318,6 @@ class _SignUpScreenState extends State<SignUpScreen> {
             autovalidateMode: AutovalidateMode.onUserInteraction,
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _RoleTile extends StatelessWidget {
-  final IconData icon;
-  final String title;
-  final String subtitle;
-  final bool selected;
-  final VoidCallback onTap;
-
-  const _RoleTile({
-    required this.icon,
-    required this.title,
-    required this.subtitle,
-    required this.selected,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        width: double.infinity,
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: selected
-              ? AppColors.navy.withValues(alpha: 0.06)
-              : AppColors.card,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(
-            color: selected ? AppColors.navy : AppColors.border,
-            width: selected ? 1.6 : 1,
-          ),
-        ),
-        child: Row(
-          children: [
-            Icon(icon,
-                size: 22,
-                color: selected ? AppColors.navy : AppColors.textMuted),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    title,
-                    style: TextStyle(
-                        fontSize: 13.5,
-                        fontWeight: FontWeight.w700,
-                        color: AppColors.textPrimary),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    subtitle,
-                    style: TextStyle(
-                        fontSize: 11.5, color: AppColors.textSecondary),
-                  ),
-                ],
-              ),
-            ),
-            Icon(
-              selected
-                  ? Icons.radio_button_checked
-                  : Icons.radio_button_unchecked,
-              size: 20,
-              color: selected ? AppColors.navy : AppColors.textMuted,
-            ),
-          ],
-        ),
       ),
     );
   }

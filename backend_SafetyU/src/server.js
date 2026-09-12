@@ -19,6 +19,7 @@ const trustRequestRoutes = require("./routes/trustRequestRoutes");
 const emergencyRoutes = require("./routes/emergencyRoutes");
 const notificationRoutes = require("./routes/notificationRoutes");
 const locationRoutes = require("./routes/locationRoutes");
+const chatRoutes = require("./routes/ChatRoutes");
 // const paymentRoutes = require("./routes/paymentRoutes");
 
 const app = express();
@@ -38,6 +39,7 @@ app.use("/api/trust-requests", trustRequestRoutes);
 app.use("/api/emergency", emergencyRoutes);
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/location", locationRoutes);
+app.use("/api/chat", chatRoutes);
 // app.use("/api/payments", paymentRoutes);
 
 // Test route

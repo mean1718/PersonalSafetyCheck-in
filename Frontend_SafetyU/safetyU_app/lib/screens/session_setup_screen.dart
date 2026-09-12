@@ -19,6 +19,13 @@ class SessionSetupScreen extends StatefulWidget {
 }
 
 class _SessionSetupScreenState extends State<SessionSetupScreen> {
+  // This screen's redesign uses a brighter accent blue for icon badges,
+  // map controls, and the primary CTA — distinct from the app's usual
+  // navy — to match the reference design. Scoped to just this screen
+  // rather than changed app-wide in AppColors.
+  static const Color _accent = Color(0xFF3E6DF6);
+  static const Color _accentLight = Color(0xFFEAF0FE);
+
   static const LatLng _defaultCenter = LatLng(11.5696, 104.9210); // Phnom Penh
 
   final _formKey = GlobalKey<FormState>();
@@ -673,6 +680,47 @@ class _SessionSetupScreenState extends State<SessionSetupScreen> {
   // BUILD
   // =========================================================
 
+  Widget _buildSectionHeader({
+    required IconData icon,
+    required String title,
+    required String subtitle,
+  }) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          width: 34,
+          height: 34,
+          decoration:
+              const BoxDecoration(color: _accent, shape: BoxShape.circle),
+          child: Icon(icon, color: Colors.white, size: 17),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                title,
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 14.5,
+                  color: AppColors.textPrimary,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                subtitle,
+                style:
+                    TextStyle(fontSize: 11.5, color: AppColors.textSecondary),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -682,13 +730,26 @@ class _SessionSetupScreenState extends State<SessionSetupScreen> {
           icon: Icon(Icons.arrow_back, color: AppColors.navy),
           onPressed: () => Navigator.maybePop(context),
         ),
-        title: Text(
-          'New Safety Session',
-          style: TextStyle(
-            color: AppColors.textPrimary,
-            fontWeight: FontWeight.bold,
-            fontSize: 18,
-          ),
+        title: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              'New Safety Session',
+              style: TextStyle(
+                color: AppColors.textPrimary,
+                fontWeight: FontWeight.bold,
+                fontSize: 18,
+              ),
+            ),
+            Text(
+              'Stay safe, wherever you go',
+              style: TextStyle(
+                color: AppColors.textSecondary,
+                fontWeight: FontWeight.w500,
+                fontSize: 11.5,
+              ),
+            ),
+          ],
         ),
         centerTitle: true,
         backgroundColor: Colors.transparent,
@@ -744,26 +805,60 @@ class _SessionSetupScreenState extends State<SessionSetupScreen> {
                         ),
                         const SizedBox(height: 10),
                       ],
-                      Text(
-                        'Destination',
-                        style: TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 13.5,
-                          color: AppColors.textPrimary,
+                      _buildSectionHeader(
+                        icon: Icons.location_on_outlined,
+                        title: 'Destination',
+                        subtitle: 'Select your destination',
+                      ),
+                      const SizedBox(height: 10),
+                      GestureDetector(
+                        onTap: _focusDestinationSearch,
+                        child: Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 14, vertical: 14),
+                          decoration: BoxDecoration(
+                            color: AppColors.card,
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: AppColors.border),
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(Icons.location_on_outlined,
+                                  color: AppColors.textMuted, size: 18),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Text(
+                                  _destinationController.text.isEmpty
+                                      ? 'Tap to choose location'
+                                      : _destinationController.text,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    fontSize: 13.5,
+                                    fontWeight:
+                                        _destinationController.text.isEmpty
+                                            ? FontWeight.w400
+                                            : FontWeight.w700,
+                                    color: _destinationController.text.isEmpty
+                                        ? AppColors.textMuted
+                                        : AppColors.textPrimary,
+                                  ),
+                                ),
+                              ),
+                              Icon(Icons.chevron_right,
+                                  color: AppColors.textMuted, size: 20),
+                            ],
+                          ),
                         ),
                       ),
-                      const SizedBox(height: 8),
-                      //  _buildDestinationInputCard(),
-                      const SizedBox(height: 16),
-                      Text(
-                        'Expected Time',
-                        style: TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 13.5,
-                          color: AppColors.textPrimary,
-                        ),
+                      const SizedBox(height: 20),
+                      _buildSectionHeader(
+                        icon: Icons.access_time,
+                        title: 'Expected Time',
+                        subtitle: 'How long will you stay?',
                       ),
-                      const SizedBox(height: 8),
+                      const SizedBox(height: 10),
                       Row(
                         children: [
                           Expanded(
@@ -794,7 +889,6 @@ class _SessionSetupScreenState extends State<SessionSetupScreen> {
                           ),
                         ),
                       ],
-
                       if (_destinationCoords != null &&
                           _currentPosition != null) ...[
                         const SizedBox(height: 6),
@@ -805,21 +899,18 @@ class _SessionSetupScreenState extends State<SessionSetupScreen> {
                         ),
                       ],
                       const SizedBox(height: 16),
-                      Text(
-                        'Arrival Time',
-                        style: TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 13.5,
-                          color: AppColors.textPrimary,
-                        ),
+                      _buildSectionHeader(
+                        icon: Icons.calendar_today_outlined,
+                        title: 'Arrival Time',
+                        subtitle: 'When will you arrive?',
                       ),
-                      const SizedBox(height: 8),
+                      const SizedBox(height: 10),
                       GestureDetector(
                         onTap: _pickArrivalTime,
                         child: Container(
-                          width: MediaQuery.of(context).size.width * 0.45,
+                          width: double.infinity,
                           padding: const EdgeInsets.symmetric(
-                              horizontal: 14, vertical: 12),
+                              horizontal: 14, vertical: 14),
                           decoration: BoxDecoration(
                             color: AppColors.card,
                             borderRadius: BorderRadius.circular(12),
@@ -829,29 +920,30 @@ class _SessionSetupScreenState extends State<SessionSetupScreen> {
                             children: [
                               Icon(Icons.access_time,
                                   color: AppColors.textMuted, size: 18),
-                              const SizedBox(width: 8),
-                              Text(
-                                _formatClock(_expectedArrival),
-                                style: TextStyle(
-                                  fontSize: 13.5,
-                                  fontWeight: FontWeight.bold,
-                                  color: AppColors.textPrimary,
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Text(
+                                  _formatClock(_expectedArrival),
+                                  style: TextStyle(
+                                    fontSize: 13.5,
+                                    fontWeight: FontWeight.bold,
+                                    color: AppColors.textPrimary,
+                                  ),
                                 ),
                               ),
+                              Icon(Icons.chevron_right,
+                                  color: AppColors.textMuted, size: 20),
                             ],
                           ),
                         ),
                       ),
                       const SizedBox(height: 20),
-                      Text(
-                        'Notify Contacts',
-                        style: TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 13.5,
-                          color: AppColors.textPrimary,
-                        ),
+                      _buildSectionHeader(
+                        icon: Icons.people_alt_outlined,
+                        title: 'Notify Contacts',
+                        subtitle: 'Choose who to notify in case of emergency',
                       ),
-                      const SizedBox(height: 8),
+                      const SizedBox(height: 10),
                       GestureDetector(
                         onTap: _pickContacts,
                         child: Container(
@@ -929,9 +1021,9 @@ class _SessionSetupScreenState extends State<SessionSetupScreen> {
                         child: ElevatedButton(
                           onPressed: _canStartSession ? _startSession : null,
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: AppColors.navy,
+                            backgroundColor: _accent,
                             disabledBackgroundColor:
-                                AppColors.navy.withValues(alpha: 0.35),
+                                _accent.withValues(alpha: 0.35),
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(26),
                             ),
@@ -1026,7 +1118,7 @@ class _SessionSetupScreenState extends State<SessionSetupScreen> {
                       height: 20,
                       child: Container(
                         decoration: BoxDecoration(
-                          color: Colors.blue,
+                          color: _accent,
                           shape: BoxShape.circle,
                           border: Border.all(color: Colors.white, width: 2.5),
                         ),
@@ -1342,12 +1434,12 @@ class _SessionSetupScreenState extends State<SessionSetupScreen> {
                   children: [
                     Container(
                       padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                        color: AppColors.background,
-                        borderRadius: BorderRadius.circular(10),
+                      decoration: const BoxDecoration(
+                        color: _accent,
+                        shape: BoxShape.circle,
                       ),
-                      child: Icon(Icons.place_outlined,
-                          color: AppColors.textPrimary, size: 20),
+                      child: const Icon(Icons.place,
+                          color: Colors.white, size: 20),
                     ),
                     const SizedBox(width: 12),
                     Expanded(
@@ -1395,73 +1487,51 @@ class _SessionSetupScreenState extends State<SessionSetupScreen> {
     required TextEditingController controller,
     required String unit,
   }) {
-    return TextFormField(
-      controller: controller,
-      keyboardType: TextInputType.number,
-      style: TextStyle(
-        fontSize: 14,
-        fontWeight: FontWeight.bold,
-        color: AppColors.textPrimary,
+    return Container(
+      height: 48,
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      decoration: BoxDecoration(
+        color: AppColors.card,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.border),
       ),
-      decoration: InputDecoration(
-        filled: true,
-        fillColor: AppColors.card,
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: AppColors.border),
-        ),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: AppColors.border),
-        ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: AppColors.navy, width: 1.2),
-        ),
-        errorBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: AppColors.danger),
-        ),
-        focusedErrorBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: AppColors.danger, width: 1.2),
-        ),
-        isDense: true,
-        contentPadding: const EdgeInsets.symmetric(
-          horizontal: 16,
-          vertical: 14,
-        ),
-        suffixText: unit,
-        suffixStyle: TextStyle(
-          fontSize: 12,
-          fontWeight: FontWeight.w600,
-          color: AppColors.textSecondary,
-        ),
-        errorStyle: TextStyle(
-          color: AppColors.danger,
-          fontSize: 11.5,
-        ),
+      child: Row(
+        children: [
+          Expanded(
+            child: TextFormField(
+              controller: controller,
+              keyboardType: TextInputType.number,
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.bold,
+                color: AppColors.textPrimary,
+              ),
+              decoration: const InputDecoration(
+                border: InputBorder.none,
+                isDense: true,
+                errorStyle: TextStyle(fontSize: 0, height: 0),
+              ),
+              validator: (value) {
+                final text = value?.trim() ?? '';
+                if (text.isEmpty) return null;
+                final number = int.tryParse(text);
+                if (number == null) return '';
+                if (number < 0) return '';
+                return null;
+              },
+              onChanged: (_) => _onDurationFieldChanged(),
+            ),
+          ),
+          Text(
+            unit,
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: AppColors.textSecondary,
+            ),
+          ),
+        ],
       ),
-      validator: (value) {
-        final text = value?.trim() ?? '';
-
-        if (text.isEmpty) {
-          return null;
-        }
-
-        final number = int.tryParse(text);
-
-        if (number == null) {
-          return 'Enter a number';
-        }
-
-        if (number < 0) {
-          return 'Cannot be negative';
-        }
-
-        return null;
-      },
-      onChanged: (_) => _onDurationFieldChanged(),
     );
   }
 
@@ -1472,16 +1542,16 @@ class _SessionSetupScreenState extends State<SessionSetupScreen> {
         width: 32,
         height: 32,
         decoration: BoxDecoration(
-          color: AppColors.card,
+          color: _accent,
           shape: BoxShape.circle,
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withValues(alpha: 0.1),
+              color: Colors.black.withValues(alpha: 0.15),
               blurRadius: 4,
             ),
           ],
         ),
-        child: Icon(icon, size: 16, color: AppColors.textPrimary),
+        child: Icon(icon, size: 16, color: Colors.white),
       ),
     );
   }
