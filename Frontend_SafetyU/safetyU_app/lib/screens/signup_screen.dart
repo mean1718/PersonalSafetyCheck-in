@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
 import '../utils/validators.dart';
+import '../widgets/safety_illustration.dart';
 
 class SignUpScreen extends StatefulWidget {
   const SignUpScreen({super.key});
@@ -57,165 +58,182 @@ class _SignUpScreenState extends State<SignUpScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-          child: Form(
-            key: _formKey,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                GestureDetector(
-                  onTap: () => Navigator.pop(context),
-                  child: Row(
+        child: Column(
+          children: [
+            Expanded(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(24, 16, 24, 8),
+                child: Form(
+                  key: _formKey,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Icon(Icons.arrow_back,
-                          size: 18, color: AppColors.textSecondary),
-                      SizedBox(width: 6),
-                      Text(
-                        'Back to Login',
-                        style: TextStyle(
-                            color: AppColors.textSecondary,
-                            fontSize: 13.5,
-                            fontWeight: FontWeight.w600),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 16),
-                Text(
-                  'Create Safety Account',
-                  style: TextStyle(
-                      fontSize: 22,
-                      fontWeight: FontWeight.w800,
-                      color: AppColors.textPrimary),
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  'Protect yourself and stay connected with trusted contacts.',
-                  style: TextStyle(
-                      fontSize: 13.5,
-                      color: AppColors.textSecondary,
-                      height: 1.4),
-                ),
-                const SizedBox(height: 24),
-                _buildField(
-                  'FULL NAME',
-                  _fullNameController,
-                  icon: Icons.person_outline,
-                  hint: 'Enter your full name',
-                  validator: (v) => (v == null || v.trim().isEmpty)
-                      ? 'Full name is required'
-                      : null,
-                ),
-                _buildField(
-                  'EMAIL ADDRESS',
-                  _emailController,
-                  icon: Icons.mail_outline,
-                  hint: 'you@example.com',
-                  keyboardType: TextInputType.emailAddress,
-                  validator: (value) =>
-                      emailValidator(value) ?? _emailBackendError,
-                  onChanged: (_) {
-                    if (_emailBackendError != null) {
-                      setState(() => _emailBackendError = null);
-                    }
-                  },
-                ),
-                _buildField(
-                  'PHONE NUMBER',
-                  _phoneController,
-                  icon: Icons.phone_outlined,
-                  hint: '+1 (000) 000-0000',
-                  keyboardType: TextInputType.phone,
-                  validator: (value) =>
-                      phoneValidator(value) ?? _phoneBackendError,
-                  onChanged: (_) {
-                    if (_phoneBackendError != null) {
-                      setState(() => _phoneBackendError = null);
-                    }
-                  },
-                ),
-                _buildPasswordField(
-                  'PASSWORD',
-                  _passwordController,
-                  _obscurePassword,
-                  () => setState(() => _obscurePassword = !_obscurePassword),
-                  icon: Icons.lock_outline,
-                  hint: 'Minimum 8 characters',
-                  onChanged: (_) {
-                    if (_passwordBackendError != null) {
-                      setState(() => _passwordBackendError = null);
-                    }
-                  },
-                  validator: (v) {
-                    if (v == null || v.isEmpty) return 'Password is required';
-                    if (v.length < 8) {
-                      return 'Password must be at least 8 characters.';
-                    }
-                    return _passwordBackendError;
-                  },
-                ),
-                _buildPasswordField(
-                  'CONFIRM PASSWORD',
-                  _confirmPasswordController,
-                  _obscureConfirm,
-                  () => setState(() => _obscureConfirm = !_obscureConfirm),
-                  icon: Icons.lock_outline,
-                  hint: 'Repeat password',
-                  validator: (v) {
-                    if (v == null || v.isEmpty)
-                      return 'Please confirm your password';
-                    if (v != _passwordController.text)
-                      return 'Passwords do not match';
-                    return null;
-                  },
-                ),
-                const SizedBox(height: 20),
-                ElevatedButton(
-                  onPressed: _isSubmitting ? null : _submit,
-                  child: _isSubmitting
-                      ? const SizedBox(
-                          width: 18,
-                          height: 18,
-                          child: CircularProgressIndicator(
-                              strokeWidth: 2, color: Colors.white),
-                        )
-                      : const Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Text('Continue'),
-                            SizedBox(width: 6),
-                            Icon(Icons.arrow_forward,
-                                size: 18, color: Colors.white),
-                          ],
-                        ),
-                ),
-                const SizedBox(height: 18),
-                Center(
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Text(
-                        'Already have an account? ',
-                        style: TextStyle(
-                            color: AppColors.textSecondary, fontSize: 13.5),
-                      ),
                       GestureDetector(
                         onTap: () => Navigator.pop(context),
-                        child: Text(
-                          'Log In',
-                          style: TextStyle(
-                              color: AppColors.danger,
-                              fontWeight: FontWeight.w700,
-                              fontSize: 13.5),
+                        child: Row(
+                          children: [
+                            Icon(Icons.arrow_back,
+                                size: 18, color: AppColors.textSecondary),
+                            SizedBox(width: 6),
+                            Text(
+                              'Back to Login',
+                              style: TextStyle(
+                                  color: AppColors.textSecondary,
+                                  fontSize: 13.5,
+                                  fontWeight: FontWeight.w600),
+                            ),
+                          ],
                         ),
                       ),
+                      const SizedBox(height: 16),
+                      Text(
+                        'Create Safety Account',
+                        style: TextStyle(
+                            fontSize: 22,
+                            fontWeight: FontWeight.w800,
+                            color: AppColors.textPrimary),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        'Protect yourself and stay connected with trusted contacts.',
+                        style: TextStyle(
+                            fontSize: 13.5,
+                            color: AppColors.textSecondary,
+                            height: 1.4),
+                      ),
+                      const SizedBox(height: 24),
+                      _buildField(
+                        'FULL NAME',
+                        _fullNameController,
+                        icon: Icons.person_outline,
+                        hint: 'Enter your full name',
+                        validator: (v) => (v == null || v.trim().isEmpty)
+                            ? 'Full name is required'
+                            : null,
+                      ),
+                      _buildField(
+                        'EMAIL ADDRESS',
+                        _emailController,
+                        icon: Icons.mail_outline,
+                        hint: 'you@example.com',
+                        keyboardType: TextInputType.emailAddress,
+                        validator: (value) =>
+                            emailValidator(value) ?? _emailBackendError,
+                        onChanged: (_) {
+                          if (_emailBackendError != null) {
+                            setState(() => _emailBackendError = null);
+                          }
+                        },
+                      ),
+                      _buildField(
+                        'PHONE NUMBER',
+                        _phoneController,
+                        icon: Icons.phone_outlined,
+                        hint: '+1 (000) 000-0000',
+                        keyboardType: TextInputType.phone,
+                        validator: (value) =>
+                            phoneValidator(value) ?? _phoneBackendError,
+                        onChanged: (_) {
+                          if (_phoneBackendError != null) {
+                            setState(() => _phoneBackendError = null);
+                          }
+                        },
+                      ),
+                      _buildPasswordField(
+                        'PASSWORD',
+                        _passwordController,
+                        _obscurePassword,
+                        () => setState(
+                            () => _obscurePassword = !_obscurePassword),
+                        icon: Icons.lock_outline,
+                        hint: 'Minimum 8 characters',
+                        onChanged: (_) {
+                          if (_passwordBackendError != null) {
+                            setState(() => _passwordBackendError = null);
+                          }
+                        },
+                        validator: (v) {
+                          if (v == null || v.isEmpty)
+                            return 'Password is required';
+                          if (v.length < 8) {
+                            return 'Password must be at least 8 characters.';
+                          }
+                          return _passwordBackendError;
+                        },
+                      ),
+                      _buildPasswordField(
+                        'CONFIRM PASSWORD',
+                        _confirmPasswordController,
+                        _obscureConfirm,
+                        () =>
+                            setState(() => _obscureConfirm = !_obscureConfirm),
+                        icon: Icons.lock_outline,
+                        hint: 'Repeat password',
+                        validator: (v) {
+                          if (v == null || v.isEmpty)
+                            return 'Please confirm your password';
+                          if (v != _passwordController.text)
+                            return 'Passwords do not match';
+                          return null;
+                        },
+                      ),
+                      const SizedBox(height: 20),
                     ],
                   ),
                 ),
-              ],
+              ),
             ),
-          ),
+            SkylineBottomBar(
+              height: 160,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  ElevatedButton(
+                    onPressed: _isSubmitting ? null : _submit,
+                    child: _isSubmitting
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(
+                                strokeWidth: 2, color: Colors.white),
+                          )
+                        : const Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Text('Continue'),
+                              SizedBox(width: 6),
+                              Icon(Icons.arrow_forward,
+                                  size: 18, color: Colors.white),
+                            ],
+                          ),
+                  ),
+                  const SizedBox(height: 14),
+                  Center(
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Text(
+                          'Already have an account? ',
+                          style: TextStyle(
+                              color: AppColors.textSecondary, fontSize: 13.5),
+                        ),
+                        GestureDetector(
+                          onTap: () => Navigator.pop(context),
+                          child: Text(
+                            'Log In',
+                            style: TextStyle(
+                                color: AppColors.danger,
+                                fontWeight: FontWeight.w700,
+                                fontSize: 13.5),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
         ),
       ),
     );
