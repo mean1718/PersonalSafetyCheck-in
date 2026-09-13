@@ -3,11 +3,13 @@ const express = require("express");
 const router = express.Router();
 
 const {
-    getSessionTrustedContacts,
-    startCheckIn,
-    completeCheckIn,
-    getMyCheckIns,
-    getAlertStatus
+  getSessionTrustedContacts,
+  startCheckIn,
+  completeCheckIn,
+  getMyCheckIns,
+  getAlertStatus,
+  updateLocation,
+  viewSessionLocation,
 } = require("../controllers/checkInController");
 
 const protect = require("../middleware/authMiddleware");
@@ -21,6 +23,12 @@ router.post("/", protect, startCheckIn);
 router.put("/:id/complete", protect, completeCheckIn);
 
 router.get("/:id/alert-status", protect, getAlertStatus);
+
+// NEW: Safety User's phone sends live GPS updates here while session is active
+router.put("/:id/location", protect, updateLocation);
+
+// NEW: Safety User (their own session) or an alerted Trusted Contact reads the live location here
+router.get("/:id/location", protect, viewSessionLocation);
 
 // Get my check-ins
 router.get("/", protect, getMyCheckIns);

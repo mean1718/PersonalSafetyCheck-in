@@ -39,4 +39,24 @@ class CheckInService {
     return (data['notifiedContacts'] as List<dynamic>? ?? [])
         .cast<Map<String, dynamic>>();
   }
+
+    static Future<void> updateLocation(
+    String checkInId, {
+    required double latitude,
+    required double longitude,
+  }) async {
+    await ApiClient.put('/checkins/$checkInId/location', {
+      'latitude': latitude,
+      'longitude': longitude,
+    });
+  }
+
+  static Future<Map<String, dynamic>?> fetchLocation(String checkInId) async {
+    try {
+      final data = await ApiClient.get('/checkins/$checkInId/location');
+      return data['location'] as Map<String, dynamic>?;
+    } catch (_) {
+      return null;
+    }
+  }
 }

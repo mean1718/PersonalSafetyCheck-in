@@ -378,6 +378,7 @@ class AppSession extends ChangeNotifier {
       location: lastKnownPosition,
       distanceKm: null,
       requestedAt: latestSession?.startedAt ?? DateTime.now(),
+      checkInId: activeCheckInId,
     );
   }
 

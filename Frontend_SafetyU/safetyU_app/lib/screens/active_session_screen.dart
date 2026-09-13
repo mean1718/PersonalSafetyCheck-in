@@ -637,6 +637,13 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
           // have a real (if slightly old) location to send instead of
           // nothing at all.
           AppSession.instance.updateLastKnownPosition(latLng);
+          if (_checkInId != null) {
+            CheckInService.updateLocation(
+              _checkInId!,
+              latitude: position.latitude,
+              longitude: position.longitude,
+            ).catchError((e) => debugPrint('Location sync skipped: $e'));
+          }
         },
         onError: (Object error) {
           debugPrint('[ACTIVE] Location stream error: $error');

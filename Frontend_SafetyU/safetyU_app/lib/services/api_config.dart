@@ -9,7 +9,7 @@ class ApiConfig {
   /// Android emulator, backend running on the SAME computer:
   /// 10.0.2.2 is the emulator's special alias for your computer's own
   /// localhost. This is the default.
-  static const String baseUrl = 'http://10.0.2.2:5000/api';
+  static const String baseUrl = 'http://172.23.129.8:5000/api';
 
   /// iOS Simulator, backend running on the SAME computer (the simulator
   /// shares your Mac's network stack, so plain localhost works):

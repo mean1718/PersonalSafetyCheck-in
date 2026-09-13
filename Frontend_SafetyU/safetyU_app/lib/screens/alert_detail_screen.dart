@@ -1,17 +1,26 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
+import 'package:latlong2/latlong.dart';
 
 import '../theme/app_theme.dart';
 import '../models/contact.dart';
 import '../models/help_request.dart';
 import '../models/contact_response_state.dart';
 import '../services/app_session.dart';
+import '../services/check_in_service.dart';
 import 'alert_response_result_screen.dart';
 
 /// "Alert detail" — what a trusted contact sees when they open a safety
 /// session alert. They decide right here whether they can help — there's
 /// no separate "Can you Help?" middle screen anymore.
-class AlertDetailScreen extends StatelessWidget {
+///
+/// NEW: on open, this now asks the backend for the Safety User's REAL,
+/// live location (GET /checkins/:id/location) instead of only showing the
+/// snapshot baked into [request] at the time it was built. If that call
+/// fails (no backend, session ended, not authorized, etc.) it falls back
+/// to the snapshot — same honest fallback pattern used elsewhere in this
+/// app for backend sync.
+class AlertDetailScreen extends StatefulWidget {
   final Contact contact;
   final HelpRequest request;
 
@@ -20,6 +29,39 @@ class AlertDetailScreen extends StatelessWidget {
     required this.contact,
     required this.request,
   });
+
+  @override
+  State<AlertDetailScreen> createState() => _AlertDetailScreenState();
+}
+
+class _AlertDetailScreenState extends State<AlertDetailScreen> {
+  LatLng? _liveLocation;
+  bool _isLoadingLocation = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _liveLocation = widget.request.location;
+    _fetchLiveLocation();
+  }
+
+  Future<void> _fetchLiveLocation() async {
+    final checkInId = widget.request.checkInId;
+    if (checkInId == null) {
+      setState(() => _isLoadingLocation = false);
+      return;
+    }
+    final data = await CheckInService.fetchLocation(checkInId);
+    if (!mounted) return;
+    final lat = (data?['latitude'] as num?)?.toDouble();
+    final lng = (data?['longitude'] as num?)?.toDouble();
+    setState(() {
+      if (lat != null && lng != null) {
+        _liveLocation = LatLng(lat, lng);
+      }
+      _isLoadingLocation = false;
+    });
+  }
 
   String _formatClock(DateTime t) {
     final hour24 = t.hour;
@@ -31,7 +73,7 @@ class AlertDetailScreen extends StatelessWidget {
 
   void _respond(BuildContext context, AlertResponseOutcome outcome) {
     AppSession.instance.recordContactOutcome(
-      contact.id,
+      widget.contact.id,
       outcome == AlertResponseOutcome.canHelp
           ? ContactResponseStatus.canHelp
           : ContactResponseStatus.cantHelp,
@@ -39,14 +81,15 @@ class AlertDetailScreen extends StatelessWidget {
     if (outcome == AlertResponseOutcome.canHelp) {
       // Let every other contact who was also alerted (and hasn't answered
       // yet) know someone's already on it, so they don't all show up too.
-      AppSession.instance.notifyOthersHelping(contact.id, contact.fullName);
+      AppSession.instance
+          .notifyOthersHelping(widget.contact.id, widget.contact.fullName);
     }
     Navigator.push(
       context,
       MaterialPageRoute(
         builder: (_) => AlertResponseResultScreen(
-          contact: contact,
-          request: request,
+          contact: widget.contact,
+          request: widget.request,
           outcome: outcome,
         ),
       ),
@@ -55,7 +98,8 @@ class AlertDetailScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final location = request.location;
+    final request = widget.request;
+    final location = _liveLocation;
     final distanceLabel = request.distanceKm != null
         ? '${request.distanceKm!.toStringAsFixed(1)} km'
         : 'Unavailable';
@@ -97,39 +141,46 @@ class AlertDetailScreen extends StatelessWidget {
                       child: SizedBox(
                         height: 180,
                         width: double.infinity,
-                        child: location != null
-                            ? FlutterMap(
-                                options: MapOptions(
-                                  initialCenter: location,
-                                  initialZoom: 14.5,
-                                ),
-                                children: [
-                                  TileLayer(
-                                    urlTemplate:
-                                        'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                                    userAgentPackageName: 'com.safetyu.app',
-                                  ),
-                                  MarkerLayer(
-                                    markers: [
-                                      Marker(
-                                        point: location,
-                                        child: Icon(Icons.location_on,
-                                            color: AppColors.danger, size: 38),
-                                      ),
-                                    ],
-                                  ),
-                                ],
-                              )
-                            : Container(
+                        child: _isLoadingLocation
+                            ? Container(
                                 color: AppColors.card,
                                 alignment: Alignment.center,
-                                child: Text(
-                                  'Location unavailable',
-                                  style: TextStyle(
-                                      fontSize: 12.5,
-                                      color: AppColors.textSecondary),
-                                ),
-                              ),
+                                child: const CircularProgressIndicator(),
+                              )
+                            : location != null
+                                ? FlutterMap(
+                                    options: MapOptions(
+                                      initialCenter: location,
+                                      initialZoom: 14.5,
+                                    ),
+                                    children: [
+                                      TileLayer(
+                                        urlTemplate:
+                                            'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                                        userAgentPackageName: 'com.safetyu.app',
+                                      ),
+                                      MarkerLayer(
+                                        markers: [
+                                          Marker(
+                                            point: location,
+                                            child: Icon(Icons.location_on,
+                                                color: AppColors.danger,
+                                                size: 38),
+                                          ),
+                                        ],
+                                      ),
+                                    ],
+                                  )
+                                : Container(
+                                    color: AppColors.card,
+                                    alignment: Alignment.center,
+                                    child: Text(
+                                      'Location unavailable',
+                                      style: TextStyle(
+                                          fontSize: 12.5,
+                                          color: AppColors.textSecondary),
+                                    ),
+                                  ),
                       ),
                     ),
                     const SizedBox(height: 16),
