@@ -18,6 +18,7 @@ import '../models/chat_message.dart';
 import '../services/app_session.dart';
 import '../services/check_in_service.dart';
 import '../services/emergency_service.dart';
+import '../services/chat_service.dart';
 import '../theme/app_theme.dart';
 import 'session_safe_screen.dart';
 
@@ -112,6 +113,7 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
     AppSession.instance.removeListener(_onSessionChanged);
     _timer?.cancel();
     _stageTimer?.cancel();
+    _alertStatusPollTimer?.cancel();
     _positionSub?.cancel();
     super.dispose();
   }
@@ -167,8 +169,23 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
           (rawArguments['longitude'] as num?)?.toDouble() ?? 104.9210;
       _destinationCoords = LatLng(latitude, longitude);
       final dynamic ids = rawArguments['notifyContactIds'];
+      // TODO(debug): remove once delivery is confirmed working. Shows the
+      // raw value and its type — tells us whether Session Setup ever sent
+      // this at all, vs. sent it as the wrong type, vs. sent it empty.
+      debugPrint(
+          'SafetyU: raw notifyContactIds = $ids (runtimeType: ${ids.runtimeType})');
       if (ids is List) {
         _confirmedNotifyContactIds = ids.map((e) => e.toString()).toList();
+        // These people are notified for real the moment the session starts
+        // (see _startBackendCheckIn below) — _notifiedContactIds used to
+        // only get populated later, during timeout escalation or a manual
+        // Need Help tap. That left it completely empty for the entire
+        // normal, no-escalation case, which meant "I'm Safe" found nobody
+        // to actually message even though real contacts were notified.
+        _notifiedContactIds.addAll(_confirmedNotifyContactIds);
+        // TODO(debug): remove once delivery is confirmed working.
+        debugPrint(
+            'SafetyU: session started with notifyContactIds=$_confirmedNotifyContactIds');
       }
     }
 
@@ -176,6 +193,34 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
     _startTimer();
     _initLocationTracking();
     _startBackendCheckIn();
+    _ensureContactsCached();
+  }
+
+  // Escalation and manual Need Help both resolve who to message via
+  // AppSession.contactsByIds — a local cache normally filled by visiting
+  // Friends or Select Contacts. If this screen is reached without that
+  // ever having happened, that cache is empty and those flows would
+  // silently find nobody to notify. This guarantees it's populated the
+  // moment a session actually starts, not just when browsing contacts.
+  Future<void> _ensureContactsCached() async {
+    try {
+      final contacts = await CheckInService.trustedContacts();
+      for (final contact in contacts) {
+        final userId = contact['userId']?.toString();
+        if (userId == null || userId.isEmpty) continue;
+        AppSession.instance.upsertContact(Contact(
+          id: userId,
+          fullName: contact['name']?.toString() ?? 'SafetyU user',
+          phone: contact['phone']?.toString() ?? '',
+          email: contact['email']?.toString() ?? '',
+          relationship: 'Trusted Contact',
+          status: ContactStatus.friend,
+          tierAssigned: false,
+        ));
+      }
+    } catch (e) {
+      debugPrint('Contact cache refresh skipped: $e');
+    }
   }
 
   // =========================================================
@@ -194,13 +239,45 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
         _checkInId = id;
         AppSession.instance.activeCheckInId = id;
         if (id != null) {
-          CheckInService.alertStatus(id).then(
-            AppSession.instance.replaceAlertResponsesFromBackend,
-          ).catchError((e) => debugPrint('Alert status sync skipped: $e'));
+          CheckInService.alertStatus(id)
+              .then(
+                AppSession.instance.replaceAlertResponsesFromBackend,
+              )
+              .catchError((e) => debugPrint('Alert status sync skipped: $e'));
+          _startAlertStatusPolling(id);
         }
       }
     }).catchError((e) {
       debugPrint('CheckIn sync skipped: $e');
+    });
+  }
+
+  // Without this, a contact's real "I can help" only ever gets pulled in
+  // at session start and (later) when Emergency escalation kicks off — so
+  // a response sent in between was invisible to this screen the whole
+  // time, and the "stop escalating once someone confirms" logic below
+  // could never actually see it happen. Every few seconds is frequent
+  // enough to feel real without hammering the server.
+  Timer? _alertStatusPollTimer;
+  void _startAlertStatusPolling(String checkInId) {
+    _alertStatusPollTimer?.cancel();
+    _alertStatusPollTimer =
+        Timer.periodic(const Duration(seconds: 6), (_) async {
+      if (!mounted) return;
+      try {
+        final contacts = await CheckInService.alertStatus(checkInId);
+        if (!mounted) return;
+        final wasConfirmed = _someoneConfirmedHelp();
+        AppSession.instance.replaceAlertResponsesFromBackend(contacts);
+        if (!wasConfirmed && _someoneConfirmedHelp()) {
+          // A response just came in — stop whatever escalation is running
+          // right now rather than waiting for its own timer to notice.
+          _stageTimer?.cancel();
+          setState(() {});
+        }
+      } catch (e) {
+        debugPrint('Alert status poll skipped: $e');
+      }
     });
   }
 
@@ -294,20 +371,30 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
   void _confirmSafe() {
     _timer?.cancel();
     _stageTimer?.cancel();
+    _alertStatusPollTimer?.cancel();
     _logHistory(SessionOutcome.safe);
     _syncSessionEndToBackend();
 
+    // This session is over — without clearing these, Home kept re-fetching
+    // and displaying status for this same completed check-in forever,
+    // showing contacts as still "Waiting..." even though there's nothing
+    // left to wait for.
+    AppSession.instance.activeCheckInId = null;
+    AppSession.instance.clearCurrentAlertResponses();
+
     // Tell every trusted contact who was actually alerted during this
     // session that the person is safe now — a real chat message, not just
-    // an in-app log.
-    for (final contact in AppSession.instance.friends) {
-      if (_notifiedContactIds.contains(contact.id)) {
-        AppSession.instance.sendChatMessage(
-          contact.id,
-          "I'm safe now. Thanks for checking on me!",
-          kind: ChatMessageKind.safeCheckIn,
-        );
-      }
+    // an in-app log. This sends straight to the real, backend-confirmed
+    // ids from session start — not filtered through AppSession.friends,
+    // which is just a local cache that may not be populated yet if this
+    // screen hasn't been visited recently, silently sending to nobody.
+    for (final contactId in _notifiedContactIds) {
+      _sendRealChatMessage(
+        contactId,
+        "I'm safe now. Thanks for checking on me!",
+        kind: ChatMessageKind.safeCheckIn,
+        backendKind: 'safeCheckIn',
+      );
     }
 
     final notifiedNames = AppSession.instance.friends
@@ -353,6 +440,15 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
     if (!mounted || _emergencyTriggered) {
       return;
     }
+    if (_someoneConfirmedHelp()) {
+      // Someone's already on the way — escalating further (notifying more
+      // people, or going to Emergency Responders) would be noise, not
+      // safety. Stop the chain here and just wait for the session to be
+      // resolved normally.
+      _stageTimer?.cancel();
+      setState(() {});
+      return;
+    }
     setState(() {
       _isAwaitingResponse = true;
       _stage = stage;
@@ -378,6 +474,13 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
         timer.cancel();
         return;
       }
+      if (_someoneConfirmedHelp()) {
+        // Don't wait for this stage's countdown to run out — the moment
+        // anyone confirms, stop ticking toward the next, louder stage.
+        timer.cancel();
+        setState(() {});
+        return;
+      }
       if (_stageSecondsRemaining > 0) {
         setState(() => _stageSecondsRemaining--);
       } else {
@@ -393,6 +496,49 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
         _enterEscalation(next);
       }
     });
+  }
+
+  bool _someoneConfirmedHelp() => AppSession.instance.currentAlertResponses
+      .any((r) => r.status == ContactResponseStatus.canHelp);
+
+  // AppSession.sendChatMessage only ever wrote to this device's own local
+  // thread — the trusted contact never actually received "Need Help" or
+  // "I'm Safe" at all, they were only ever visible on the sender's own
+  // phone. This sends the real message too, so it actually reaches them.
+  void _sendRealChatMessage(String contactId, String text,
+      {required ChatMessageKind kind, required String backendKind}) {
+    AppSession.instance.sendChatMessage(contactId, text, kind: kind);
+    ChatService.send(contactId, text, kind: backendKind).then((_) {
+      // TODO(debug): remove once delivery is confirmed working.
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            duration: const Duration(seconds: 6),
+            backgroundColor: Colors.green,
+            content: Text('DEBUG: delivered to $contactId'),
+          ),
+        );
+      }
+    }).catchError((e) {
+      debugPrint('Chat delivery skipped: $e');
+      // TODO(debug): remove once delivery is confirmed working.
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            duration: const Duration(seconds: 8),
+            backgroundColor: Colors.red,
+            content: Text('DEBUG: FAILED to $contactId -> $e'),
+          ),
+        );
+      }
+    });
+  }
+
+  String? _confirmedHelperName() {
+    for (final r in AppSession.instance.currentAlertResponses) {
+      if (r.status == ContactResponseStatus.canHelp) return r.contactName;
+    }
+    return null;
   }
 
   Future<void> _notifyStage(_EscalationStage stage) async {
@@ -444,11 +590,19 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
         kind: NotificationKind.trustedContact,
       );
       _notifiedContactIds.add(target.id);
-      AppSession.instance.sendChatMessage(
+      _sendRealChatMessage(
         target.id,
         "I need help! I haven't checked in near $_destination.$locationLine\nCan you help?",
         kind: ChatMessageKind.helpRequest,
+        backendKind: 'helpRequest',
       );
+    }
+    // A real, fresh alert — not just a chat message — so it actually shows
+    // up on each contact's Home screen even if they already answered the
+    // original session-start notification.
+    if (_checkInId != null && targets.isNotEmpty) {
+      CheckInService.needHelpNow(_checkInId!, targets.map((t) => t.id).toList())
+          .catchError((e) => debugPrint('Need-help re-alert skipped: $e'));
     }
 
     if (_confirmedNotifyContactIds.isEmpty && stage == _EscalationStage.main) {
@@ -544,11 +698,16 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
         kind: NotificationKind.trustedContact,
       );
       _notifiedContactIds.add(main.id);
-      AppSession.instance.sendChatMessage(
+      _sendRealChatMessage(
         main.id,
         "I need help right now near $_destination.$locationLine\nCan you help?",
         kind: ChatMessageKind.helpRequest,
+        backendKind: 'helpRequest',
       );
+    }
+    if (_checkInId != null && mains.isNotEmpty) {
+      CheckInService.needHelpNow(_checkInId!, mains.map((c) => c.id).toList())
+          .catchError((e) => debugPrint('Need-help re-alert skipped: $e'));
     }
 
     _escalateToEmergencyResponders();
@@ -771,296 +930,318 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
     final String appBarTitle =
         _hadDelay ? 'Delay Session Active' : 'Safety Session Active';
 
-    return Scaffold(
-      backgroundColor: AppColors.background,
-      appBar: AppBar(
-        backgroundColor: AppColors.background,
-        elevation: 0,
-        automaticallyImplyLeading: false,
-        title: Text(appBarTitle,
-            style: TextStyle(
-                color: AppColors.textPrimary,
-                fontSize: 18,
-                fontWeight: FontWeight.w700)),
-        actions: [
-          IconButton(
-            icon: Icon(Icons.share_location, color: AppColors.navy),
-            tooltip: 'Share my live location',
-            onPressed: () => _shareLocation(),
+    return PopScope(
+      // The countdown, escalation, and alert-status polling all live on
+      // this screen's State — if it gets popped (back button/gesture),
+      // dispose() cancels every one of those timers and the whole safety
+      // session silently stops running, even though the backend still
+      // thinks it's active. Blocking back here is what keeps it running;
+      // I'm Safe / Need Help / Request Delay are the only real exits.
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) {
+        if (didPop) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+                "Your safety session is still active. Use I'm Safe or Need Help to end it."),
           ),
-        ],
-      ),
-      body: SafeArea(
-        child: SingleChildScrollView(
-          child: Column(
-            children: [
-              if (_isAwaitingResponse)
-                _EscalationBanner(
-                  stage: _stage,
-                  sosSent: _emergencyTriggered,
-                  onCallPolice: _callPolice,
-                )
-              else
-                Container(
-                  height: 180,
-                  width: double.infinity,
-                  margin: const EdgeInsets.all(20),
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(16),
-                    child: FlutterMap(
-                      mapController: _mapController,
-                      options: MapOptions(
-                          initialCenter: _currentPosition ?? _destinationCoords,
-                          initialZoom: 15.0),
-                      children: [
-                        TileLayer(
-                          urlTemplate:
-                              'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                          userAgentPackageName: 'com.safetyu.app',
-                        ),
-                        if (_currentPosition != null)
-                          PolylineLayer(
-                            polylines: [
-                              Polyline(
-                                  points: [
-                                    _currentPosition!,
-                                    _destinationCoords
-                                  ],
-                                  strokeWidth: 3,
-                                  color: AppColors.navy.withValues(alpha: 0.4)),
+        );
+      },
+      child: Scaffold(
+        backgroundColor: AppColors.background,
+        appBar: AppBar(
+          backgroundColor: AppColors.background,
+          elevation: 0,
+          automaticallyImplyLeading: false,
+          title: Text(appBarTitle,
+              style: TextStyle(
+                  color: AppColors.textPrimary,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w700)),
+          actions: [
+            IconButton(
+              icon: Icon(Icons.share_location, color: AppColors.navy),
+              tooltip: 'Share my live location',
+              onPressed: () => _shareLocation(),
+            ),
+          ],
+        ),
+        body: SafeArea(
+          child: SingleChildScrollView(
+            child: Column(
+              children: [
+                if (_isAwaitingResponse)
+                  _EscalationBanner(
+                    stage: _stage,
+                    sosSent: _emergencyTriggered,
+                    helpConfirmedBy: _confirmedHelperName(),
+                    onCallPolice: _callPolice,
+                  )
+                else
+                  Container(
+                    height: 180,
+                    width: double.infinity,
+                    margin: const EdgeInsets.all(20),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(16),
+                      child: FlutterMap(
+                        mapController: _mapController,
+                        options: MapOptions(
+                            initialCenter:
+                                _currentPosition ?? _destinationCoords,
+                            initialZoom: 15.0),
+                        children: [
+                          TileLayer(
+                            urlTemplate:
+                                'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                            userAgentPackageName: 'com.safetyu.app',
+                          ),
+                          if (_currentPosition != null)
+                            PolylineLayer(
+                              polylines: [
+                                Polyline(
+                                    points: [
+                                      _currentPosition!,
+                                      _destinationCoords
+                                    ],
+                                    strokeWidth: 3,
+                                    color:
+                                        AppColors.navy.withValues(alpha: 0.4)),
+                              ],
+                            ),
+                          MarkerLayer(
+                            markers: [
+                              Marker(
+                                  point: _destinationCoords,
+                                  child: Icon(Icons.location_on,
+                                      color: AppColors.navy, size: 38)),
+                              if (_currentPosition != null)
+                                Marker(
+                                    point: _currentPosition!,
+                                    child: const Icon(Icons.my_location,
+                                        color: Colors.blueAccent, size: 30)),
                             ],
                           ),
-                        MarkerLayer(
-                          markers: [
-                            Marker(
-                                point: _destinationCoords,
-                                child: Icon(Icons.location_on,
-                                    color: AppColors.navy, size: 38)),
-                            if (_currentPosition != null)
-                              Marker(
-                                  point: _currentPosition!,
-                                  child: const Icon(Icons.my_location,
-                                      color: Colors.blueAccent, size: 30)),
+                        ],
+                      ),
+                    ),
+                  ),
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text(
+                        _formatTime(_secondsRemaining),
+                        style: TextStyle(
+                          fontSize: 54,
+                          fontWeight: FontWeight.w800,
+                          color: _isAwaitingResponse
+                              ? AppColors.textMuted
+                              : AppColors.navy,
+                          letterSpacing: 1.5,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text('Count Down Time',
+                          style: TextStyle(
+                              fontSize: 13,
+                              color: AppColors.textMuted,
+                              fontWeight: FontWeight.w500)),
+                    ],
+                  ),
+                ),
+                Container(
+                  width: double.infinity,
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                  decoration: BoxDecoration(
+                      border: Border(
+                          bottom: BorderSide(
+                              color: AppColors.border.withValues(alpha: 0.5)))),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(_destination,
+                          style: TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.w800,
+                              color: AppColors.textPrimary)),
+                      const SizedBox(height: 4),
+                      Text(
+                        _hadDelay
+                            ? 'Expected arrival with delay: $_expectedTimeStr'
+                            : 'Expected arrival: $_expectedTimeStr',
+                        style: TextStyle(
+                            fontSize: 12.5, color: AppColors.textSecondary),
+                      ),
+                      if (_locationStatusMessage != null) ...[
+                        const SizedBox(height: 5),
+                        Text(_locationStatusMessage!,
+                            style: const TextStyle(
+                                fontSize: 11.5, color: Colors.redAccent)),
+                      ],
+                    ],
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.all(20),
+                  child: Column(
+                    children: [
+                      SizedBox(
+                        width: double.infinity,
+                        height: 52,
+                        child: ElevatedButton(
+                          onPressed: _confirmSafe,
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: AppColors.navy,
+                            elevation: 0,
+                            shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(26)),
+                          ),
+                          child: const Text("I'm Safe",
+                              style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w700)),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      SizedBox(
+                        width: double.infinity,
+                        height: 52,
+                        child: OutlinedButton(
+                          onPressed: () async {
+                            final dynamic result = await Navigator.pushNamed(
+                              context,
+                              '/request-delay',
+                              arguments: <String, dynamic>{
+                                'remainingSeconds': _secondsRemaining,
+                                'destination': _destination
+                              },
+                            );
+                            if (!mounted) {
+                              return;
+                            }
+                            if (result is Map) {
+                              final int extraSeconds =
+                                  result['extraSeconds'] as int? ?? 0;
+                              final String? newDestination =
+                                  result['destination'] as String?;
+                              final double? newLat =
+                                  (result['latitude'] as num?)?.toDouble();
+                              final double? newLng =
+                                  (result['longitude'] as num?)?.toDouble();
+
+                              setState(() {
+                                if (extraSeconds > 0) {
+                                  _secondsRemaining += extraSeconds;
+                                  _hadDelay = true;
+                                  _expectedTimeStr =
+                                      _formatClockFromNow(_secondsRemaining);
+                                }
+                                if (newDestination != null &&
+                                    newDestination.isNotEmpty) {
+                                  _destination = newDestination;
+                                }
+                                if (newLat != null && newLng != null) {
+                                  _destinationCoords = LatLng(newLat, newLng);
+                                }
+                                if (_isAwaitingResponse &&
+                                    !_emergencyTriggered) {
+                                  _isAwaitingResponse = false;
+                                  _stage = _EscalationStage.main;
+                                  _stageTimer?.cancel();
+                                  _stageSecondsRemaining =
+                                      _stageGracePeriodSeconds;
+                                }
+                              });
+
+                              if (extraSeconds > 0 && !_emergencyTriggered) {
+                                _startTimer();
+                              }
+                            }
+                          },
+                          style: OutlinedButton.styleFrom(
+                            backgroundColor: AppColors.card,
+                            side: BorderSide(
+                                color: AppColors.border.withValues(alpha: 0.8)),
+                            shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(26)),
+                          ),
+                          child: Text('Request Delay',
+                              style: TextStyle(
+                                  color: AppColors.textPrimary,
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w700)),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      SizedBox(
+                        width: double.infinity,
+                        height: 52,
+                        child: ElevatedButton(
+                          onPressed: _triggerEmergencyAlert,
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFFFF6554),
+                            elevation: 0,
+                            shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(26)),
+                          ),
+                          child: const Text('Need Help',
+                              style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w700)),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                if (_isAwaitingResponse && !_emergencyTriggered)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text(
+                              _stage == _EscalationStage.main
+                                  ? 'We will alert your other contacts in'
+                                  : 'We will alert Emergency Responders in',
+                              style: TextStyle(
+                                  fontSize: 12,
+                                  color: AppColors.textSecondary,
+                                  fontWeight: FontWeight.w600),
+                            ),
+                            Text(_formatTime(_stageSecondsRemaining),
+                                style: const TextStyle(
+                                    fontSize: 12,
+                                    color: Color(0xFFFF6554),
+                                    fontWeight: FontWeight.w700)),
                           ],
+                        ),
+                        const SizedBox(height: 6),
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(6),
+                          child: LinearProgressIndicator(
+                            value: 1 -
+                                (_stageSecondsRemaining /
+                                    _stageGracePeriodSeconds),
+                            minHeight: 6,
+                            backgroundColor:
+                                AppColors.border.withValues(alpha: 0.5),
+                            valueColor: const AlwaysStoppedAnimation<Color>(
+                                Color(0xFFFF6554)),
+                          ),
                         ),
                       ],
                     ),
                   ),
-                ),
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 12),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Text(
-                      _formatTime(_secondsRemaining),
-                      style: TextStyle(
-                        fontSize: 54,
-                        fontWeight: FontWeight.w800,
-                        color: _isAwaitingResponse
-                            ? AppColors.textMuted
-                            : AppColors.navy,
-                        letterSpacing: 1.5,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Text('Count Down Time',
-                        style: TextStyle(
-                            fontSize: 13,
-                            color: AppColors.textMuted,
-                            fontWeight: FontWeight.w500)),
-                  ],
-                ),
-              ),
-              Container(
-                width: double.infinity,
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                decoration: BoxDecoration(
-                    border: Border(
-                        bottom: BorderSide(
-                            color: AppColors.border.withValues(alpha: 0.5)))),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(_destination,
-                        style: TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.w800,
-                            color: AppColors.textPrimary)),
-                    const SizedBox(height: 4),
-                    Text(
-                      _hadDelay
-                          ? 'Expected arrival with delay: $_expectedTimeStr'
-                          : 'Expected arrival: $_expectedTimeStr',
-                      style: TextStyle(
-                          fontSize: 12.5, color: AppColors.textSecondary),
-                    ),
-                    if (_locationStatusMessage != null) ...[
-                      const SizedBox(height: 5),
-                      Text(_locationStatusMessage!,
-                          style: const TextStyle(
-                              fontSize: 11.5, color: Colors.redAccent)),
-                    ],
-                  ],
-                ),
-              ),
-              Padding(
-                padding: const EdgeInsets.all(20),
-                child: Column(
-                  children: [
-                    SizedBox(
-                      width: double.infinity,
-                      height: 52,
-                      child: ElevatedButton(
-                        onPressed: _confirmSafe,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: AppColors.navy,
-                          elevation: 0,
-                          shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(26)),
-                        ),
-                        child: const Text("I'm Safe",
-                            style: TextStyle(
-                                color: Colors.white,
-                                fontSize: 15,
-                                fontWeight: FontWeight.w700)),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    SizedBox(
-                      width: double.infinity,
-                      height: 52,
-                      child: OutlinedButton(
-                        onPressed: () async {
-                          final dynamic result = await Navigator.pushNamed(
-                            context,
-                            '/request-delay',
-                            arguments: <String, dynamic>{
-                              'remainingSeconds': _secondsRemaining,
-                              'destination': _destination
-                            },
-                          );
-                          if (!mounted) {
-                            return;
-                          }
-                          if (result is Map) {
-                            final int extraSeconds =
-                                result['extraSeconds'] as int? ?? 0;
-                            final String? newDestination =
-                                result['destination'] as String?;
-                            final double? newLat =
-                                (result['latitude'] as num?)?.toDouble();
-                            final double? newLng =
-                                (result['longitude'] as num?)?.toDouble();
-
-                            setState(() {
-                              if (extraSeconds > 0) {
-                                _secondsRemaining += extraSeconds;
-                                _hadDelay = true;
-                                _expectedTimeStr =
-                                    _formatClockFromNow(_secondsRemaining);
-                              }
-                              if (newDestination != null &&
-                                  newDestination.isNotEmpty) {
-                                _destination = newDestination;
-                              }
-                              if (newLat != null && newLng != null) {
-                                _destinationCoords = LatLng(newLat, newLng);
-                              }
-                              if (_isAwaitingResponse && !_emergencyTriggered) {
-                                _isAwaitingResponse = false;
-                                _stage = _EscalationStage.main;
-                                _stageTimer?.cancel();
-                                _stageSecondsRemaining =
-                                    _stageGracePeriodSeconds;
-                              }
-                            });
-
-                            if (extraSeconds > 0 && !_emergencyTriggered) {
-                              _startTimer();
-                            }
-                          }
-                        },
-                        style: OutlinedButton.styleFrom(
-                          backgroundColor: AppColors.card,
-                          side: BorderSide(
-                              color: AppColors.border.withValues(alpha: 0.8)),
-                          shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(26)),
-                        ),
-                        child: Text('Request Delay',
-                            style: TextStyle(
-                                color: AppColors.textPrimary,
-                                fontSize: 15,
-                                fontWeight: FontWeight.w700)),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    SizedBox(
-                      width: double.infinity,
-                      height: 52,
-                      child: ElevatedButton(
-                        onPressed: _triggerEmergencyAlert,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFFFF6554),
-                          elevation: 0,
-                          shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(26)),
-                        ),
-                        child: const Text('Need Help',
-                            style: TextStyle(
-                                color: Colors.white,
-                                fontSize: 15,
-                                fontWeight: FontWeight.w700)),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              if (_isAwaitingResponse && !_emergencyTriggered)
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Text(
-                            _stage == _EscalationStage.main
-                                ? 'Escalates to other contacts in'
-                                : 'Escalates to Emergency Responders in',
-                            style: TextStyle(
-                                fontSize: 12,
-                                color: AppColors.textSecondary,
-                                fontWeight: FontWeight.w600),
-                          ),
-                          Text(_formatTime(_stageSecondsRemaining),
-                              style: const TextStyle(
-                                  fontSize: 12,
-                                  color: Color(0xFFFF6554),
-                                  fontWeight: FontWeight.w700)),
-                        ],
-                      ),
-                      const SizedBox(height: 6),
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(6),
-                        child: LinearProgressIndicator(
-                          value: 1 -
-                              (_stageSecondsRemaining /
-                                  _stageGracePeriodSeconds),
-                          minHeight: 6,
-                          backgroundColor:
-                              AppColors.border.withValues(alpha: 0.5),
-                          valueColor: const AlwaysStoppedAnimation<Color>(
-                              Color(0xFFFF6554)),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
@@ -1071,17 +1252,26 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
 class _EscalationBanner extends StatelessWidget {
   final _EscalationStage stage;
   final bool sosSent;
+  final String? helpConfirmedBy;
   final VoidCallback onCallPolice;
 
-  const _EscalationBanner(
-      {required this.stage, required this.sosSent, required this.onCallPolice});
+  const _EscalationBanner({
+    required this.stage,
+    required this.sosSent,
+    required this.onCallPolice,
+    this.helpConfirmedBy,
+  });
 
   @override
   Widget build(BuildContext context) {
     String title;
     String subtitle;
 
-    if (sosSent) {
+    if (helpConfirmedBy != null) {
+      title = 'Help is on the way';
+      subtitle =
+          "$helpConfirmedBy confirmed they can help. We've stopped alerting anyone else — tap I'm Safe once they've reached you.";
+    } else if (sosSent) {
       title = 'SOS Sent';
       subtitle =
           'Your Emergency Responders have been alerted with your location.';
@@ -1089,23 +1279,32 @@ class _EscalationBanner extends StatelessWidget {
       title = 'Time is up!';
       subtitle = 'Are you safe? Your main contacts have been notified.';
     } else {
-      title = 'Escalating';
+      title = 'Still no response';
       subtitle =
-          'No confirmation yet — your other contacts have been notified.';
+          "You haven't confirmed you're safe yet — your other contacts have been told.";
     }
+
+    final calm = helpConfirmedBy != null;
 
     return Container(
       width: double.infinity,
       margin: const EdgeInsets.fromLTRB(20, 20, 20, 4),
       padding: const EdgeInsets.symmetric(vertical: 26, horizontal: 20),
       decoration: BoxDecoration(
-        color: AppColors.dangerLight,
+        color: calm
+            ? AppColors.success.withValues(alpha: 0.1)
+            : AppColors.dangerLight,
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: const Color(0xFFFFC9C0)),
+        border: Border.all(
+            color: calm
+                ? AppColors.success.withValues(alpha: 0.4)
+                : const Color(0xFFFFC9C0)),
       ),
       child: Column(
         children: [
-          const Icon(Icons.error_outline, color: Color(0xFFFF6554), size: 34),
+          Icon(calm ? Icons.check_circle_outline : Icons.error_outline,
+              color: calm ? AppColors.success : const Color(0xFFFF6554),
+              size: 34),
           const SizedBox(height: 10),
           Text(title,
               style: TextStyle(
@@ -1115,10 +1314,10 @@ class _EscalationBanner extends StatelessWidget {
           const SizedBox(height: 4),
           Text(subtitle,
               textAlign: TextAlign.center,
-              style: const TextStyle(
+              style: TextStyle(
                   fontSize: 13.5,
                   fontWeight: FontWeight.w700,
-                  color: Color(0xFFFF6554))),
+                  color: calm ? AppColors.success : const Color(0xFFFF6554))),
           if (sosSent) ...[
             const SizedBox(height: 16),
             SizedBox(

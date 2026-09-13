@@ -8,6 +8,7 @@ import '../models/help_request.dart';
 import '../models/contact_response_state.dart';
 import '../services/app_session.dart';
 import '../services/check_in_service.dart';
+import '../services/notification_service.dart';
 import 'alert_response_result_screen.dart';
 
 /// "Alert detail" — what a trusted contact sees when they open a safety
@@ -23,11 +24,22 @@ import 'alert_response_result_screen.dart';
 class AlertDetailScreen extends StatefulWidget {
   final Contact contact;
   final HelpRequest request;
+  // Set when this screen was opened from a real backend alert (Home's
+  // incoming-alert card). When present, responding here actually calls
+  // PUT /notifications/:id/response so the session owner sees the real
+  // response — not just a local-only update on this device.
+  final String? notificationId;
+  // Other still-pending alerts from the same sender (repeated/duplicate
+  // test sessions pile these up fast) — resolved with the same outcome
+  // the moment this one is, so she never has to tap through each one.
+  final List<String> siblingNotificationIds;
 
   const AlertDetailScreen({
     super.key,
     required this.contact,
     required this.request,
+    this.notificationId,
+    this.siblingNotificationIds = const [],
   });
 
   @override
@@ -37,6 +49,7 @@ class AlertDetailScreen extends StatefulWidget {
 class _AlertDetailScreenState extends State<AlertDetailScreen> {
   LatLng? _liveLocation;
   bool _isLoadingLocation = true;
+  bool _sending = false;
 
   @override
   void initState() {
@@ -71,7 +84,37 @@ class _AlertDetailScreenState extends State<AlertDetailScreen> {
     return '$hour12:$minute $period';
   }
 
-  void _respond(BuildContext context, AlertResponseOutcome outcome) {
+  Future<void> _respond(
+      BuildContext context, AlertResponseOutcome outcome) async {
+    if (_sending) return;
+    final notificationId = widget.notificationId;
+    if (notificationId != null) {
+      setState(() => _sending = true);
+      final responseStatus =
+          outcome == AlertResponseOutcome.canHelp ? 'can_help' : 'cannot_help';
+      try {
+        await NotificationService.respondToSafetyAlert(
+            notificationId, responseStatus);
+      } catch (_) {
+        if (mounted) {
+          setState(() => _sending = false);
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+                content: Text('Could not send your response. Try again.')),
+          );
+        }
+        return;
+      }
+      // Best-effort — if one of these fails, it just stays pending and
+      // she can resolve it normally later; it doesn't block this response.
+      for (final siblingId in widget.siblingNotificationIds) {
+        try {
+          await NotificationService.respondToSafetyAlert(
+              siblingId, responseStatus);
+        } catch (_) {}
+      }
+    }
+
     AppSession.instance.recordContactOutcome(
       widget.contact.id,
       outcome == AlertResponseOutcome.canHelp
@@ -84,7 +127,8 @@ class _AlertDetailScreenState extends State<AlertDetailScreen> {
       AppSession.instance
           .notifyOthersHelping(widget.contact.id, widget.contact.fullName);
     }
-    Navigator.push(
+    if (!mounted) return;
+    Navigator.pushReplacement(
       context,
       MaterialPageRoute(
         builder: (_) => AlertResponseResultScreen(
@@ -347,8 +391,10 @@ class _AlertDetailScreenState extends State<AlertDetailScreen> {
                     child: SizedBox(
                       height: 54,
                       child: OutlinedButton(
-                        onPressed: () =>
-                            _respond(context, AlertResponseOutcome.cantHelp),
+                        onPressed: _sending
+                            ? null
+                            : () => _respond(
+                                context, AlertResponseOutcome.cantHelp),
                         style: OutlinedButton.styleFrom(
                           side: BorderSide(color: AppColors.danger),
                         ),
@@ -363,12 +409,21 @@ class _AlertDetailScreenState extends State<AlertDetailScreen> {
                     child: SizedBox(
                       height: 54,
                       child: ElevatedButton(
-                        onPressed: () =>
-                            _respond(context, AlertResponseOutcome.canHelp),
+                        onPressed: _sending
+                            ? null
+                            : () =>
+                                _respond(context, AlertResponseOutcome.canHelp),
                         style: ElevatedButton.styleFrom(
                           backgroundColor: AppColors.success,
                         ),
-                        child: Text('Respond to ${request.requesterName}'),
+                        child: _sending
+                            ? const SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(
+                                    strokeWidth: 2, color: Colors.white),
+                              )
+                            : Text('Respond to ${request.requesterName}'),
                       ),
                     ),
                   ),

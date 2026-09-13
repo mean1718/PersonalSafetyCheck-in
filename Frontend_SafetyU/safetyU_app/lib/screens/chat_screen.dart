@@ -1,12 +1,14 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
 import '../models/contact.dart';
 import '../models/chat_message.dart';
 import '../services/app_session.dart';
+import '../services/chat_service.dart';
 
 /// Opened by tapping a contact's avatar/name in Trusted Contacts.
-/// A real (if backend-less) 1:1 thread with that contact — messages are
-/// only ever what the person actually typed or tapped from this device.
+/// A real, backend-delivered 1:1 thread with that contact — messages sent
+/// here actually reach their account, and theirs actually reach yours.
 class ChatScreen extends StatefulWidget {
   final Contact contact;
   const ChatScreen({super.key, required this.contact});
@@ -19,8 +21,73 @@ class _ChatScreenState extends State<ChatScreen> {
   final TextEditingController _controller = TextEditingController();
   final ScrollController _scrollController = ScrollController();
 
-  List<ChatMessage> get _messages =>
-      AppSession.instance.messagesFor(widget.contact.id);
+  List<ChatMessage> _messages = [];
+  bool _loading = true;
+  Timer? _pollTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadConversation(initial: true);
+    // Lightweight polling so a reply shows up without needing to leave and
+    // reopen the screen — there's no push/socket layer in this build yet.
+    _pollTimer =
+        Timer.periodic(const Duration(seconds: 4), (_) => _loadConversation());
+  }
+
+  ChatMessageKind _kindFromBackend(String? kind) {
+    switch (kind) {
+      case 'safeCheckIn':
+        return ChatMessageKind.safeCheckIn;
+      case 'helpRequest':
+        return ChatMessageKind.helpRequest;
+      default:
+        return ChatMessageKind.text;
+    }
+  }
+
+  String _kindToBackend(ChatMessageKind kind) {
+    switch (kind) {
+      case ChatMessageKind.safeCheckIn:
+        return 'safeCheckIn';
+      case ChatMessageKind.helpRequest:
+        return 'helpRequest';
+      case ChatMessageKind.text:
+        return 'text';
+    }
+  }
+
+  Future<void> _loadConversation({bool initial = false}) async {
+    try {
+      final raw = await ChatService.conversation(widget.contact.id);
+      final myId = AppSession.instance.backendUserId;
+      final messages = raw.map((m) {
+        // Server timestamps are UTC — .toLocal() is what makes the time
+        // shown match the person's own clock instead of running however
+        // many hours ahead/behind the server's timezone.
+        final sentAt = (DateTime.tryParse(m['createdAt']?.toString() ?? '') ??
+                DateTime.now())
+            .toLocal();
+        return ChatMessage(
+          id: m['_id']?.toString() ?? '',
+          text: m['text']?.toString() ?? '',
+          isMe: m['sender']?.toString() == myId,
+          sentAt: sentAt,
+          kind: _kindFromBackend(m['kind']?.toString()),
+        );
+      }).toList();
+      if (mounted) {
+        setState(() {
+          _messages = messages;
+          _loading = false;
+        });
+        _scrollToBottom();
+      }
+    } catch (e) {
+      if (mounted) setState(() => _loading = false);
+      debugPrint('Chat load skipped: $e');
+    }
+  }
 
   void _scrollToBottom() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -33,19 +100,42 @@ class _ChatScreenState extends State<ChatScreen> {
     });
   }
 
-  void _send(
-      {String? presetText, ChatMessageKind kind = ChatMessageKind.text}) {
+  Future<void> _send(
+      {String? presetText, ChatMessageKind kind = ChatMessageKind.text}) async {
     final text = presetText ?? _controller.text.trim();
     if (text.isEmpty) return;
+    _controller.clear();
+    // Optimistic local echo so sending feels instant, reconciled against
+    // the server's own copy on the next poll.
     setState(() {
-      AppSession.instance.sendChatMessage(widget.contact.id, text, kind: kind);
-      _controller.clear();
+      _messages = [
+        ..._messages,
+        ChatMessage(
+          id: 'local-${DateTime.now().microsecondsSinceEpoch}',
+          text: text,
+          isMe: true,
+          sentAt: DateTime.now(),
+          kind: kind,
+        ),
+      ];
     });
     _scrollToBottom();
+    try {
+      await ChatService.send(widget.contact.id, text,
+          kind: _kindToBackend(kind));
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Message didn't send. Try again.")),
+        );
+      }
+    }
+    _loadConversation();
   }
 
   @override
   void dispose() {
+    _pollTimer?.cancel();
     _controller.dispose();
     _scrollController.dispose();
     super.dispose();
@@ -109,16 +199,18 @@ class _ChatScreenState extends State<ChatScreen> {
         child: Column(
           children: [
             Expanded(
-              child: _messages.isEmpty
-                  ? _EmptyChat(contactName: contact.fullName)
-                  : ListView.builder(
-                      controller: _scrollController,
-                      padding: const EdgeInsets.all(16),
-                      itemCount: _messages.length,
-                      itemBuilder: (context, index) {
-                        return _MessageBubble(message: _messages[index]);
-                      },
-                    ),
+              child: _loading
+                  ? const Center(child: CircularProgressIndicator())
+                  : _messages.isEmpty
+                      ? _EmptyChat(contactName: contact.fullName)
+                      : ListView.builder(
+                          controller: _scrollController,
+                          padding: const EdgeInsets.all(16),
+                          itemCount: _messages.length,
+                          itemBuilder: (context, index) {
+                            return _MessageBubble(message: _messages[index]);
+                          },
+                        ),
             ),
             _ChatInputBar(
               controller: _controller,

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:geocoding/geocoding.dart';
 import '../theme/app_theme.dart';
+import '../widgets/safety_illustration.dart';
 
 class RequestDelayScreen extends StatefulWidget {
   const RequestDelayScreen({super.key});
@@ -360,8 +361,8 @@ class _RequestDelayScreenState extends State<RequestDelayScreen> {
             ),
 
             // BOTTOM BUTTONS
-            Padding(
-              padding: const EdgeInsets.all(20),
+            SkylineBottomBar(
+              height: 190,
               child: Column(
                 children: [
                   SizedBox(

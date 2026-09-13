@@ -11,7 +11,8 @@ import 'api_client.dart';
 class CheckInService {
   static Future<List<Map<String, dynamic>>> trustedContacts() async {
     final data = await ApiClient.get('/checkins/trusted-contacts');
-    return (data['contacts'] as List<dynamic>? ?? []).cast<Map<String, dynamic>>();
+    return (data['contacts'] as List<dynamic>? ?? [])
+        .cast<Map<String, dynamic>>();
   }
 
   static Future<String?> start({
@@ -34,13 +35,14 @@ class CheckInService {
     await ApiClient.put('/checkins/$checkInId/complete', {});
   }
 
-  static Future<List<Map<String, dynamic>>> alertStatus(String checkInId) async {
+  static Future<List<Map<String, dynamic>>> alertStatus(
+      String checkInId) async {
     final data = await ApiClient.get('/checkins/$checkInId/alert-status');
     return (data['notifiedContacts'] as List<dynamic>? ?? [])
         .cast<Map<String, dynamic>>();
   }
 
-    static Future<void> updateLocation(
+  static Future<void> updateLocation(
     String checkInId, {
     required double latitude,
     required double longitude,
@@ -58,5 +60,29 @@ class CheckInService {
     } catch (_) {
       return null;
     }
+  }
+
+  // GET /api/checkins — every check-in *this* signed-in account has ever
+  // started, most recent first. History used to only ever show whatever
+  // happened to still be sitting in local memory since the last login,
+  // which meant a fresh sign-in — or another account's leftover
+  // memory — showed the wrong thing (or nothing at all). This is the
+  // real, per-account record from the server.
+  static Future<List<Map<String, dynamic>>> myCheckIns() async {
+    final data = await ApiClient.get('/checkins');
+    return (data['checkIns'] as List<dynamic>? ?? [])
+        .cast<Map<String, dynamic>>();
+  }
+
+  // POST /api/checkins/:id/need-help — creates a fresh, real safety_alert
+  // notification for the given contacts. The original session-start
+  // notification only reflects state from when the session began; if a
+  // contact already responded to it, nothing would otherwise resurface on
+  // their Home screen for this more urgent later moment.
+  static Future<void> needHelpNow(
+      String checkInId, List<String> contactUserIds) async {
+    await ApiClient.post('/checkins/$checkInId/need-help', {
+      if (contactUserIds.isNotEmpty) 'contactUserIds': contactUserIds,
+    });
   }
 }

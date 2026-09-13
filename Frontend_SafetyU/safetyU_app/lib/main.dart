@@ -5,6 +5,7 @@ import 'models/contact.dart';
 import 'screens/splash_screen.dart';
 import 'screens/login_screen.dart';
 import 'screens/signup_screen.dart';
+import 'screens/account_type_screen.dart';
 import 'screens/home_dashboard_screen.dart';
 import 'screens/trusted_contacts_screen.dart';
 import 'screens/edit_contact_screen.dart';
@@ -53,6 +54,7 @@ class SafetyUApp extends StatelessWidget {
             '/': (context) => const SplashScreen(),
             '/login': (context) => const LoginScreen(),
             '/signup': (context) => const SignUpScreen(),
+            '/account-type': (context) => const AccountTypeScreen(),
             '/home': (context) => const HomeDashboardScreen(),
             '/contacts': (context) => const TrustedContactsScreen(),
             '/session-setup': (context) => const SessionSetupScreen(),

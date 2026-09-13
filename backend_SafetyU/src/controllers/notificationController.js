@@ -3,7 +3,10 @@ const Notification = require("../models/Notification");
 
 const getMyNotifications = async (req, res) => {
   try {
-    const notifications = await Notification.find({ receiver: req.user.id }).populate("sender", "name phone").sort({ createdAt: -1 });
+    const notifications = await Notification.find({ receiver: req.user.id })
+      .populate("sender", "name phone")
+      .populate("checkIn", "status")
+      .sort({ createdAt: -1 });
     return res.json({ notifications });
   } catch (_) { return res.status(500).json({ message: "Server error" }); }
 };

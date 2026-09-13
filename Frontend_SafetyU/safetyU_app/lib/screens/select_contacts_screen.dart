@@ -36,12 +36,13 @@ class _SelectContactsScreenState extends State<SelectContactsScreen> {
       final preselected = ModalRoute.of(context)?.settings.arguments;
       if (preselected is List<String>) {
         setState(() => _selectedIds.addAll(preselected));
-      } else {
-        // Default to notifying every confirmed friend, so the session
-        // always starts with someone covered.
-        setState(() =>
-            _selectedIds.addAll(AppSession.instance.friends.map((c) => c.id)));
       }
+      // No longer defaults to every confirmed friend — silently
+      // pre-selecting people meant every friend got a real "you were
+      // notified" alert the moment this screen was even opened, with
+      // nothing tapped. Notifying someone should always be a deliberate
+      // choice; the Confirm button below already stays disabled until at
+      // least one person is actually picked.
     });
     _searchController.addListener(() {
       setState(() => _query = _searchController.text.trim().toLowerCase());
@@ -71,11 +72,7 @@ class _SelectContactsScreenState extends State<SelectContactsScreen> {
           tierAssigned: false,
         ));
       }
-      if (mounted) setState(() {
-        if (_selectedIds.isEmpty) {
-          _selectedIds.addAll(AppSession.instance.friends.map((c) => c.id));
-        }
-      });
+      if (mounted) setState(() {});
     } catch (error) {
       debugPrint('Could not load confirmed trust contacts: $error');
     }
@@ -185,15 +182,15 @@ class _SelectContactsScreenState extends State<SelectContactsScreen> {
       return;
     }
     if (_hasUnassignedSelectedContacts) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text(
-          'Please assign every selected contact as Main or Other before confirming.',
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Please assign every selected contact as Main or Other before confirming.',
+          ),
         ),
-      ),
-    );
-    return;
-  }
+      );
+      return;
+    }
 
     if (!_overMainLimit && !_overOtherLimit) {
       final selected = AppSession.instance.friends
@@ -423,28 +420,29 @@ class _SelectContactsScreenState extends State<SelectContactsScreen> {
               padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
               child: Column(
                 children: [
-                  if (_selectedIds.isNotEmpty && _hasUnassignedSelectedContacts) ...[
+                  if (_selectedIds.isNotEmpty &&
+                      _hasUnassignedSelectedContacts) ...[
                     const SizedBox(height: 12),
                     Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                   Icon(
-                      Icons.info_outline,
-                      size: 16,
-                      color: AppColors.danger,
-                   ),
-                     const SizedBox(width: 6),
-                     Expanded(
-                       child: Text(
-                    'Please assign every selected contact as Main or Other before confirming.',
-                       style: TextStyle(
-                       fontSize: 12,
-                       color: AppColors.danger,
-                       fontWeight: FontWeight.w600,
-                       ),
-                      ),
-                    ),
-                 ],
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Icon(
+                          Icons.info_outline,
+                          size: 16,
+                          color: AppColors.danger,
+                        ),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(
+                            'Please assign every selected contact as Main or Other before confirming.',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: AppColors.danger,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                   ],
                   if (hasFriends)
@@ -452,10 +450,10 @@ class _SelectContactsScreenState extends State<SelectContactsScreen> {
                       width: double.infinity,
                       height: 50,
                       child: ElevatedButton(
-                        onPressed: _selectedIds.isNotEmpty && 
-                                  !_hasUnassignedSelectedContacts
-                                  ? _onConfirm
-                                  : null,
+                        onPressed: _selectedIds.isNotEmpty &&
+                                !_hasUnassignedSelectedContacts
+                            ? _onConfirm
+                            : null,
                         style: ElevatedButton.styleFrom(
                             backgroundColor: AppColors.navy,
                             disabledBackgroundColor:

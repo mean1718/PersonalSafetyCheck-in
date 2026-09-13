@@ -3,12 +3,15 @@ import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_bottom_nav.dart';
 import '../models/contact.dart';
+import '../models/help_request.dart';
 import '../services/app_session.dart';
 import '../services/trusted_contact_service.dart';
 import '../services/notification_service.dart';
+import '../services/chat_service.dart';
 import 'add_contact_screen.dart';
 import 'alert_detail_screen.dart';
 import 'incoming_trust_request_card.dart';
+import 'live_location_map_screen.dart';
 
 /// "Friends" tab — the people who'll actually be notified in an emergency.
 /// A sent request sits under Requests as [ContactStatus.pending] until the
@@ -26,6 +29,7 @@ class _TrustedContactsScreenState extends State<TrustedContactsScreen> {
   List<Map<String, dynamic>> _incomingRequests = [];
   List<Contact> _confirmedContacts = [];
   List<Map<String, dynamic>> _safetyAlerts = [];
+  Map<String, int> _unreadMessageCounts = {};
   bool _loadingRequests = true;
   bool _loadingContacts = true;
   String? _requestLoadError;
@@ -44,6 +48,16 @@ class _TrustedContactsScreenState extends State<TrustedContactsScreen> {
     _loadIncomingRequests();
     _loadConfirmedContacts();
     _loadSafetyAlerts();
+    _loadUnreadMessageCounts();
+  }
+
+  Future<void> _loadUnreadMessageCounts() async {
+    try {
+      final counts = await ChatService.unreadCounts();
+      if (mounted) setState(() => _unreadMessageCounts = counts);
+    } catch (_) {
+      // Offline / not reachable — leave whatever was last loaded in place.
+    }
   }
 
   @override
@@ -59,6 +73,7 @@ class _TrustedContactsScreenState extends State<TrustedContactsScreen> {
   Future<void> _loadIncomingRequests() async {
     try {
       final requests = await TrustedContactService.receivedTrustRequests();
+      AppSession.instance.setPendingTrustRequestCount(requests.length);
       if (mounted) {
         setState(() {
           _incomingRequests = requests;
@@ -91,10 +106,11 @@ class _TrustedContactsScreenState extends State<TrustedContactsScreen> {
   Future<void> _loadConfirmedContacts() async {
     try {
       final contacts = await TrustedContactService.fetchAll();
-      if (mounted) setState(() {
-        _confirmedContacts = contacts.map(_contactFromApi).toList();
-        _loadingContacts = false;
-      });
+      if (mounted)
+        setState(() {
+          _confirmedContacts = contacts.map(_contactFromApi).toList();
+          _loadingContacts = false;
+        });
     } catch (_) {
       if (mounted) setState(() => _loadingContacts = false);
     }
@@ -102,7 +118,7 @@ class _TrustedContactsScreenState extends State<TrustedContactsScreen> {
 
   Future<void> _loadSafetyAlerts() async {
     try {
-      final alerts = await NotificationService.activeSafetyAlerts();
+      final alerts = await NotificationService.pendingSafetyAlerts();
       if (mounted) setState(() => _safetyAlerts = alerts);
     } catch (error) {
       debugPrint('Safety alert load skipped: $error');
@@ -114,7 +130,8 @@ class _TrustedContactsScreenState extends State<TrustedContactsScreen> {
     final notificationId = alert['notificationId']?.toString();
     if (notificationId == null) return;
     try {
-      await NotificationService.respondToSafetyAlert(notificationId, responseStatus);
+      await NotificationService.respondToSafetyAlert(
+          notificationId, responseStatus);
       await _loadSafetyAlerts();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -124,7 +141,8 @@ class _TrustedContactsScreenState extends State<TrustedContactsScreen> {
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Unable to send the safety alert response.')),
+          const SnackBar(
+              content: Text('Unable to send the safety alert response.')),
         );
       }
     }
@@ -137,7 +155,10 @@ class _TrustedContactsScreenState extends State<TrustedContactsScreen> {
       if (accept) await _loadConfirmedContacts();
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(accept ? 'Trust request accepted.' : 'Trust request rejected.')),
+        SnackBar(
+            content: Text(accept
+                ? 'Trust request accepted.'
+                : 'Trust request rejected.')),
       );
     } catch (_) {
       if (!mounted) return;
@@ -170,8 +191,8 @@ class _TrustedContactsScreenState extends State<TrustedContactsScreen> {
     if (result is Contact) {
       try {
         await TrustedContactService.sendTrustRequest(
-        phone: result.phone,
-        relationship: result.relationship,
+          phone: result.phone,
+          relationship: result.relationship,
         );
       } catch (_) {
         if (mounted) {
@@ -202,6 +223,15 @@ class _TrustedContactsScreenState extends State<TrustedContactsScreen> {
     }
   }
 
+  void _openLiveLocation(Contact contact) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => LiveLocationMapScreen(focusContactId: contact.id),
+      ),
+    );
+  }
+
   void _delete(Contact contact) {
     setState(() => AppSession.instance.removeContact(contact.id));
     if (contact.tierAssigned) {
@@ -213,24 +243,65 @@ class _TrustedContactsScreenState extends State<TrustedContactsScreen> {
   }
 
   void _openChat(Contact contact) {
-    Navigator.pushNamed(context, '/chat', arguments: contact);
+    Navigator.pushNamed(context, '/chat', arguments: contact)
+        .then((_) => _loadUnreadMessageCounts());
   }
 
   void _openRespondFlow(Contact contact) {
-    final request = AppSession.instance.buildHelpRequestFor(contact);
+    // AppSession.buildHelpRequestFor was building this from the signed-in
+    // person's OWN last session — meaning it showed your own name/session
+    // instead of an alert from the friend you tapped. Use that friend's
+    // actual pending alert (already loaded into _safetyAlerts) instead.
+    final matches = _safetyAlerts
+        .where((a) => a['ownerUserId']?.toString() == contact.id)
+        .toList();
+    if (matches.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+            content: Text(
+                'No active safety alert from ${contact.fullName} right now.')),
+      );
+      return;
+    }
+    final alert = matches.first;
+    final request = HelpRequest(
+      requesterName: contact.fullName,
+      requesterPhone: contact.phone,
+      destination: alert['message']?.toString() ?? 'their destination',
+      location: null,
+      distanceKm: null,
+      requestedAt: DateTime.tryParse(alert['notifiedAt']?.toString() ?? '') ??
+          DateTime.now(),
+    );
+    final thisId = alert['notificationId']?.toString();
+    final siblingIds = matches
+        .where((a) => a['notificationId']?.toString() != thisId)
+        .map((a) => a['notificationId']?.toString())
+        .whereType<String>()
+        .toList();
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (_) => AlertDetailScreen(contact: contact, request: request),
+        builder: (_) => AlertDetailScreen(
+          contact: contact,
+          request: request,
+          notificationId: thisId,
+          siblingNotificationIds: siblingIds,
+        ),
       ),
-    );
+    ).then((_) => _loadSafetyAlerts());
   }
 
   @override
   Widget build(BuildContext context) {
     final friends = _friends;
     final requests = _requests;
-    final isEmpty = friends.isEmpty && requests.isEmpty && !_loadingRequests && !_loadingContacts && _incomingRequests.isEmpty && _safetyAlerts.isEmpty;
+    final isEmpty = friends.isEmpty &&
+        requests.isEmpty &&
+        !_loadingRequests &&
+        !_loadingContacts &&
+        _incomingRequests.isEmpty &&
+        _safetyAlerts.isEmpty;
 
     return Scaffold(
       backgroundColor: AppColors.background,
@@ -243,7 +314,7 @@ class _TrustedContactsScreenState extends State<TrustedContactsScreen> {
               Text(
                 'Friends',
                 style: TextStyle(
-                    fontSize: 24,
+                    fontSize: 30,
                     fontWeight: FontWeight.w800,
                     color: AppColors.textPrimary),
               ),
@@ -259,18 +330,6 @@ class _TrustedContactsScreenState extends State<TrustedContactsScreen> {
                     : ListView(
                         padding: const EdgeInsets.only(bottom: 20),
                         children: [
-                          if (_safetyAlerts.isNotEmpty) ...[
-                            Text('Safety Alerts', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: AppColors.textPrimary)),
-                            const SizedBox(height: 10),
-                            ..._safetyAlerts.map((alert) => Padding(
-                              padding: const EdgeInsets.only(bottom: 12),
-                              child: _SafetyAlertCard(
-                                alert: alert,
-                                onCanHelp: () => _respondToSafetyAlert(alert, 'can_help'),
-                                onCannotHelp: () => _respondToSafetyAlert(alert, 'cannot_help'),
-                              ),
-                            )),
-                          ],
                           if (_loadingRequests || _loadingContacts)
                             const Padding(
                               padding: EdgeInsets.all(20),
@@ -281,26 +340,78 @@ class _TrustedContactsScreenState extends State<TrustedContactsScreen> {
                               padding: const EdgeInsets.only(bottom: 12),
                               child: TextButton(
                                 onPressed: _loadIncomingRequests,
-                                child: Text('Retry loading Trust Requests', style: TextStyle(color: AppColors.danger)),
+                                child: Text('Retry loading Trust Requests',
+                                    style: TextStyle(color: AppColors.danger)),
                               ),
                             )
                           else ...[
-                            Text('Trust Requests', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: AppColors.textPrimary)),
+                            Text('Trust Requests',
+                                style: TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w800,
+                                    color: AppColors.textPrimary)),
                             const SizedBox(height: 10),
                             if (_incomingRequests.isEmpty)
-                              Padding(
-                                padding: const EdgeInsets.only(bottom: 14),
-                                child: Text('No pending Trust Requests', style: TextStyle(fontSize: 12, color: AppColors.textSecondary)),
+                              Container(
+                                width: double.infinity,
+                                padding:
+                                    const EdgeInsets.symmetric(vertical: 36),
+                                margin: const EdgeInsets.only(bottom: 14),
+                                decoration: BoxDecoration(
+                                  color: AppColors.card,
+                                  borderRadius: BorderRadius.circular(18),
+                                  border: Border.all(
+                                      color: AppColors.border
+                                          .withValues(alpha: 0.6)),
+                                ),
+                                child: Column(
+                                  children: [
+                                    Stack(
+                                      clipBehavior: Clip.none,
+                                      children: [
+                                        Icon(Icons.people_alt_rounded,
+                                            size: 42,
+                                            color: AppColors.navy
+                                                .withValues(alpha: 0.35)),
+                                        Positioned(
+                                          right: -4,
+                                          bottom: -2,
+                                          child: Container(
+                                            width: 20,
+                                            height: 20,
+                                            decoration: BoxDecoration(
+                                              color: AppColors.navy,
+                                              shape: BoxShape.circle,
+                                              border: Border.all(
+                                                  color: AppColors.card,
+                                                  width: 2),
+                                            ),
+                                            child: const Icon(Icons.add,
+                                                size: 12, color: Colors.white),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 14),
+                                    Text('No pending trust requests.',
+                                        style: TextStyle(
+                                            fontSize: 13,
+                                            fontWeight: FontWeight.w600,
+                                            color: AppColors.textSecondary)),
+                                  ],
+                                ),
                               )
                             else
                               ..._incomingRequests.map((request) => Padding(
-                                padding: const EdgeInsets.only(bottom: 12),
-                                child: IncomingTrustRequestCard(
-                                  request: request,
-                                  onConfirm: () => _respondToRequest(request['_id'].toString(), true),
-                                  onReject: () => _respondToRequest(request['_id'].toString(), false),
-                                ),
-                              )),
+                                    padding: const EdgeInsets.only(bottom: 12),
+                                    child: IncomingTrustRequestCard(
+                                      request: request,
+                                      onConfirm: () => _respondToRequest(
+                                          request['_id'].toString(), true),
+                                      onReject: () => _respondToRequest(
+                                          request['_id'].toString(), false),
+                                    ),
+                                  )),
                           ],
                           if (requests.isNotEmpty) ...[
                             Text(
@@ -334,10 +445,18 @@ class _TrustedContactsScreenState extends State<TrustedContactsScreen> {
                                   padding: const EdgeInsets.only(bottom: 12),
                                   child: _FriendCard(
                                     contact: c,
+                                    alertCount: _safetyAlerts
+                                        .where((a) =>
+                                            a['ownerUserId']?.toString() ==
+                                            c.id)
+                                        .length,
+                                    unreadMessageCount:
+                                        _unreadMessageCounts[c.id] ?? 0,
                                     onUnfriend: () => _delete(c),
                                     onOpenChat: () => _openChat(c),
                                     onOpenRespond: () => _openRespondFlow(c),
                                     onEdit: () => _openEditScreen(c),
+                                    onLocate: () => _openLiveLocation(c),
                                   ),
                                 )),
                           ],
@@ -398,27 +517,40 @@ class _SafetyAlertCard extends StatelessWidget {
         Row(children: [
           Icon(Icons.warning_amber_rounded, color: AppColors.danger),
           const SizedBox(width: 8),
-          Text('Safety Alert', style: TextStyle(fontWeight: FontWeight.w800, color: AppColors.textPrimary)),
+          Text('Safety Alert',
+              style: TextStyle(
+                  fontWeight: FontWeight.w800, color: AppColors.textPrimary)),
         ]),
         const SizedBox(height: 8),
-        Text('$ownerName may need your help.', style: TextStyle(color: AppColors.textPrimary)),
+        Text('$ownerName may need your help.',
+            style: TextStyle(color: AppColors.textPrimary)),
         const SizedBox(height: 3),
-        Text('Started ${_notifiedTime()}', style: TextStyle(fontSize: 11.5, color: AppColors.textSecondary)),
+        Text('Started ${_notifiedTime()}',
+            style: TextStyle(fontSize: 11.5, color: AppColors.textSecondary)),
         if ((alert['message']?.toString() ?? '').isNotEmpty) ...[
           const SizedBox(height: 4),
-          Text(alert['message'].toString(), style: TextStyle(fontSize: 12, color: AppColors.textSecondary)),
+          Text(alert['message'].toString(),
+              style: TextStyle(fontSize: 12, color: AppColors.textSecondary)),
         ],
         const SizedBox(height: 12),
         if (status == 'pending')
           Row(children: [
-            Expanded(child: OutlinedButton(onPressed: onCannotHelp, child: const Text("I Can't Help"))),
+            Expanded(
+                child: OutlinedButton(
+                    onPressed: onCannotHelp,
+                    child: const Text("I Can't Help"))),
             const SizedBox(width: 10),
-            Expanded(child: ElevatedButton(onPressed: onCanHelp, child: const Text('I Can Help'))),
+            Expanded(
+                child: ElevatedButton(
+                    onPressed: onCanHelp, child: const Text('I Can Help'))),
           ])
         else
           Text(
-            status == 'can_help' ? 'You responded: I Can Help' : "You responded: I Can't Help",
-            style: TextStyle(fontWeight: FontWeight.w700, color: AppColors.textSecondary),
+            status == 'can_help'
+                ? 'You responded: I Can Help'
+                : "You responded: I Can't Help",
+            style: TextStyle(
+                fontWeight: FontWeight.w700, color: AppColors.textSecondary),
           ),
       ]),
     );
@@ -482,17 +614,23 @@ class _EmptyFriendsState extends StatelessWidget {
 
 class _FriendCard extends StatelessWidget {
   final Contact contact;
+  final int alertCount;
   final VoidCallback onUnfriend;
   final VoidCallback onOpenChat;
   final VoidCallback onOpenRespond;
   final VoidCallback onEdit;
+  final VoidCallback onLocate;
+  final int unreadMessageCount;
 
   const _FriendCard({
     required this.contact,
+    this.alertCount = 0,
+    this.unreadMessageCount = 0,
     required this.onUnfriend,
     required this.onOpenChat,
     required this.onOpenRespond,
     required this.onEdit,
+    required this.onLocate,
   });
 
   @override
@@ -575,29 +713,93 @@ class _FriendCard extends StatelessWidget {
             children: [
               GestureDetector(
                 onTap: onOpenChat,
-                child: Container(
-                  width: 34,
-                  height: 34,
-                  decoration: const BoxDecoration(
-                    color: Color(0xFFF5F7FA),
-                    shape: BoxShape.circle,
-                  ),
-                  child: Icon(Icons.chat_bubble_outline,
-                      size: 16, color: AppColors.navy),
+                child: Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    Container(
+                      width: 34,
+                      height: 34,
+                      decoration: const BoxDecoration(
+                        color: Color(0xFFF5F7FA),
+                        shape: BoxShape.circle,
+                      ),
+                      child: Icon(Icons.chat_bubble_outline,
+                          size: 16, color: AppColors.navy),
+                    ),
+                    if (unreadMessageCount > 0)
+                      Positioned(
+                        top: -4,
+                        right: -4,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 5, vertical: 1),
+                          constraints:
+                              const BoxConstraints(minWidth: 16, minHeight: 16),
+                          decoration: BoxDecoration(
+                            color: AppColors.danger,
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(color: AppColors.card, width: 2),
+                          ),
+                          child: Text(
+                            unreadMessageCount > 9
+                                ? '9+'
+                                : '$unreadMessageCount',
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 9,
+                              fontWeight: FontWeight.w800,
+                              height: 1.2,
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
                 ),
               ),
               const SizedBox(width: 8),
               GestureDetector(
                 onTap: onOpenRespond,
-                child: Container(
-                  width: 34,
-                  height: 34,
-                  decoration: const BoxDecoration(
-                    color: Color(0xFFF5F7FA),
-                    shape: BoxShape.circle,
-                  ),
-                  child: Icon(Icons.notifications_active_outlined,
-                      size: 16, color: AppColors.navy),
+                child: Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    Container(
+                      width: 34,
+                      height: 34,
+                      decoration: const BoxDecoration(
+                        color: Color(0xFFF5F7FA),
+                        shape: BoxShape.circle,
+                      ),
+                      child: Icon(Icons.notifications_active_outlined,
+                          size: 16, color: AppColors.navy),
+                    ),
+                    if (alertCount > 0)
+                      Positioned(
+                        top: -4,
+                        right: -4,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 5, vertical: 1),
+                          constraints:
+                              const BoxConstraints(minWidth: 16, minHeight: 16),
+                          decoration: BoxDecoration(
+                            color: AppColors.danger,
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(color: AppColors.card, width: 2),
+                          ),
+                          child: Text(
+                            alertCount > 9 ? '9+' : '$alertCount',
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 9,
+                              fontWeight: FontWeight.w800,
+                              height: 1.2,
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
                 ),
               ),
               const SizedBox(width: 8),
@@ -612,6 +814,20 @@ class _FriendCard extends StatelessWidget {
                   ),
                   child:
                       Icon(Icons.edit_square, size: 16, color: AppColors.navy),
+                ),
+              ),
+              const SizedBox(width: 8),
+              GestureDetector(
+                onTap: onLocate,
+                child: Container(
+                  width: 34,
+                  height: 34,
+                  decoration: const BoxDecoration(
+                    color: Color(0xFFF5F7FA),
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(Icons.location_on_outlined,
+                      size: 16, color: AppColors.navy),
                 ),
               ),
               const Spacer(),

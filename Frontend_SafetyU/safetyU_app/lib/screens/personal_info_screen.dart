@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
 import '../services/app_session.dart';
 import '../utils/validators.dart';
+import '../widgets/safety_illustration.dart';
 
 class PersonalInfoScreen extends StatefulWidget {
   const PersonalInfoScreen({super.key});
@@ -60,67 +61,75 @@ class _PersonalInfoScreenState extends State<PersonalInfoScreen> {
             style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700)),
       ),
       body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(20),
-          child: Form(
-            key: _formKey,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _field('FULL NAME', _nameController, validator: (v) {
-                  final text = v?.trim() ?? '';
-                  if (text.isEmpty) return 'Name is required';
-                  if (AppSession.instance.isOwnNameTakenByContact(text)) {
-                    return 'This name is already used by one of your saved contacts';
-                  }
-                  return null;
-                }),
-                _field(
-                  'EMAIL ADDRESS',
-                  _emailController,
-                  keyboardType: TextInputType.emailAddress,
-                  validator: (v) {
-                    final err = emailValidator(v);
-                    if (err != null) return err;
-                    if (AppSession.instance
-                        .isOwnEmailTakenByContact(v!.trim())) {
-                      return 'This email is already used by one of your saved contacts';
-                    }
-                    return null;
-                  },
-                ),
-                _field(
-                  'PHONE NUMBER',
-                  _phoneController,
-                  keyboardType: TextInputType.phone,
-                  validator: (v) {
-                    final err = phoneValidator(v);
-                    if (err != null) return err;
-                    if (AppSession.instance
-                        .isOwnPhoneTakenByContact(v!.trim())) {
-                      return 'This phone number is already used by one of your saved contacts';
-                    }
-                    return null;
-                  },
-                ),
-                const SizedBox(height: 12),
-                SizedBox(
-                  width: double.infinity,
-                  height: 52,
-                  child: ElevatedButton(
-                    onPressed: _save,
-                    style: ElevatedButton.styleFrom(
-                        backgroundColor: AppColors.navy,
-                        shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(26))),
-                    child: const Text('Save Changes',
-                        style: TextStyle(
-                            color: Colors.white, fontWeight: FontWeight.w700)),
+        child: Column(
+          children: [
+            Expanded(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(20, 20, 20, 8),
+                child: Form(
+                  key: _formKey,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _field('FULL NAME', _nameController, validator: (v) {
+                        final text = v?.trim() ?? '';
+                        if (text.isEmpty) return 'Name is required';
+                        if (AppSession.instance.isOwnNameTakenByContact(text)) {
+                          return 'This name is already used by one of your saved contacts';
+                        }
+                        return null;
+                      }),
+                      _field(
+                        'EMAIL ADDRESS',
+                        _emailController,
+                        keyboardType: TextInputType.emailAddress,
+                        validator: (v) {
+                          final err = emailValidator(v);
+                          if (err != null) return err;
+                          if (AppSession.instance
+                              .isOwnEmailTakenByContact(v!.trim())) {
+                            return 'This email is already used by one of your saved contacts';
+                          }
+                          return null;
+                        },
+                      ),
+                      _field(
+                        'PHONE NUMBER',
+                        _phoneController,
+                        keyboardType: TextInputType.phone,
+                        validator: (v) {
+                          final err = phoneValidator(v);
+                          if (err != null) return err;
+                          if (AppSession.instance
+                              .isOwnPhoneTakenByContact(v!.trim())) {
+                            return 'This phone number is already used by one of your saved contacts';
+                          }
+                          return null;
+                        },
+                      ),
+                      const SizedBox(height: 12),
+                    ],
                   ),
                 ),
-              ],
+              ),
             ),
-          ),
+            SkylineBottomBar(
+              child: SizedBox(
+                width: double.infinity,
+                height: 52,
+                child: ElevatedButton(
+                  onPressed: _save,
+                  style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.navy,
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(26))),
+                  child: const Text('Save Changes',
+                      style: TextStyle(
+                          color: Colors.white, fontWeight: FontWeight.w700)),
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );

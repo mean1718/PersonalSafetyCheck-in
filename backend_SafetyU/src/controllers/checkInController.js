@@ -312,6 +312,52 @@ const viewSessionLocation = async (req, res) => {
   }
 };
 
+// POST /api/checkins/:id/need-help — called when "Need Help" fires, either
+// the manual button or a timed-out escalation stage. The original
+// session-start notification only reflects the state from when the
+// session began; if a contact already answered it (or it's otherwise not
+// currently "pending"), nothing would ever resurface on their Home screen
+// for this more urgent moment. This creates a brand-new safety_alert
+// notification for the given contacts, tied to the same check-in, so it
+// naturally reappears as a fresh, unread, pending alert — instead of
+// silently resetting the original one's history.
+const needHelpNow = async (req, res) => {
+    if (!mongoose.isValidObjectId(req.params.id)) {
+        return res.status(404).json({ message: "Check-in not found" });
+    }
+    try {
+        const checkIn = await CheckIn.findOne({ _id: req.params.id, user: req.user.id });
+        if (!checkIn) return res.status(404).json({ message: "Check-in not found" });
+        if (checkIn.status === "completed") {
+            return res.status(400).json({ message: "This session has already ended." });
+        }
+
+        const { contactUserIds } = req.body;
+        const requestedIds = Array.isArray(contactUserIds)
+            ? [...new Set(contactUserIds.map((id) => id?.toString()).filter(Boolean))]
+            : (checkIn.trustedContactUsers || []).map((id) => id.toString());
+        if (requestedIds.some((id) => !mongoose.isValidObjectId(id))) {
+            return res.status(400).json({ message: "One of the selected contacts is invalid." });
+        }
+        if (requestedIds.length === 0) {
+            return res.status(400).json({ message: "No contacts to notify." });
+        }
+
+        const created = await Notification.insertMany(requestedIds.map((receiver) => ({
+            receiver,
+            sender: req.user.id,
+            checkIn: checkIn._id,
+            type: "safety_alert",
+            title: "SafetyU Alert",
+            message: `${req.authenticatedUser?.name || "A trusted contact"} needs help right now.`,
+        })));
+
+        return res.status(201).json({ message: "Contacts re-alerted.", notifications: created });
+    } catch (error) {
+        return res.status(500).json({ message: "Server error", error: error.message });
+    }
+};
+
 module.exports = {
   getSessionTrustedContacts,
   startCheckIn,
@@ -320,4 +366,5 @@ module.exports = {
   getAlertStatus,
   updateLocation,
   viewSessionLocation,
+  needHelpNow,
 };
