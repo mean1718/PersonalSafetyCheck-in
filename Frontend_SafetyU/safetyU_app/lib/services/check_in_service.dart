@@ -53,4 +53,16 @@ class CheckInService {
     return (data['checkIns'] as List<dynamic>? ?? [])
         .cast<Map<String, dynamic>>();
   }
+
+  // POST /api/checkins/:id/need-help — creates a fresh, real safety_alert
+  // notification for the given contacts. The original session-start
+  // notification only reflects state from when the session began; if a
+  // contact already responded to it, nothing would otherwise resurface on
+  // their Home screen for this more urgent later moment.
+  static Future<void> needHelpNow(
+      String checkInId, List<String> contactUserIds) async {
+    await ApiClient.post('/checkins/$checkInId/need-help', {
+      if (contactUserIds.isNotEmpty) 'contactUserIds': contactUserIds,
+    });
+  }
 }

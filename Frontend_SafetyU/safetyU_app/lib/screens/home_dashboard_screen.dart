@@ -5,6 +5,7 @@ import '../services/app_session.dart';
 import '../services/check_in_service.dart';
 import '../services/notification_service.dart';
 import '../services/trusted_contact_service.dart';
+import '../services/alert_sound.dart';
 import '../models/contact_response_state.dart';
 import '../models/contact.dart';
 import '../models/help_request.dart';
@@ -28,6 +29,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
   // *this* person sent out as the session owner.
   bool _loadingIncomingAlerts = false;
   List<Map<String, dynamic>> _incomingAlerts = [];
+  final Set<String> _seenAlertIds = {};
 
   // "X is safe now" cards — shown once the owner confirms Safe, then
   // auto-dismissed 2 minutes after the person has actually seen it here,
@@ -113,6 +115,17 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
               (a['responseStatus']?.toString() ?? 'pending') == 'pending')
           .toList();
       AppSession.instance.setBackendPendingAlertCount(pending.length);
+      // Sound only for alerts we haven't already shown/played for — this
+      // screen isn't polling continuously, but it does reload after
+      // viewing a detail, so without this a resolved-then-reopened alert
+      // list would replay the sound for the same alert again.
+      final newOnes = pending.where((a) =>
+          !_seenAlertIds.contains(a['notificationId']?.toString() ?? ''));
+      if (newOnes.isNotEmpty) {
+        AlertSoundService.playAlert(times: 3);
+      }
+      _seenAlertIds
+          .addAll(pending.map((a) => a['notificationId']?.toString() ?? ''));
       if (mounted) setState(() => _incomingAlerts = pending);
     } catch (e) {
       // TODO(debug): remove once incoming alerts are confirmed reliable —
@@ -322,33 +335,54 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                   borderRadius: BorderRadius.circular(20),
                 ),
                 padding: const EdgeInsets.all(18),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                child: Stack(
                   children: [
-                    const Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text('You are protected',
-                              style: TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.w800)),
-                          SizedBox(height: 6),
-                          Text('No active safety session',
-                              style: TextStyle(
-                                  color: Colors.white60, fontSize: 12.5)),
-                        ],
-                      ),
+                    Positioned(
+                      right: -10,
+                      top: -10,
+                      child: Icon(Icons.shield,
+                          color: Colors.white.withValues(alpha: 0.08),
+                          size: 110),
                     ),
-                    Container(
-                      padding: const EdgeInsets.all(10),
-                      decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.12),
-                        shape: BoxShape.circle,
-                      ),
-                      child: const Icon(Icons.shield,
-                          color: Colors.white, size: 22),
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.14),
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(Icons.verified_user,
+                              color: Colors.white, size: 24),
+                        ),
+                        const SizedBox(width: 14),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text('YOU ARE',
+                                  style: TextStyle(
+                                      color: Colors.white60,
+                                      fontSize: 11.5,
+                                      fontWeight: FontWeight.w700,
+                                      letterSpacing: 1)),
+                              const SizedBox(height: 2),
+                              const Text('Protected',
+                                  style: TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 24,
+                                      fontWeight: FontWeight.w800)),
+                              const SizedBox(height: 6),
+                              Text(
+                                'No active safety session',
+                                style: TextStyle(
+                                    color: Colors.white60, fontSize: 12.5),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
                     ),
                   ],
                 ),
@@ -364,10 +398,10 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                 children: [
                   Expanded(
                     child: _QuickActionCard(
-                      icon: Icons.play_circle_fill,
+                      icon: Icons.play_arrow,
                       label: 'Start Safety\nSession',
                       background: AppColors.navy,
-                      iconColor: Colors.white,
+                      badgeIconColor: AppColors.navy,
                       textColor: Colors.white,
                       onTap: () {
                         Navigator.pushNamed(context, '/session-setup');
@@ -380,7 +414,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                       icon: Icons.warning_amber,
                       label: 'Emergency\nAssistant',
                       background: AppColors.dangerLight,
-                      iconColor: AppColors.danger,
+                      badgeIconColor: AppColors.danger,
                       textColor: AppColors.danger,
                       onTap: () {
                         Navigator.pushNamed(context, '/emergency-sos');
@@ -417,7 +451,7 @@ class _QuickActionCard extends StatelessWidget {
   final IconData icon;
   final String label;
   final Color background;
-  final Color iconColor;
+  final Color badgeIconColor;
   final Color textColor;
   final VoidCallback onTap;
 
@@ -425,7 +459,7 @@ class _QuickActionCard extends StatelessWidget {
     required this.icon,
     required this.label,
     required this.background,
-    required this.iconColor,
+    required this.badgeIconColor,
     required this.textColor,
     required this.onTap,
   });
@@ -435,21 +469,38 @@ class _QuickActionCard extends StatelessWidget {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        height: 120,
+        height: 150,
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
             color: background, borderRadius: BorderRadius.circular(18)),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Icon(icon, color: iconColor, size: 26),
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: const BoxDecoration(
+                color: Colors.white,
+                shape: BoxShape.circle,
+              ),
+              child: Icon(icon, color: badgeIconColor, size: 22),
+            ),
             const Spacer(),
             Text(label,
                 style: TextStyle(
                     color: textColor,
-                    fontSize: 13.5,
-                    fontWeight: FontWeight.w700,
+                    fontSize: 14.5,
+                    fontWeight: FontWeight.w800,
                     height: 1.25)),
+            const SizedBox(height: 10),
+            Container(
+              width: 30,
+              height: 30,
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.22),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(Icons.arrow_forward, color: textColor, size: 15),
+            ),
           ],
         ),
       ),
@@ -691,9 +742,16 @@ class _ContactResponsesPanel extends StatelessWidget {
               children: [
                 Row(
                   children: [
-                    Icon(Icons.groups_outlined,
-                        size: 18, color: AppColors.navy),
-                    const SizedBox(width: 8),
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: AppColors.navy.withValues(alpha: 0.08),
+                        shape: BoxShape.circle,
+                      ),
+                      child: Icon(Icons.groups_outlined,
+                          size: 16, color: AppColors.navy),
+                    ),
+                    const SizedBox(width: 10),
                     Expanded(
                       child: Text(
                         'Your Alert Status',
@@ -707,15 +765,21 @@ class _ContactResponsesPanel extends StatelessWidget {
                       padding: const EdgeInsets.symmetric(
                           horizontal: 9, vertical: 4),
                       decoration: BoxDecoration(
-                        color: AppColors.navy.withValues(alpha: 0.08),
+                        color: respondedCount == 0
+                            ? AppColors.background
+                            : AppColors.navy.withValues(alpha: 0.08),
                         borderRadius: BorderRadius.circular(20),
                       ),
                       child: Text(
-                        '$respondedCount/${responses.length} responded',
+                        respondedCount == 0
+                            ? 'Not Responded'
+                            : '$respondedCount/${responses.length} responded',
                         style: TextStyle(
                             fontSize: 11,
                             fontWeight: FontWeight.w700,
-                            color: AppColors.navy),
+                            color: respondedCount == 0
+                                ? AppColors.textSecondary
+                                : AppColors.navy),
                       ),
                     ),
                   ],

@@ -169,6 +169,11 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
           (rawArguments['longitude'] as num?)?.toDouble() ?? 104.9210;
       _destinationCoords = LatLng(latitude, longitude);
       final dynamic ids = rawArguments['notifyContactIds'];
+      // TODO(debug): remove once delivery is confirmed working. Shows the
+      // raw value and its type — tells us whether Session Setup ever sent
+      // this at all, vs. sent it as the wrong type, vs. sent it empty.
+      debugPrint(
+          'SafetyU: raw notifyContactIds = $ids (runtimeType: ${ids.runtimeType})');
       if (ids is List) {
         _confirmedNotifyContactIds = ids.map((e) => e.toString()).toList();
         // These people are notified for real the moment the session starts
@@ -178,6 +183,9 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
         // normal, no-escalation case, which meant "I'm Safe" found nobody
         // to actually message even though real contacts were notified.
         _notifiedContactIds.addAll(_confirmedNotifyContactIds);
+        // TODO(debug): remove once delivery is confirmed working.
+        debugPrint(
+            'SafetyU: session started with notifyContactIds=$_confirmedNotifyContactIds');
       }
     }
 
@@ -185,6 +193,34 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
     _startTimer();
     _initLocationTracking();
     _startBackendCheckIn();
+    _ensureContactsCached();
+  }
+
+  // Escalation and manual Need Help both resolve who to message via
+  // AppSession.contactsByIds — a local cache normally filled by visiting
+  // Friends or Select Contacts. If this screen is reached without that
+  // ever having happened, that cache is empty and those flows would
+  // silently find nobody to notify. This guarantees it's populated the
+  // moment a session actually starts, not just when browsing contacts.
+  Future<void> _ensureContactsCached() async {
+    try {
+      final contacts = await CheckInService.trustedContacts();
+      for (final contact in contacts) {
+        final userId = contact['userId']?.toString();
+        if (userId == null || userId.isEmpty) continue;
+        AppSession.instance.upsertContact(Contact(
+          id: userId,
+          fullName: contact['name']?.toString() ?? 'SafetyU user',
+          phone: contact['phone']?.toString() ?? '',
+          email: contact['email']?.toString() ?? '',
+          relationship: 'Trusted Contact',
+          status: ContactStatus.friend,
+          tierAssigned: false,
+        ));
+      }
+    } catch (e) {
+      debugPrint('Contact cache refresh skipped: $e');
+    }
   }
 
   // =========================================================
@@ -339,18 +375,26 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
     _logHistory(SessionOutcome.safe);
     _syncSessionEndToBackend();
 
+    // This session is over — without clearing these, Home kept re-fetching
+    // and displaying status for this same completed check-in forever,
+    // showing contacts as still "Waiting..." even though there's nothing
+    // left to wait for.
+    AppSession.instance.activeCheckInId = null;
+    AppSession.instance.clearCurrentAlertResponses();
+
     // Tell every trusted contact who was actually alerted during this
     // session that the person is safe now — a real chat message, not just
-    // an in-app log.
-    for (final contact in AppSession.instance.friends) {
-      if (_notifiedContactIds.contains(contact.id)) {
-        _sendRealChatMessage(
-          contact.id,
-          "I'm safe now. Thanks for checking on me!",
-          kind: ChatMessageKind.safeCheckIn,
-          backendKind: 'safeCheckIn',
-        );
-      }
+    // an in-app log. This sends straight to the real, backend-confirmed
+    // ids from session start — not filtered through AppSession.friends,
+    // which is just a local cache that may not be populated yet if this
+    // screen hasn't been visited recently, silently sending to nobody.
+    for (final contactId in _notifiedContactIds) {
+      _sendRealChatMessage(
+        contactId,
+        "I'm safe now. Thanks for checking on me!",
+        kind: ChatMessageKind.safeCheckIn,
+        backendKind: 'safeCheckIn',
+      );
     }
 
     final notifiedNames = AppSession.instance.friends
@@ -464,8 +508,29 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
   void _sendRealChatMessage(String contactId, String text,
       {required ChatMessageKind kind, required String backendKind}) {
     AppSession.instance.sendChatMessage(contactId, text, kind: kind);
-    ChatService.send(contactId, text, kind: backendKind).catchError((e) {
+    ChatService.send(contactId, text, kind: backendKind).then((_) {
+      // TODO(debug): remove once delivery is confirmed working.
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            duration: const Duration(seconds: 6),
+            backgroundColor: Colors.green,
+            content: Text('DEBUG: delivered to $contactId'),
+          ),
+        );
+      }
+    }).catchError((e) {
       debugPrint('Chat delivery skipped: $e');
+      // TODO(debug): remove once delivery is confirmed working.
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            duration: const Duration(seconds: 8),
+            backgroundColor: Colors.red,
+            content: Text('DEBUG: FAILED to $contactId -> $e'),
+          ),
+        );
+      }
     });
   }
 
@@ -531,6 +596,13 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
         kind: ChatMessageKind.helpRequest,
         backendKind: 'helpRequest',
       );
+    }
+    // A real, fresh alert — not just a chat message — so it actually shows
+    // up on each contact's Home screen even if they already answered the
+    // original session-start notification.
+    if (_checkInId != null && targets.isNotEmpty) {
+      CheckInService.needHelpNow(_checkInId!, targets.map((t) => t.id).toList())
+          .catchError((e) => debugPrint('Need-help re-alert skipped: $e'));
     }
 
     if (_confirmedNotifyContactIds.isEmpty && stage == _EscalationStage.main) {
@@ -632,6 +704,10 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
         kind: ChatMessageKind.helpRequest,
         backendKind: 'helpRequest',
       );
+    }
+    if (_checkInId != null && mains.isNotEmpty) {
+      CheckInService.needHelpNow(_checkInId!, mains.map((c) => c.id).toList())
+          .catchError((e) => debugPrint('Need-help re-alert skipped: $e'));
     }
 
     _escalateToEmergencyResponders();

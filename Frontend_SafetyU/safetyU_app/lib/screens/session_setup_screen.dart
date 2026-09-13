@@ -806,7 +806,7 @@ class _SessionSetupScreenState extends State<SessionSetupScreen> {
                         const SizedBox(height: 10),
                       ],
                       _buildSectionHeader(
-                        icon: Icons.location_on_outlined,
+                        icon: Icons.place,
                         title: 'Destination',
                         subtitle: 'Select your destination',
                       ),
@@ -824,7 +824,7 @@ class _SessionSetupScreenState extends State<SessionSetupScreen> {
                           ),
                           child: Row(
                             children: [
-                              Icon(Icons.location_on_outlined,
+                              Icon(Icons.place,
                                   color: AppColors.textMuted, size: 18),
                               const SizedBox(width: 10),
                               Expanded(
@@ -1021,9 +1021,9 @@ class _SessionSetupScreenState extends State<SessionSetupScreen> {
                         child: ElevatedButton(
                           onPressed: _canStartSession ? _startSession : null,
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: _accent,
+                            backgroundColor: AppColors.navy,
                             disabledBackgroundColor:
-                                _accent.withValues(alpha: 0.35),
+                                AppColors.navy.withValues(alpha: 0.35),
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(26),
                             ),

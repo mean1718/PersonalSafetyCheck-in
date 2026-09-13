@@ -141,6 +141,16 @@ class AppBottomNav extends StatelessWidget {
                                   active ? AppColors.navy : AppColors.textMuted,
                             ),
                           ),
+                          const SizedBox(height: 3),
+                          AnimatedContainer(
+                            duration: const Duration(milliseconds: 150),
+                            width: active ? 18 : 0,
+                            height: 2.5,
+                            decoration: BoxDecoration(
+                              color: AppColors.navy,
+                              borderRadius: BorderRadius.circular(2),
+                            ),
+                          ),
                         ],
                       ),
                     ),
