@@ -69,22 +69,29 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
     try {
       final resolved = await NotificationService.recentlyResolvedSafetyAlerts();
       if (!mounted) return;
-      setState(() => _resolvedAlerts = resolved);
-      // Give each newly-seen card 40 seconds on screen before it goes away.
+      // Only ever ADD newly-seen alerts here — never replace the whole
+      // list with whatever the backend reports right now. Each alert
+      // gets marked read a few lines below, which means the very next
+      // poll (this runs every 6s) would no longer include it, and a
+      // blanket setState(() => _resolvedAlerts = resolved) would wipe it
+      // off screen almost immediately instead of the intended 30s. Also
+      // what let this ever show live at all — since only a brand-new
+      // login started with an empty, freshly-unread list.
       for (final alert in resolved) {
         final id = alert['notificationId']?.toString();
         if (id == null || _resolvedAlertsWithDismissTimerStarted.contains(id)) {
           continue;
         }
         _resolvedAlertsWithDismissTimerStarted.add(id);
-        // Mark it read right away, not just after the 40s window — this is
+        setState(() => _resolvedAlerts = [..._resolvedAlerts, alert]);
+        // Mark it read right away, not just after the window — this is
         // what stops it from showing again on a future login. Waiting
         // until dismissal would leave it "unread" (and so re-fetchable) if
         // the person logs out before the timer finishes.
         NotificationService.markRead(id).catchError((e) {
           debugPrint('Mark resolved-alert read skipped: $e');
         });
-        Future.delayed(const Duration(seconds: 40), () {
+        Future.delayed(const Duration(seconds: 30), () {
           if (!mounted) return;
           setState(() {
             _resolvedAlerts = _resolvedAlerts

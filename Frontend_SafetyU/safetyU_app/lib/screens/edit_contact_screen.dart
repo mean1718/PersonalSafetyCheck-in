@@ -3,8 +3,12 @@ import '../theme/app_theme.dart';
 import '../models/contact.dart';
 import '../services/app_session.dart';
 import '../utils/validators.dart';
-import '../widgets/safety_illustration.dart';
 
+/// "Edit Contact" — same card-based look as Add Contact. Priority tier
+/// (Main vs Other) is no longer picked here; like Add Contact, that's
+/// handled from the Notify Contacts screen instead, where the free-plan
+/// limits are actually visible. Editing keeps whatever tier this contact
+/// already had.
 class EditContactScreen extends StatefulWidget {
   final Contact? contact;
   const EditContactScreen({super.key, this.contact});
@@ -19,7 +23,6 @@ class _EditContactScreenState extends State<EditContactScreen> {
   late final TextEditingController _phoneController;
   late final TextEditingController _emailController;
   late final TextEditingController _relationshipController;
-  late bool _isMainContact;
 
   @override
   void initState() {
@@ -30,7 +33,6 @@ class _EditContactScreenState extends State<EditContactScreen> {
     _emailController = TextEditingController(text: c?.email ?? '');
     _relationshipController =
         TextEditingController(text: c?.relationship ?? '');
-    _isMainContact = c?.isMainContact ?? true;
   }
 
   @override
@@ -58,7 +60,9 @@ class _EditContactScreenState extends State<EditContactScreen> {
       phone: _phoneController.text.trim(),
       email: _emailController.text.trim(),
       relationship: _relationshipController.text.trim(),
-      isMainContact: _isMainContact,
+      // Priority tier isn't editable here anymore — keep whatever this
+      // contact already had (Add Contact starts new contacts as "Other").
+      isMainContact: widget.contact?.isMainContact ?? false,
       isAvailable: widget.contact?.isAvailable ?? true,
       // Editing never changes whether this contact has confirmed the
       // friend request — brand new contacts (no widget.contact) still
@@ -72,8 +76,6 @@ class _EditContactScreenState extends State<EditContactScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final isEditing = widget.contact != null;
-
     return Scaffold(
       body: SafeArea(
         child: Column(
@@ -86,26 +88,34 @@ class _EditContactScreenState extends State<EditContactScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Row(
-                        children: [
-                          IconButton(
-                            onPressed: () => Navigator.pop(context),
-                            icon: Icon(Icons.arrow_back,
-                                color: AppColors.textPrimary),
-                          ),
-                          Text(
-                            isEditing ? 'Edit Contact' : 'Add Contact',
-                            style: TextStyle(
-                                fontSize: 18,
-                                fontWeight: FontWeight.w800,
-                                color: AppColors.textPrimary),
-                          ),
-                        ],
+                      GestureDetector(
+                        onTap: () => Navigator.pop(context),
+                        child: Row(
+                          children: [
+                            Icon(Icons.arrow_back,
+                                size: 20, color: AppColors.textPrimary),
+                          ],
+                        ),
                       ),
                       const SizedBox(height: 16),
+                      Text(
+                        'Edit Contact',
+                        style: TextStyle(
+                            fontSize: 26,
+                            fontWeight: FontWeight.w800,
+                            color: AppColors.textPrimary),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        "Update this contact's details below.",
+                        style: TextStyle(
+                            fontSize: 13, color: AppColors.textSecondary),
+                      ),
+                      const SizedBox(height: 20),
                       _buildField(
                         'FULL NAME',
                         _nameController,
+                        icon: Icons.person_outline,
                         hint: 'e.g. Sophea Chan',
                         validator: (v) {
                           final text = v?.trim() ?? '';
@@ -120,6 +130,7 @@ class _EditContactScreenState extends State<EditContactScreen> {
                       _buildField(
                         'PHONE NUMBER',
                         _phoneController,
+                        icon: Icons.phone_outlined,
                         hint: '+855 12 345 678',
                         keyboardType: TextInputType.phone,
                         validator: (v) {
@@ -135,6 +146,7 @@ class _EditContactScreenState extends State<EditContactScreen> {
                       _buildField(
                         'EMAIL ADDRESS',
                         _emailController,
+                        icon: Icons.mail_outline,
                         hint: 'name@example.com',
                         keyboardType: TextInputType.emailAddress,
                         validator: (v) {
@@ -150,69 +162,65 @@ class _EditContactScreenState extends State<EditContactScreen> {
                       _buildField(
                         'RELATIONSHIP',
                         _relationshipController,
+                        icon: Icons.people_alt_outlined,
                         hint: 'e.g. Sister, Roommate, Friend',
                         validator: (v) => (v == null || v.trim().isEmpty)
                             ? 'Relationship is required'
                             : null,
                       ),
-                      const SizedBox(height: 8),
-                      Text(
-                        'CONTACT PRIORITY TIER',
-                        style: TextStyle(
-                            fontSize: 11.5,
-                            fontWeight: FontWeight.w700,
-                            color: AppColors.textSecondary,
-                            letterSpacing: 0.4),
-                      ),
-                      const SizedBox(height: 10),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: _PriorityOption(
-                              label: 'Main Contact',
-                              sublabel: 'Notified first',
-                              selected: _isMainContact,
-                              onTap: () =>
-                                  setState(() => _isMainContact = true),
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: _PriorityOption(
-                              label: 'Other Contact',
-                              sublabel: 'Backup notification',
-                              selected: !_isMainContact,
-                              onTap: () =>
-                                  setState(() => _isMainContact = false),
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 32),
                     ],
                   ),
                 ),
               ),
             ),
-            SkylineBottomBar(
-              child: SizedBox(
-                width: double.infinity,
-                height: 50,
-                child: ElevatedButton(
-                  onPressed: _saveContact,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.navy,
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(25)),
+            SizedBox(
+              height: 150,
+              width: double.infinity,
+              child: Stack(
+                alignment: Alignment.bottomCenter,
+                children: [
+                  Positioned.fill(
+                    child: Image.asset(
+                      'assets/images/add_contact_background.png',
+                      fit: BoxFit.cover,
+                    ),
                   ),
-                  child: Text(
-                    isEditing ? 'Save Edit' : 'Add Contact',
-                    style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 15,
-                        fontWeight: FontWeight.w700),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        SizedBox(
+                          width: double.infinity,
+                          height: 50,
+                          child: ElevatedButton(
+                            onPressed: _saveContact,
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: AppColors.navy,
+                              shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(25)),
+                            ),
+                            child: const Text(
+                              'Save Edit',
+                              style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w700),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        TextButton(
+                          onPressed: () => Navigator.pop(context),
+                          child: Text('Cancel',
+                              style: TextStyle(
+                                  color: AppColors.danger,
+                                  fontWeight: FontWeight.w600)),
+                        ),
+                      ],
+                    ),
                   ),
-                ),
+                ],
               ),
             ),
           ],
@@ -221,15 +229,45 @@ class _EditContactScreenState extends State<EditContactScreen> {
     );
   }
 
+  Widget _buildCard({required IconData icon, required Widget child}) {
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(bottom: 14),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppColors.card,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppColors.border.withValues(alpha: 0.6)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: AppColors.background,
+              shape: BoxShape.circle,
+            ),
+            child: Icon(icon, size: 19, color: AppColors.navy),
+          ),
+          const SizedBox(width: 12),
+          Expanded(child: child),
+        ],
+      ),
+    );
+  }
+
   Widget _buildField(
     String label,
     TextEditingController controller, {
+    required IconData icon,
     String? hint,
     TextInputType? keyboardType,
     String? Function(String?)? validator,
   }) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 16),
+    return _buildCard(
+      icon: icon,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -241,86 +279,22 @@ class _EditContactScreenState extends State<EditContactScreen> {
                 color: AppColors.textSecondary,
                 letterSpacing: 0.4),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 6),
           TextFormField(
             controller: controller,
             keyboardType: keyboardType,
             decoration: InputDecoration(
               hintText: hint,
-              contentPadding:
-                  const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-              border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide(color: AppColors.border)),
+              isDense: true,
+              contentPadding: EdgeInsets.zero,
+              border: InputBorder.none,
+              enabledBorder: InputBorder.none,
+              focusedBorder: InputBorder.none,
             ),
             validator: validator,
             autovalidateMode: AutovalidateMode.onUserInteraction,
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _PriorityOption extends StatelessWidget {
-  final String label;
-  final String sublabel;
-  final bool selected;
-  final VoidCallback onTap;
-
-  const _PriorityOption({
-    required this.label,
-    required this.sublabel,
-    required this.selected,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: selected
-              ? AppColors.navy.withValues(alpha: 0.06)
-              : AppColors.card,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(
-              color: selected ? AppColors.navy : AppColors.border,
-              width: selected ? 1.6 : 1),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(
-                  selected
-                      ? Icons.radio_button_checked
-                      : Icons.radio_button_unchecked,
-                  size: 18,
-                  color: selected ? AppColors.navy : AppColors.textMuted,
-                ),
-                const SizedBox(width: 6),
-                Expanded(
-                  child: Text(label,
-                      style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w700,
-                          color: AppColors.textPrimary)),
-                ),
-              ],
-            ),
-            const SizedBox(height: 4),
-            Padding(
-              padding: const EdgeInsets.only(left: 24),
-              child: Text(sublabel,
-                  style:
-                      TextStyle(fontSize: 11, color: AppColors.textSecondary)),
-            ),
-          ],
-        ),
       ),
     );
   }

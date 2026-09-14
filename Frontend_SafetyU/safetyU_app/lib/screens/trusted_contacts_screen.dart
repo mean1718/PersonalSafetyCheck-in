@@ -235,6 +235,11 @@ class _TrustedContactsScreenState extends State<TrustedContactsScreen> {
 
   void _delete(Contact contact) {
     setState(() => AppSession.instance.removeContact(contact.id));
+    // Revoke the underlying Trust relationship on the backend too — see
+    // removeTrustByPhone for why this matters (without it, she quietly
+    // stays "trusted", so she reappears later and can't be re-added).
+    TrustedContactService.removeTrustByPhone(contact.phone)
+        .catchError((e) => debugPrint('Trust removal sync skipped: $e'));
     if (contact.tierAssigned) {
       // Only Main/Other contacts are ever mirrored to the backend — see
       // TrustedContactService — so only try to remove those there.
