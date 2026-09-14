@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../theme/app_theme.dart';
 
 /// A flat, hand-drawn-from-shapes cityscape + simplified person illustration,
 /// in the spirit of the reference design (skyline silhouette, person with a
@@ -193,6 +194,92 @@ class SkylineBottomBar extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
             child: child,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Small decorative corner accent — a soft blob plus a heart — used in the
+/// app bar area of several screens in the reference designs. Purely
+/// decorative, no functionality.
+class HeaderAccent extends StatelessWidget {
+  final double size;
+  const HeaderAccent({super.key, this.size = 46});
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: size,
+      height: size,
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          Positioned(
+            left: 0,
+            top: 0,
+            child: Container(
+              width: size * 0.7,
+              height: size * 0.7,
+              decoration: BoxDecoration(
+                color: const Color(0xFF4A90E2).withValues(alpha: 0.18),
+                shape: BoxShape.circle,
+              ),
+            ),
+          ),
+          Positioned(
+            right: -2,
+            bottom: -2,
+            child:
+                Icon(Icons.favorite, size: size * 0.4, color: AppColors.danger),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Simple wavy background with a cloud and a couple of droplet/leaf
+/// accents — used behind a bottom button area on a few screens, distinct
+/// from the fuller SafetyIllustration/SkylineBottomBar art.
+class WaveDecorBottom extends StatelessWidget {
+  final double height;
+  const WaveDecorBottom({super.key, this.height = 120});
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: height,
+      width: double.infinity,
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          ClipPath(
+            clipper: BottomWaveClipper(),
+            child: Container(
+              color: const Color(0xFF4A90E2).withValues(alpha: 0.1),
+            ),
+          ),
+          Positioned(
+            top: height * 0.1,
+            right: 40,
+            child: Icon(Icons.cloud,
+                size: 26,
+                color: const Color(0xFF4A90E2).withValues(alpha: 0.35)),
+          ),
+          Positioned(
+            left: 40,
+            bottom: 10,
+            child: Icon(Icons.water_drop,
+                size: 20,
+                color: const Color(0xFF4A90E2).withValues(alpha: 0.4)),
+          ),
+          Positioned(
+            right: 60,
+            bottom: 4,
+            child: Icon(Icons.water_drop,
+                size: 18, color: AppColors.danger.withValues(alpha: 0.35)),
           ),
         ],
       ),

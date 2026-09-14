@@ -205,6 +205,19 @@ class _ProfileScreenState extends State<ProfileScreen> {
         automaticallyImplyLeading: false,
         title: const Text('Setting',
             style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700)),
+        actions: [
+          Padding(
+            padding: const EdgeInsets.only(right: 12),
+            child: Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: AppColors.navy.withValues(alpha: 0.08),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(Icons.settings, size: 18, color: AppColors.navy),
+            ),
+          ),
+        ],
       ),
       body: SafeArea(
         child: ListView(
@@ -217,19 +230,30 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   child: Stack(
                     clipBehavior: Clip.none,
                     children: [
-                      CircleAvatar(
-                        radius: 28,
-                        backgroundColor: AppColors.navy,
-                        backgroundImage: session.profilePhotoPath != null
-                            ? FileImage(File(session.profilePhotoPath!))
-                            : null,
-                        child: session.profilePhotoPath == null
-                            ? Text(session.initials,
-                                style: const TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 18,
-                                    fontWeight: FontWeight.w700))
-                            : null,
+                      Container(
+                        padding: const EdgeInsets.all(3),
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          gradient: const LinearGradient(
+                            colors: [Color(0xFF6C8DF7), Color(0xFFF7A8C4)],
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                          ),
+                        ),
+                        child: CircleAvatar(
+                          radius: 28,
+                          backgroundColor: AppColors.navy,
+                          backgroundImage: session.profilePhotoPath != null
+                              ? FileImage(File(session.profilePhotoPath!))
+                              : null,
+                          child: session.profilePhotoPath == null
+                              ? Text(session.initials,
+                                  style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 18,
+                                      fontWeight: FontWeight.w700))
+                              : null,
+                        ),
                       ),
                       // Small camera badge — signals the avatar is tappable
                       // and lets you change the photo.
@@ -290,44 +314,72 @@ class _ProfileScreenState extends State<ProfileScreen> {
               ],
             ),
             const SizedBox(height: 28),
-            const _SectionLabel('General'),
-            _SwitchRow(
-              label: 'Notifications and Sounds',
-              value: session.notificationsEnabled,
-              onChanged: (v) =>
-                  setState(() => session.notificationsEnabled = v),
-            ),
-            _ValueRow(
-              label: 'Language',
-              value: session.language,
-              onTap: () => _pickOption(
-                  'Language',
-                  const ['English'],
-                  session.language,
-                  (v) => setState(() => session.language = v)),
-            ),
-            _ValueRow(
-              label: 'Theme',
-              value: session.themeName,
-              onTap: () => _pickOption(
-                  'Theme', const ['Light', 'Dark'], session.themeName, (v) {
-                setState(() => session.themeName = v);
-                ThemeController.instance.setDark(v == 'Dark');
-              }),
-            ),
+            _SectionLabel('General',
+                icon: Icons.person, color: const Color(0xFF7B6EF6)),
+            const SizedBox(height: 10),
+            _SettingsCard(children: [
+              _SwitchRow(
+                label: 'Notifications and Sounds',
+                subtitle: 'Manage alerts and notification sounds',
+                icon: Icons.notifications,
+                color: const Color(0xFFFF6B6B),
+                value: session.notificationsEnabled,
+                onChanged: (v) =>
+                    setState(() => session.notificationsEnabled = v),
+              ),
+              _ValueRow(
+                label: 'Language',
+                subtitle: 'Choose your preferred language',
+                icon: Icons.language,
+                color: const Color(0xFF4A90E2),
+                value: session.language,
+                onTap: () => _pickOption(
+                    'Language',
+                    const ['English'],
+                    session.language,
+                    (v) => setState(() => session.language = v)),
+              ),
+              _ValueRow(
+                label: 'Theme',
+                subtitle: 'Choose your app theme',
+                icon: Icons.water_drop,
+                color: const Color(0xFF9B7FE8),
+                value: session.themeName,
+                onTap: () => _pickOption(
+                    'Theme', const ['Light', 'Dark'], session.themeName, (v) {
+                  setState(() => session.themeName = v);
+                  ThemeController.instance.setDark(v == 'Dark');
+                }),
+              ),
+            ]),
             const SizedBox(height: 20),
-            const _SectionLabel('Account'),
-            _NavRow(
+            _SectionLabel('Account',
+                icon: Icons.shield, color: AppColors.success),
+            const SizedBox(height: 10),
+            _SettingsCard(children: [
+              _NavRow(
                 label: 'Personal Info',
-                onTap: () => Navigator.pushNamed(context, '/personal-info')),
-            _NavRow(
+                subtitle: 'View and edit your personal information',
+                icon: Icons.person_outline,
+                color: const Color(0xFF4A90E2),
+                onTap: () => Navigator.pushNamed(context, '/personal-info'),
+              ),
+              _NavRow(
                 label: 'Change Password',
-                onTap: () => Navigator.pushNamed(context, '/change-password')),
-            _SwitchRow(
-              label: 'Location',
-              value: session.locationSharingEnabled,
-              onChanged: _toggleLocation,
-            ),
+                subtitle: 'Update your password',
+                icon: Icons.lock_outline,
+                color: const Color(0xFFD86EDB),
+                onTap: () => Navigator.pushNamed(context, '/change-password'),
+              ),
+              _SwitchRow(
+                label: 'Location',
+                subtitle: 'Allow location access for better safety',
+                icon: Icons.location_on,
+                color: const Color(0xFFF5A623),
+                value: session.locationSharingEnabled,
+                onChanged: _toggleLocation,
+              ),
+            ]),
             const SizedBox(height: 32),
             SizedBox(
               width: double.infinity,
@@ -358,44 +410,125 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
 class _SectionLabel extends StatelessWidget {
   final String text;
-  const _SectionLabel(this.text);
+  final IconData icon;
+  final Color color;
+  const _SectionLabel(this.text, {required this.icon, required this.color});
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: Text(
-        text.toUpperCase(),
-        style: TextStyle(
-            fontSize: 11,
-            fontWeight: FontWeight.w700,
-            color: AppColors.textMuted,
-            letterSpacing: 0.6),
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(bottom: 2),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(14),
       ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(6),
+            decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+            child: Icon(icon, size: 14, color: Colors.white),
+          ),
+          const SizedBox(width: 10),
+          Text(
+            text,
+            style: TextStyle(
+                fontSize: 15, fontWeight: FontWeight.w800, color: color),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SettingsCard extends StatelessWidget {
+  final List<Widget> children;
+  const _SettingsCard({required this.children});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 4),
+      decoration: BoxDecoration(
+        color: AppColors.card,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: AppColors.border.withValues(alpha: 0.6)),
+      ),
+      child: Column(
+        children: [
+          for (int i = 0; i < children.length; i++) ...[
+            if (i > 0) Divider(height: 1, indent: 60, color: AppColors.border),
+            children[i],
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _IconBadge extends StatelessWidget {
+  final IconData icon;
+  final Color color;
+  const _IconBadge({required this.icon, required this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 40,
+      height: 40,
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.14),
+        shape: BoxShape.circle,
+      ),
+      child: Icon(icon, size: 19, color: color),
     );
   }
 }
 
 class _SwitchRow extends StatelessWidget {
   final String label;
+  final String subtitle;
+  final IconData icon;
+  final Color color;
   final bool value;
   final ValueChanged<bool> onChanged;
 
-  const _SwitchRow(
-      {required this.label, required this.value, required this.onChanged});
+  const _SwitchRow({
+    required this.label,
+    required this.subtitle,
+    required this.icon,
+    required this.color,
+    required this.value,
+    required this.onChanged,
+  });
 
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 4),
+      padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
       child: Row(
         children: [
+          _IconBadge(icon: icon, color: color),
+          const SizedBox(width: 12),
           Expanded(
-              child: Text(label,
-                  style: TextStyle(
-                      fontSize: 14,
-                      color: AppColors.textPrimary,
-                      fontWeight: FontWeight.w600))),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(label,
+                    style: TextStyle(
+                        fontSize: 14,
+                        color: AppColors.textPrimary,
+                        fontWeight: FontWeight.w700)),
+                const SizedBox(height: 2),
+                Text(subtitle,
+                    style: TextStyle(
+                        fontSize: 11.5, color: AppColors.textSecondary)),
+              ],
+            ),
+          ),
           Switch(
               value: value,
               onChanged: onChanged,
@@ -408,26 +541,47 @@ class _SwitchRow extends StatelessWidget {
 
 class _ValueRow extends StatelessWidget {
   final String label;
+  final String subtitle;
+  final IconData icon;
+  final Color color;
   final String value;
   final VoidCallback onTap;
 
-  const _ValueRow(
-      {required this.label, required this.value, required this.onTap});
+  const _ValueRow({
+    required this.label,
+    required this.subtitle,
+    required this.icon,
+    required this.color,
+    required this.value,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
     return InkWell(
       onTap: onTap,
       child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 10),
+        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
         child: Row(
           children: [
+            _IconBadge(icon: icon, color: color),
+            const SizedBox(width: 12),
             Expanded(
-                child: Text(label,
-                    style: TextStyle(
-                        fontSize: 14,
-                        color: AppColors.textPrimary,
-                        fontWeight: FontWeight.w600))),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(label,
+                      style: TextStyle(
+                          fontSize: 14,
+                          color: AppColors.textPrimary,
+                          fontWeight: FontWeight.w700)),
+                  const SizedBox(height: 2),
+                  Text(subtitle,
+                      style: TextStyle(
+                          fontSize: 11.5, color: AppColors.textSecondary)),
+                ],
+              ),
+            ),
             Text(value,
                 style:
                     TextStyle(fontSize: 13.5, color: AppColors.textSecondary)),
@@ -442,24 +596,45 @@ class _ValueRow extends StatelessWidget {
 
 class _NavRow extends StatelessWidget {
   final String label;
+  final String subtitle;
+  final IconData icon;
+  final Color color;
   final VoidCallback onTap;
 
-  const _NavRow({required this.label, required this.onTap});
+  const _NavRow({
+    required this.label,
+    required this.subtitle,
+    required this.icon,
+    required this.color,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
     return InkWell(
       onTap: onTap,
       child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 10),
+        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
         child: Row(
           children: [
+            _IconBadge(icon: icon, color: color),
+            const SizedBox(width: 12),
             Expanded(
-                child: Text(label,
-                    style: TextStyle(
-                        fontSize: 14,
-                        color: AppColors.textPrimary,
-                        fontWeight: FontWeight.w600))),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(label,
+                      style: TextStyle(
+                          fontSize: 14,
+                          color: AppColors.textPrimary,
+                          fontWeight: FontWeight.w700)),
+                  const SizedBox(height: 2),
+                  Text(subtitle,
+                      style: TextStyle(
+                          fontSize: 11.5, color: AppColors.textSecondary)),
+                ],
+              ),
+            ),
             Icon(Icons.chevron_right, size: 18, color: AppColors.textMuted),
           ],
         ),
