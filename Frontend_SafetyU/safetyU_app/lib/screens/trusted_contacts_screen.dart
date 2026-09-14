@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_bottom_nav.dart';
+import '../widgets/safety_illustration.dart';
 import '../models/contact.dart';
 import '../models/help_request.dart';
 import '../services/app_session.dart';
@@ -311,17 +312,31 @@ class _TrustedContactsScreenState extends State<TrustedContactsScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                'Friends',
-                style: TextStyle(
-                    fontSize: 30,
-                    fontWeight: FontWeight.w800,
-                    color: AppColors.textPrimary),
-              ),
-              const SizedBox(height: 6),
-              Text(
-                'People you trust and can notify in an emergency.',
-                style: TextStyle(fontSize: 13, color: AppColors.textSecondary),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Friends',
+                          style: TextStyle(
+                              fontSize: 30,
+                              fontWeight: FontWeight.w800,
+                              color: AppColors.textPrimary),
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          'People you trust and can notify in an emergency.',
+                          style: TextStyle(
+                              fontSize: 13, color: AppColors.textSecondary),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const HeaderAccent(),
+                ],
               ),
               const SizedBox(height: 18),
               Expanded(
@@ -386,8 +401,10 @@ class _TrustedContactsScreenState extends State<TrustedContactsScreen> {
                                                   color: AppColors.card,
                                                   width: 2),
                                             ),
-                                            child: const Icon(Icons.add,
-                                                size: 12, color: Colors.white),
+                                            child: const Icon(
+                                                Icons.priority_high,
+                                                size: 12,
+                                                color: Colors.white),
                                           ),
                                         ),
                                       ],
@@ -469,11 +486,22 @@ class _TrustedContactsScreenState extends State<TrustedContactsScreen> {
       ),
       floatingActionButton: isEmpty
           ? null
-          : FloatingActionButton(
-              onPressed: _addContact,
-              backgroundColor: AppColors.navy,
-              shape: const CircleBorder(),
-              child: const Icon(Icons.add, color: Colors.white, size: 28),
+          : Container(
+              decoration: const BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: LinearGradient(
+                  colors: [Color(0xFF6C63F7), Color(0xFF4A90E2)],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+              ),
+              child: FloatingActionButton(
+                onPressed: _addContact,
+                backgroundColor: Colors.transparent,
+                elevation: 0,
+                shape: const CircleBorder(),
+                child: const Icon(Icons.add, color: Colors.white, size: 28),
+              ),
             ),
       bottomNavigationBar:
           AppBottomNav(currentIndex: _navIndex, onTap: _onNavTap),
@@ -834,15 +862,32 @@ class _FriendCard extends StatelessWidget {
               ElevatedButton(
                 onPressed: onUnfriend,
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.navy,
+                  backgroundColor: Colors.transparent,
+                  shadowColor: Colors.transparent,
                   minimumSize: const Size(0, 36),
-                  padding: const EdgeInsets.symmetric(horizontal: 14),
+                  padding: EdgeInsets.zero,
                   shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(20)),
                   textStyle: const TextStyle(
                       fontSize: 12, fontWeight: FontWeight.w700),
                 ),
-                child: const Text('Unfriend'),
+                child: Ink(
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(20),
+                    gradient: const LinearGradient(
+                      colors: [Color(0xFF6C63F7), Color(0xFF4A90E2)],
+                      begin: Alignment.centerLeft,
+                      end: Alignment.centerRight,
+                    ),
+                  ),
+                  child: Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+                    alignment: Alignment.center,
+                    child: const Text('Unfriend',
+                        style: TextStyle(color: Colors.white)),
+                  ),
+                ),
               ),
             ],
           ),

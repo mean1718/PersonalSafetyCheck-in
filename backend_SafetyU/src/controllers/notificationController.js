@@ -32,6 +32,7 @@ const getMyActiveSafetyAlerts = async (req, res) => {
         notifiedAt: notification.createdAt,
         responseStatus: notification.responseStatus || "pending",
         respondedAt: notification.respondedAt || null,
+        isRead: notification.isRead || false,
       }));
     return res.json({ alerts });
   } catch (_) { return res.status(500).json({ message: "Server error" }); }

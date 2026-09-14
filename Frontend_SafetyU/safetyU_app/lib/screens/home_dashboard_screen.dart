@@ -114,7 +114,13 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
           .where((a) =>
               (a['responseStatus']?.toString() ?? 'pending') == 'pending')
           .toList();
-      AppSession.instance.setBackendPendingAlertCount(pending.length);
+      // The badge should clear once the person has actually looked at
+      // Notifications, then climb again only for genuinely new alerts —
+      // "pending" alone doesn't capture that, since it stays true forever
+      // until someone responds. "isRead" is what tracks whether they've
+      // actually seen it.
+      final unreadPending = pending.where((a) => a['isRead'] != true).length;
+      AppSession.instance.setBackendPendingAlertCount(unreadPending);
       // Sound only for alerts we haven't already shown/played for — this
       // screen isn't polling continuously, but it does reload after
       // viewing a detail, so without this a resolved-then-reopened alert

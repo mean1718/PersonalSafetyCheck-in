@@ -1,6 +1,5 @@
-const User = require("../models/User");
 const Location = require("../models/Location");
-const TrustedContact = require("../models/TrustedContact");
+const TrustRequest = require("../models/TrustRequest");
 
 const toNumber = (value) => {
   const n = Number(value);
@@ -69,53 +68,58 @@ const stopSharing = async (req, res) => {
   }
 };
 
-// GET /api/location/contacts — every trusted contact who (a) is a real
-// SafetyU user, and (b) currently has sharing turned on, with their last
-// known point and distance from the requester's own last known point.
+// GET /api/location/contacts — every trusted contact who (a) is a
+// confirmed friend via a real, accepted TrustRequest — the same system
+// Friends/chat/check-ins already use — and (b) currently has sharing
+// turned on, with their last known point and distance from the
+// requester's own last known point.
+//
+// This used to query the older, separate TrustedContact model (manually
+// entered phone-number contacts, backfilled to a user account), which has
+// nothing to do with the real accepted-TrustRequest relationships the
+// rest of the app is built on. That meant this endpoint could never find
+// anyone real — a confirmed friend from Friends/Select Contacts simply
+// isn't in that other table at all.
 const listContactLocations = async (req, res) => {
   try {
-    const [me, contacts] = await Promise.all([
+    const relationships = await TrustRequest.find({
+      status: "accepted",
+      $or: [{ sender: req.user.id }, { receiver: req.user.id }],
+    }).populate("sender", "name phone").populate("receiver", "name phone");
+
+    const contacts = relationships
+      .map((r) => {
+        const other = r.sender._id.toString() === req.user.id.toString()
+          ? r.receiver
+          : r.sender;
+        return other ? { userId: other._id, name: other.name } : null;
+      })
+      .filter(Boolean);
+
+    const [me, locations] = await Promise.all([
       Location.findOne({ user: req.user.id }),
-      TrustedContact.find({ user: req.user.id, isActive: true }),
+      Location.find({
+        user: { $in: contacts.map((c) => c.userId) },
+        sharingEnabled: true,
+      }),
     ]);
-
-    // Backfill contactUser for older records that predate that field.
-    const missingLink = contacts.filter((c) => !c.contactUser && c.phone);
-    if (missingLink.length) {
-      const users = await User.find({
-        phone: { $in: missingLink.map((c) => c.phone) },
-      }).select("_id phone");
-      const byPhone = new Map(users.map((u) => [u.phone, u._id]));
-      await Promise.all(
-        missingLink
-          .filter((c) => byPhone.has(c.phone))
-          .map((c) => {
-            c.contactUser = byPhone.get(c.phone);
-            return c.save();
-          }),
-      );
-    }
-
-    const linkedIds = contacts.map((c) => c.contactUser).filter(Boolean);
-    const locations = await Location.find({
-      user: { $in: linkedIds },
-      sharingEnabled: true,
-    });
     const locationByUser = new Map(
       locations.map((l) => [l.user.toString(), l]),
     );
 
     const result = contacts
-      .filter(
-        (c) => c.contactUser && locationByUser.has(c.contactUser.toString()),
-      )
+      .filter((c) => locationByUser.has(c.userId.toString()))
       .map((c) => {
-        const loc = locationByUser.get(c.contactUser.toString());
+        const loc = locationByUser.get(c.userId.toString());
         return {
-          contactId: c._id,
-          userId: c.contactUser,
+          // No separate "contact record" id exists anymore now that this
+          // reads straight from confirmed users — the real user id is
+          // used consistently everywhere else in the app (Contact.id),
+          // so it's used here too instead of inventing a second id.
+          contactId: c.userId,
+          userId: c.userId,
           name: c.name,
-          relationship: c.relationship,
+          relationship: "Trusted Contact",
           latitude: loc.latitude,
           longitude: loc.longitude,
           accuracy: loc.accuracy ?? null,

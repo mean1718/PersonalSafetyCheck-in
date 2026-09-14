@@ -38,9 +38,11 @@ class NotificationService {
       if ((n['responseStatus']?.toString() ?? 'pending') != 'pending') continue;
       final checkIn = n['checkIn'] as Map<String, dynamic>?;
       final checkInStatus = checkIn?['status']?.toString();
-      // The owner marked themselves safe (or it otherwise resolved) —
-      // this no longer belongs on the "needs a response" list even
-      // though nobody ever tapped Can Help / Can't Help.
+      // Once the owner has genuinely confirmed Safe, this no longer
+      // belongs on the "needs a response" list — it converts to the
+      // separate "X is safe now" card instead (see
+      // recentlyResolvedSafetyAlerts below), rather than staying stuck
+      // asking for a response to something that's already resolved.
       if (checkInStatus == 'completed') continue;
       final id = n['_id']?.toString();
       if (id == null || seenIds.contains(id)) continue;
@@ -54,6 +56,7 @@ class NotificationService {
         'message': n['message']?.toString() ?? '',
         'notifiedAt': n['createdAt']?.toString(),
         'responseStatus': n['responseStatus']?.toString() ?? 'pending',
+        'isRead': n['isRead'] == true,
       });
     }
     return merged;
