@@ -1,7 +1,11 @@
+import 'dart:async';
 import 'dart:math';
 import 'package:flutter/material.dart';
+import 'package:qr_flutter/qr_flutter.dart';
 import '../theme/app_theme.dart';
 import '../services/app_session.dart';
+import '../services/api_client.dart';
+import '../services/payment_service.dart';
 
 /// Shown when the person tries to notify more contacts than the free plan
 /// allows.
@@ -65,26 +69,94 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
 
   _LimitStep _step = _LimitStep.plans;
 
+  // Real Bakong KHQR payment in flight, if any (see services/payment_service.dart).
+  PendingPayment? _pendingPayment;
+  String? _paymentError;
+  bool _creatingPayment = false;
+  Timer? _pollTimer;
+
+  @override
+  void dispose() {
+    _pollTimer?.cancel();
+    super.dispose();
+  }
+
+  String _friendlyError(Object error) {
+    if (error is ApiException || error is ApiConnectionException) {
+      return error.toString();
+    }
+    return 'Something went wrong creating the payment. Please try again.';
+  }
+
+  /// Polls the backend every 3s for whether the KHQR on screen has actually
+  /// been paid yet (the backend checks the live Bakong network). Stops
+  /// itself once the payment settles, expires, or the dialog is closed.
+  void _startPolling({required VoidCallback onPaid}) {
+    _pollTimer?.cancel();
+    _pollTimer = Timer.periodic(const Duration(seconds: 3), (_) async {
+      final payment = _pendingPayment;
+      if (payment == null || !mounted) return;
+      try {
+        final status = await PaymentService.checkStatus(payment.md5);
+        if (!mounted) return;
+        if (status.isPaid) {
+          _pollTimer?.cancel();
+          onPaid();
+        } else if (status.isExpired) {
+          _pollTimer?.cancel();
+          setState(() {
+            _paymentError =
+                'This QR code expired before payment was received. Please try again.';
+            _step = _LimitStep.plans;
+          });
+        }
+        // isPending: keep waiting quietly, no need to update UI each tick.
+      } catch (_) {
+        // Transient network hiccup while polling — try again next tick
+        // rather than interrupting the person mid-payment.
+      }
+    });
+  }
+
   // ---------------------------------------------------------------------------
   // PRO PAYMENT
   // ---------------------------------------------------------------------------
 
   Future<void> _beginProPayment() async {
+    // Guard against double-tap / accidental re-entry firing a second
+    // create request while the first is still in flight (this is what
+    // was causing the backend's duplicate-md5 crash).
+    if (_creatingPayment) return;
+
     setState(() {
       _step = _LimitStep.proScan;
+      _creatingPayment = true;
+      _paymentError = null;
     });
 
-    // Demo payment delay.
-    await Future.delayed(const Duration(seconds: 4));
-
-    if (!mounted) return;
-
-    // Upgrade only after payment completes.
-    AppSession.instance.upgradeToPro();
-
-    setState(() {
-      _step = _LimitStep.proSuccess;
-    });
+    try {
+      final payment = await PaymentService.createProPayment();
+      if (!mounted) return;
+      setState(() {
+        _pendingPayment = payment;
+        _creatingPayment = false;
+      });
+      _startPolling(
+        onPaid: () {
+          if (!mounted) return;
+          // Credit locally only after the backend confirms the real
+          // Bakong payment settled.
+          AppSession.instance.upgradeToPro();
+          setState(() => _step = _LimitStep.proSuccess);
+        },
+      );
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _creatingPayment = false;
+        _paymentError = _friendlyError(error);
+      });
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -92,18 +164,51 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
   // ---------------------------------------------------------------------------
 
   Future<void> _beginPayPayment() async {
+    // Same double-tap guard as _beginProPayment.
+    if (_creatingPayment) return;
+
+    final extraMain = max(
+      0,
+      widget.selectedMain - AppSession.freeMainContactLimit,
+    );
+    final extraOther = max(
+      0,
+      widget.selectedOther - AppSession.freeOtherContactLimit,
+    );
+
     setState(() {
       _step = _LimitStep.payScan;
+      _creatingPayment = true;
+      _paymentError = null;
     });
 
-    // Demo payment delay.
-    await Future.delayed(const Duration(seconds: 4));
-
-    if (!mounted) return;
-
-    setState(() {
-      _step = _LimitStep.paySuccess;
-    });
+    try {
+      final payment = await PaymentService.createPayPerContactPayment(
+        extraMain: extraMain,
+        extraOther: extraOther,
+      );
+      if (!mounted) return;
+      setState(() {
+        _pendingPayment = payment;
+        _creatingPayment = false;
+      });
+      _startPolling(
+        onPaid: () {
+          if (!mounted) return;
+          AppSession.instance.purchaseExtraSlots(
+            extraMain: extraMain,
+            extraOther: extraOther,
+          );
+          setState(() => _step = _LimitStep.paySuccess);
+        },
+      );
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _creatingPayment = false;
+        _paymentError = _friendlyError(error);
+      });
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -113,8 +218,7 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
   @override
   Widget build(BuildContext context) {
     return PopScope(
-      canPop: _step != _LimitStep.proScan &&
-          _step != _LimitStep.payScan,
+      canPop: _step != _LimitStep.proScan && _step != _LimitStep.payScan,
       child: Dialog(
         backgroundColor: AppColors.card,
         shape: RoundedRectangleBorder(
@@ -244,6 +348,23 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
           ),
         ),
 
+        if (_paymentError != null) ...[
+          const SizedBox(height: 12),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: Colors.red.withValues(alpha: 0.08),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Text(
+              _paymentError!,
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontSize: 11.5, color: Colors.red),
+            ),
+          ),
+        ],
+
         const SizedBox(height: 16),
 
         Text(
@@ -265,8 +386,7 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
           icon: Icons.card_giftcard,
           title: 'Free Plan',
           tag: 'Current',
-          subtitle:
-              'Up to ${AppSession.freeMainContactLimit} main + '
+          subtitle: 'Up to ${AppSession.freeMainContactLimit} main + '
               '${AppSession.freeOtherContactLimit} other contacts',
           highlighted: _selectedPlan == 'free',
           onTap: () {
@@ -287,8 +407,7 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
           icon: Icons.workspace_premium,
           title: 'Pro Plan',
           tag: 'Most Popular',
-          subtitle:
-              'Unlimited contacts & all premium features — '
+          subtitle: 'Unlimited contacts & all premium features — '
               '\$${_proMonthlyPrice.toStringAsFixed(2)}/month',
           highlighted: _selectedPlan == 'pro',
           onTap: () {
@@ -309,8 +428,7 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
           icon: Icons.person_add_alt_1,
           title: 'Pay Per Contact',
           tag: 'One-Pay-Per-Person',
-          subtitle:
-              'Add extra contacts without upgrading — '
+          subtitle: 'Add extra contacts without upgrading — '
               '\$${_pricePerContact.toStringAsFixed(2)}/person',
           highlighted: _selectedPlan == 'pay',
           onTap: () {
@@ -377,7 +495,6 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
             });
           },
         ),
-
         Container(
           width: 56,
           height: 56,
@@ -391,9 +508,7 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
             size: 26,
           ),
         ),
-
         const SizedBox(height: 14),
-
         Text(
           'Free Plan',
           style: TextStyle(
@@ -402,9 +517,7 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
             color: AppColors.textPrimary,
           ),
         ),
-
         const SizedBox(height: 6),
-
         Text(
           'You are currently using the Free Plan.',
           textAlign: TextAlign.center,
@@ -413,9 +526,7 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
             color: AppColors.textSecondary,
           ),
         ),
-
         const SizedBox(height: 16),
-
         Container(
           width: double.infinity,
           padding: const EdgeInsets.all(14),
@@ -442,9 +553,7 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
             ],
           ),
         ),
-
         const SizedBox(height: 16),
-
         Text(
           'You can continue using the Free Plan, but you cannot add more '
           'contacts until you choose another option.',
@@ -454,9 +563,7 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
             color: AppColors.textMuted,
           ),
         ),
-
         const SizedBox(height: 16),
-
         SizedBox(
           width: double.infinity,
           child: ElevatedButton(
@@ -470,7 +577,6 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
             child: const Text('Continue with Free Plan'),
           ),
         ),
-
         TextButton(
           onPressed: () {
             setState(() {
@@ -634,78 +740,68 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
             color: AppColors.textPrimary,
           ),
         ),
-
         const SizedBox(height: 6),
-
         Text(
-          '\$${_proMonthlyPrice.toStringAsFixed(2)}',
+          '\$${(_pendingPayment?.amount ?? _proMonthlyPrice).toStringAsFixed(2)}',
           style: TextStyle(
             fontSize: 26,
             fontWeight: FontWeight.w800,
             color: AppColors.navy,
           ),
         ),
-
         const SizedBox(height: 18),
-
-        Container(
-          padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(
-              color: AppColors.border,
-            ),
-          ),
-          child: _QrCode(
-            seed: (_proMonthlyPrice * 100).round(),
-            size: 180,
-          ),
-        ),
-
+        _khqrPanel(),
         const SizedBox(height: 16),
-
-        Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            SizedBox(
-              width: 16,
-              height: 16,
-              child: CircularProgressIndicator(
-                strokeWidth: 2,
-                color: AppColors.navy,
+        if (_paymentError == null)
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              SizedBox(
+                width: 16,
+                height: 16,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: AppColors.navy,
+                ),
               ),
-            ),
-            const SizedBox(width: 10),
-            Text(
-              'Waiting for payment confirmation…',
-              style: TextStyle(
-                fontSize: 12.5,
-                fontWeight: FontWeight.w600,
-                color: AppColors.textSecondary,
+              const SizedBox(width: 10),
+              Text(
+                _creatingPayment
+                    ? 'Generating your KHQR code…'
+                    : 'Waiting for payment confirmation…',
+                style: TextStyle(
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.textSecondary,
+                ),
               ),
-            ),
-          ],
-        ),
-
+            ],
+          )
+        else
+          Text(
+            _paymentError!,
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontSize: 12, color: Colors.red),
+          ),
         const SizedBox(height: 8),
-
         Text(
-          'Open your banking or e-wallet app and scan this code to complete '
-          'the payment. This screen updates automatically once payment is received.',
+          'Open your Bakong-linked banking or e-wallet app and scan this '
+          'real KHQR code to complete the payment. This screen updates '
+          'automatically once the payment is received.',
           textAlign: TextAlign.center,
           style: TextStyle(
             fontSize: 11,
             color: AppColors.textMuted,
           ),
         ),
-
         const SizedBox(height: 16),
-
         TextButton(
           onPressed: () {
+            _pollTimer?.cancel();
             setState(() {
               _selectedPlan = 'pro';
+              _pendingPayment = null;
+              _paymentError = null;
               _step = _LimitStep.plans;
             });
           },
@@ -717,6 +813,31 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
           ),
         ),
       ],
+    );
+  }
+
+  /// Shared KHQR-or-loading panel used by both the Pro and Pay Per Contact
+  /// scan steps.
+  Widget _khqrPanel() {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      width: 208,
+      height: 208,
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: _creatingPayment || _pendingPayment == null
+          ? Center(
+              child: CircularProgressIndicator(color: AppColors.navy),
+            )
+          : QrImageView(
+              data: _pendingPayment!.qrString,
+              version: QrVersions.auto,
+              size: 180,
+              gapless: true,
+            ),
     );
   }
 
@@ -741,9 +862,7 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
             size: 34,
           ),
         ),
-
         const SizedBox(height: 16),
-
         Text(
           "You're Pro Now",
           style: TextStyle(
@@ -752,9 +871,7 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
             color: AppColors.textPrimary,
           ),
         ),
-
         const SizedBox(height: 6),
-
         Text(
           'Unlimited contacts and all premium features are unlocked.',
           textAlign: TextAlign.center,
@@ -763,9 +880,7 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
             color: AppColors.textSecondary,
           ),
         ),
-
         const SizedBox(height: 20),
-
         SizedBox(
           width: double.infinity,
           child: ElevatedButton(
@@ -865,16 +980,12 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
                   'Main Contact',
                   extraMain,
                 ),
-
-              if (extraMain > 0 && extraOther > 0)
-                const SizedBox(height: 10),
-
+              if (extraMain > 0 && extraOther > 0) const SizedBox(height: 10),
               if (extraOther > 0)
                 _extraRow(
                   'Other Contact',
                   extraOther,
                 ),
-
               if (extraTotal == 0)
                 Text(
                   'No extra contacts are required.',
@@ -995,20 +1106,16 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
             color: AppColors.textPrimary,
           ),
         ),
-
         const SizedBox(height: 6),
-
         Text(
-          '\$${total.toStringAsFixed(2)}',
+          '\$${(_pendingPayment?.amount ?? total).toStringAsFixed(2)}',
           style: TextStyle(
             fontSize: 26,
             fontWeight: FontWeight.w800,
             color: AppColors.navy,
           ),
         ),
-
         const SizedBox(height: 6),
-
         Text(
           '$extraTotal extra contact${extraTotal == 1 ? '' : 's'}',
           style: TextStyle(
@@ -1016,67 +1123,59 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
             color: AppColors.textSecondary,
           ),
         ),
-
         const SizedBox(height: 18),
-
-        Container(
-          padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(
-              color: AppColors.border,
-            ),
-          ),
-          child: _QrCode(
-            seed: (total * 100).round(),
-            size: 180,
-          ),
-        ),
-
+        _khqrPanel(),
         const SizedBox(height: 16),
-
-        Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            SizedBox(
-              width: 16,
-              height: 16,
-              child: CircularProgressIndicator(
-                strokeWidth: 2,
-                color: AppColors.navy,
+        if (_paymentError == null)
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              SizedBox(
+                width: 16,
+                height: 16,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: AppColors.navy,
+                ),
               ),
-            ),
-            const SizedBox(width: 10),
-            Text(
-              'Waiting for payment confirmation…',
-              style: TextStyle(
-                fontSize: 12.5,
-                fontWeight: FontWeight.w600,
-                color: AppColors.textSecondary,
+              const SizedBox(width: 10),
+              Text(
+                _creatingPayment
+                    ? 'Generating your KHQR code…'
+                    : 'Waiting for payment confirmation…',
+                style: TextStyle(
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.textSecondary,
+                ),
               ),
-            ),
-          ],
-        ),
-
+            ],
+          )
+        else
+          Text(
+            _paymentError!,
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontSize: 12, color: Colors.red),
+          ),
         const SizedBox(height: 8),
-
         Text(
-          'Open your banking or e-wallet app and scan this code to complete '
-          'the payment. This screen updates automatically once payment is received.',
+          'Open your Bakong-linked banking or e-wallet app and scan this '
+          'real KHQR code to complete the payment. This screen updates '
+          'automatically once the payment is received.',
           textAlign: TextAlign.center,
           style: TextStyle(
             fontSize: 11,
             color: AppColors.textMuted,
           ),
         ),
-
         const SizedBox(height: 16),
-
         TextButton(
           onPressed: () {
+            _pollTimer?.cancel();
             setState(() {
               _selectedPlan = 'pay';
+              _pendingPayment = null;
+              _paymentError = null;
               _step = _LimitStep.plans;
             });
           },
@@ -1125,9 +1224,7 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
             size: 34,
           ),
         ),
-
         const SizedBox(height: 16),
-
         Text(
           'Payment Successful',
           style: TextStyle(
@@ -1136,9 +1233,7 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
             color: AppColors.textPrimary,
           ),
         ),
-
         const SizedBox(height: 6),
-
         Text(
           extraTotal == 1
               ? '1 extra contact has been added.'
@@ -1149,9 +1244,7 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
             color: AppColors.textSecondary,
           ),
         ),
-
         const SizedBox(height: 16),
-
         Container(
           width: double.infinity,
           padding: const EdgeInsets.all(14),
@@ -1189,9 +1282,7 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
             ],
           ),
         ),
-
         const SizedBox(height: 20),
-
         SizedBox(
           width: double.infinity,
           child: ElevatedButton(
@@ -1365,9 +1456,7 @@ class _PlanOption extends StatelessWidget {
               : AppColors.background,
           borderRadius: BorderRadius.circular(14),
           border: Border.all(
-            color: highlighted
-                ? AppColors.navy
-                : AppColors.border,
+            color: highlighted ? AppColors.navy : AppColors.border,
             width: highlighted ? 1.4 : 1,
           ),
         ),
@@ -1376,13 +1465,9 @@ class _PlanOption extends StatelessWidget {
             Icon(
               icon,
               size: 20,
-              color: highlighted
-                  ? AppColors.navy
-                  : AppColors.textSecondary,
+              color: highlighted ? AppColors.navy : AppColors.textSecondary,
             ),
-
             const SizedBox(width: 10),
-
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -1397,19 +1482,16 @@ class _PlanOption extends StatelessWidget {
                           color: AppColors.textPrimary,
                         ),
                       ),
-
                       if (tag != null) ...[
                         const SizedBox(width: 6),
-
                         Container(
                           padding: const EdgeInsets.symmetric(
                             horizontal: 6,
                             vertical: 1,
                           ),
                           decoration: BoxDecoration(
-                            color: highlighted
-                                ? AppColors.navy
-                                : AppColors.border,
+                            color:
+                                highlighted ? AppColors.navy : AppColors.border,
                             borderRadius: BorderRadius.circular(8),
                           ),
                           child: Text(
@@ -1426,9 +1508,7 @@ class _PlanOption extends StatelessWidget {
                       ],
                     ],
                   ),
-
                   const SizedBox(height: 2),
-
                   Text(
                     subtitle,
                     style: TextStyle(
@@ -1445,153 +1525,3 @@ class _PlanOption extends StatelessWidget {
     );
   }
 }
-
-// ===========================================================================
-// QR CODE
-// ===========================================================================
-
-class _QrCode extends StatelessWidget {
-  final int seed;
-  final double size;
-
-  const _QrCode({
-    required this.seed,
-    required this.size,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      width: size,
-      height: size,
-      child: CustomPaint(
-        painter: _QrPainter(
-          seed: seed,
-        ),
-      ),
-    );
-  }
-}
-
-// ===========================================================================
-// QR PAINTER
-// ===========================================================================
-
-class _QrPainter extends CustomPainter {
-  final int seed;
-
-  static const int _grid = 21;
-
-  _QrPainter({
-    required this.seed,
-  });
-
-  @override
-  void paint(
-    Canvas canvas,
-    Size size,
-  ) {
-    final cell = size.width / _grid;
-    final random = Random(seed);
-
-    final paint = Paint()
-      ..color = const Color(0xFF0B1F3A);
-
-    // White background
-    canvas.drawRect(
-      Offset.zero & size,
-      Paint()..color = Colors.white,
-    );
-
-    // Finder pattern positions
-    bool isFinder(
-      int r,
-      int c,
-    ) {
-      const positions = [
-        [0, 0],
-        [0, _grid - 7],
-        [_grid - 7, 0],
-      ];
-
-      for (final p in positions) {
-        if (r >= p[0] &&
-            r < p[0] + 7 &&
-            c >= p[1] &&
-            c < p[1] + 7) {
-          return true;
-        }
-      }
-
-      return false;
-    }
-
-    // Draw finder pattern
-    void drawFinder(
-      int r,
-      int c,
-    ) {
-      canvas.drawRect(
-        Rect.fromLTWH(
-          c * cell,
-          r * cell,
-          cell * 7,
-          cell * 7,
-        ),
-        paint,
-      );
-
-      canvas.drawRect(
-        Rect.fromLTWH(
-          (c + 1) * cell,
-          (r + 1) * cell,
-          cell * 5,
-          cell * 5,
-        ),
-        Paint()..color = Colors.white,
-      );
-
-      canvas.drawRect(
-        Rect.fromLTWH(
-          (c + 2) * cell,
-          (r + 2) * cell,
-          cell * 3,
-          cell * 3,
-        ),
-        paint,
-      );
-    }
-
-    // Random QR-like blocks
-    for (var r = 0; r < _grid; r++) {
-      for (var c = 0; c < _grid; c++) {
-        if (isFinder(r, c)) continue;
-
-        if (random.nextDouble() < 0.42) {
-          canvas.drawRect(
-            Rect.fromLTWH(
-              c * cell,
-              r * cell,
-              cell,
-              cell,
-            ),
-            paint,
-          );
-        }
-      }
-    }
-
-    // Finder patterns
-    drawFinder(0, 0);
-    drawFinder(0, _grid - 7);
-    drawFinder(_grid - 7, 0);
-  }
-
-  @override
-  bool shouldRepaint(
-    covariant _QrPainter oldDelegate,
-  ) {
-    return oldDelegate.seed != seed;
-  }
-}
-

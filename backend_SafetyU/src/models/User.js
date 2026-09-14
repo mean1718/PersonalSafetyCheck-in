@@ -37,8 +37,14 @@ const userSchema = new mongoose.Schema(
       enum: ["user", "emergency"],
       default: "user",
     },
+
+    // ---- Plan / paywall (credited by paymentController on confirmed Bakong payments) ----
+    isPro: { type: Boolean, default: false },
+    proExpiresAt: { type: Date },
+    purchasedExtraMainSlots: { type: Number, default: 0 },
+    purchasedExtraOtherSlots: { type: Number, default: 0 },
   },
-  { timestamps: true }
+  { timestamps: true },
 );
 
 module.exports = mongoose.model("User", userSchema);

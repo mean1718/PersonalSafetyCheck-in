@@ -40,7 +40,7 @@ class AppSession extends ChangeNotifier {
   // It lets the owner reload actual notification recipients and responses.
   String? activeCheckInId;
 
-    // Local file path to the picture the person chose from their own camera
+  // Local file path to the picture the person chose from their own camera
   // or gallery. SafetyU has no backend/cloud storage in this build, so
   // this only points at a file already on the device — nothing is
   // uploaded anywhere.
@@ -223,13 +223,40 @@ class AppSession extends ChangeNotifier {
   static const int freeOtherContactLimit = 1;
 
   bool isPro = false;
+  DateTime? proExpiresAt;
   int purchasedExtraMainSlots = 0;
   int purchasedExtraOtherSlots = 0;
 
+  /// True Pro status right now — false once [proExpiresAt] has passed, even
+  /// if the last-synced [isPro] flag from the backend was still true.
+  bool get isProActive =>
+      isPro && (proExpiresAt == null || proExpiresAt!.isAfter(DateTime.now()));
+
   int get maxMainContacts =>
-      isPro ? 1 << 30 : freeMainContactLimit + purchasedExtraMainSlots;
+      isProActive ? 1 << 30 : freeMainContactLimit + purchasedExtraMainSlots;
   int get maxOtherContacts =>
-      isPro ? 1 << 30 : freeOtherContactLimit + purchasedExtraOtherSlots;
+      isProActive ? 1 << 30 : freeOtherContactLimit + purchasedExtraOtherSlots;
+
+  /// Applies the plan fields the backend just returned (on login, or right
+  /// after AuthService confirms a payment) so this device's paywall state
+  /// matches what's actually been paid for, not just what happened locally
+  /// on this device since the app was last opened.
+  void syncPlanFromBackend({
+    bool? isPro,
+    DateTime? proExpiresAt,
+    int? purchasedExtraMainSlots,
+    int? purchasedExtraOtherSlots,
+  }) {
+    if (isPro != null) this.isPro = isPro;
+    this.proExpiresAt = proExpiresAt;
+    if (purchasedExtraMainSlots != null) {
+      this.purchasedExtraMainSlots = purchasedExtraMainSlots;
+    }
+    if (purchasedExtraOtherSlots != null) {
+      this.purchasedExtraOtherSlots = purchasedExtraOtherSlots;
+    }
+    notifyListeners();
+  }
 
   void upgradeToPro() {
     isPro = true;
@@ -436,7 +463,9 @@ class AppSession extends ChangeNotifier {
           'cannot_help' => ContactResponseStatus.cantHelp,
           _ => ContactResponseStatus.pending,
         };
-        final notifiedAt = DateTime.tryParse(contact['notifiedAt']?.toString() ?? '') ?? DateTime.now();
+        final notifiedAt =
+            DateTime.tryParse(contact['notifiedAt']?.toString() ?? '') ??
+                DateTime.now();
         return ContactResponseState(
           contactId: contact['userId']?.toString() ?? '',
           contactName: contact['name']?.toString() ?? 'Unknown contact',
