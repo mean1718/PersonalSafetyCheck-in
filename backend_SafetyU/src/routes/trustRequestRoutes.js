@@ -1,5 +1,5 @@
 const express = require("express");
-const { sendRequest, receivedRequests, acceptRequest, rejectRequest } = require("../controllers/trustRequestController");
+const { sendRequest, receivedRequests, acceptRequest, rejectRequest, removeTrustByPhone } = require("../controllers/trustRequestController");
 const protect = require("../middleware/authMiddleware");
 const router = express.Router();
 router.use(protect);
@@ -7,4 +7,5 @@ router.post("/", sendRequest);
 router.get("/received", receivedRequests);
 router.post("/:id/accept", acceptRequest);
 router.post("/:id/reject", rejectRequest);
+router.post("/remove-by-phone", removeTrustByPhone);
 module.exports = router;

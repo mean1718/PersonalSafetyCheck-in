@@ -14,15 +14,18 @@ class TrustedContactService {
 
   static Future<List<Map<String, dynamic>>> receivedTrustRequests() async {
     final data = await ApiClient.get('/trust-requests/received');
-    return (data['requests'] as List<dynamic>? ?? []).cast<Map<String, dynamic>>();
+    return (data['requests'] as List<dynamic>? ?? [])
+        .cast<Map<String, dynamic>>();
   }
 
-  static Future<void> respondToTrustRequest(String id, {required bool accept}) =>
+  static Future<void> respondToTrustRequest(String id,
+          {required bool accept}) =>
       ApiClient.post('/trust-requests/$id/${accept ? 'accept' : 'reject'}', {});
 
   static Future<List<Map<String, dynamic>>> fetchAll() async {
     final data = await ApiClient.get('/trusted-contacts');
-    return (data['contacts'] as List<dynamic>? ?? []).cast<Map<String, dynamic>>();
+    return (data['contacts'] as List<dynamic>? ?? [])
+        .cast<Map<String, dynamic>>();
   }
 
   static Future<Map<String, dynamic>> create({
@@ -63,7 +66,8 @@ class TrustedContactService {
     );
   }
 
-  static Future<Map<String, dynamic>> update(String id, {
+  static Future<Map<String, dynamic>> update(
+    String id, {
     required String name,
     required String phone,
     required String email,
@@ -122,7 +126,15 @@ class TrustedContactService {
     );
   }
 
-  static Future<void> remove(String id) => ApiClient.delete('/trusted-contacts/$id');
+  static Future<void> remove(String id) =>
+      ApiClient.delete('/trusted-contacts/$id');
+
+  /// Actually revokes the accepted Trust relationship (not just the local
+  /// TrustedContact row) so this person stops being silently re-synced
+  /// back into contacts later, and can be re-added without hitting
+  /// "already used by another contact".
+  static Future<void> removeTrustByPhone(String phone) =>
+      ApiClient.post('/trust-requests/remove-by-phone', {'phone': phone});
 
   static Future<void> removeByPhone(String phone) async {
     for (final contact in await fetchAll()) {

@@ -13,6 +13,10 @@ class HelpRequest {
   final LatLng? location;
   final double? distanceKm;
   final DateTime requestedAt;
+  // NEW: the backend CheckIn _id for this session, if one was created.
+  // Used by AlertDetailScreen to fetch the Safety User's REAL, live
+  // location from the backend instead of relying on this snapshot.
+  final String? checkInId;
 
   const HelpRequest({
     required this.requesterName,
@@ -21,5 +25,6 @@ class HelpRequest {
     required this.location,
     required this.distanceKm,
     required this.requestedAt,
+    this.checkInId,
   });
 }

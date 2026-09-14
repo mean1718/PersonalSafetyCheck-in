@@ -4,6 +4,9 @@ import '../models/app_notification.dart';
 import '../services/app_session.dart';
 import '../services/notification_service.dart';
 import '../services/trusted_contact_service.dart';
+import '../models/contact.dart';
+import '../models/help_request.dart';
+import 'alert_detail_screen.dart';
 import 'incoming_trust_request_card.dart';
 
 class NotificationsScreen extends StatefulWidget {
@@ -33,6 +36,17 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     try {
       final notifications = await NotificationService.fetchAll();
       if (mounted) setState(() => _backendNotifications = notifications);
+      // Viewing this list is what "checking your notifications" means —
+      // mark everything currently shown as read so the Home badge count
+      // resets, and only climbs again for alerts that arrive after this.
+      for (final n in notifications) {
+        if (n['isRead'] != true) {
+          final id = n['_id']?.toString();
+          if (id != null) {
+            NotificationService.markRead(id).catchError((_) {});
+          }
+        }
+      }
     } catch (_) {}
   }
 
@@ -86,6 +100,38 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
         );
       }
     }
+  }
+
+  void _openAlertDetail(Map<String, dynamic> notification) {
+    final sender = notification['sender'] as Map<String, dynamic>?;
+    final owner = Contact(
+      id: sender?['_id']?.toString() ?? '',
+      fullName: sender?['name']?.toString() ?? 'A trusted friend',
+      phone: sender?['phone']?.toString() ?? '',
+      email: '',
+      relationship: 'Trusted Contact',
+      status: ContactStatus.friend,
+    );
+    final request = HelpRequest(
+      requesterName: owner.fullName,
+      requesterPhone: owner.phone,
+      destination: notification['message']?.toString() ?? 'their destination',
+      location: null,
+      distanceKm: null,
+      requestedAt:
+          DateTime.tryParse(notification['createdAt']?.toString() ?? '') ??
+              DateTime.now(),
+    );
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => AlertDetailScreen(
+          contact: owner,
+          request: request,
+          notificationId: notification['_id']?.toString(),
+        ),
+      ),
+    ).then((_) => _loadBackendNotifications());
   }
 
   String _relativeTime(String? iso) {
@@ -249,21 +295,17 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                                     notification['responseStatus'] ==
                                         'pending') ...[
                                   const SizedBox(height: 12),
-                                  Row(children: [
-                                    Expanded(
-                                        child: OutlinedButton(
-                                      onPressed: () => _respondToSafetyAlert(
-                                          notification, 'cannot_help'),
-                                      child: const Text("I can't help"),
-                                    )),
-                                    const SizedBox(width: 8),
-                                    Expanded(
-                                        child: ElevatedButton(
-                                      onPressed: () => _respondToSafetyAlert(
-                                          notification, 'can_help'),
-                                      child: const Text('I can help'),
-                                    )),
-                                  ]),
+                                  SizedBox(
+                                    width: double.infinity,
+                                    child: ElevatedButton.icon(
+                                      onPressed: () =>
+                                          _openAlertDetail(notification),
+                                      icon: const Icon(
+                                          Icons.location_on_outlined,
+                                          size: 17),
+                                      label: const Text('View Location'),
+                                    ),
+                                  ),
                                 ] else if (notification['type'] ==
                                     'safety_alert') ...[
                                   const SizedBox(height: 8),

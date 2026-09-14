@@ -21,6 +21,7 @@
     "express": "^5.2.1",
     "firebase-admin": "^14.3.0",
     "jsonwebtoken": "^9.0.3",
+    "mongodb": "^7.6.0",
     "mongoose": "^9.9.5"
   },
   "devDependencies": {

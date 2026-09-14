@@ -441,6 +441,7 @@ class AppSession extends ChangeNotifier {
       location: lastKnownPosition,
       distanceKm: null,
       requestedAt: latestSession?.startedAt ?? DateTime.now(),
+      checkInId: activeCheckInId,
     );
   }
 
@@ -449,8 +450,23 @@ class AppSession extends ChangeNotifier {
   // time, who was notified and whether they've responded yet.
   final List<ContactResponseState> currentAlertResponses = [];
 
+  // True once the person taps "I'm Safe" on a session that had actually
+  // alerted contacts. Kept alongside currentAlertResponses (instead of
+  // wiping the list) so Home can show a "Safe" confirmation instead of
+  // the panel just vanishing with no explanation.
+  bool currentSessionMarkedSafe = false;
+
   void clearCurrentAlertResponses() {
     currentAlertResponses.clear();
+    currentSessionMarkedSafe = false;
+    notifyListeners();
+  }
+
+  /// Call this instead of [clearCurrentAlertResponses] when the person
+  /// confirms they're safe — it keeps who-was-notified visible on Home
+  /// but flips the panel into a "Safe" state instead of hiding it.
+  void markCurrentSessionSafe() {
+    currentSessionMarkedSafe = true;
     notifyListeners();
   }
 

@@ -46,8 +46,17 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
         backgroundColor: AppColors.background,
         elevation: 0,
         foregroundColor: AppColors.textPrimary,
-        title: const Text('Change Password',
-            style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700)),
+        title: Text('Change Password',
+            style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.w800,
+                color: AppColors.textPrimary)),
+        actions: const [
+          Padding(
+            padding: EdgeInsets.only(right: 16),
+            child: HeaderAccent(),
+          ),
+        ],
       ),
       body: SafeArea(
         child: Column(
@@ -99,21 +108,38 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
                 ),
               ),
             ),
-            SkylineBottomBar(
-              child: SizedBox(
-                width: double.infinity,
-                height: 52,
-                child: ElevatedButton(
-                  onPressed: _submit,
-                  style: ElevatedButton.styleFrom(
-                      backgroundColor: AppColors.navy,
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(26))),
-                  child: const Text('Update Password',
-                      style: TextStyle(
-                          color: Colors.white, fontWeight: FontWeight.w700)),
+            Stack(
+              alignment: Alignment.bottomCenter,
+              children: [
+                const WaveDecorBottom(height: 130),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+                  child: SizedBox(
+                    width: double.infinity,
+                    height: 52,
+                    child: ElevatedButton(
+                      onPressed: _submit,
+                      style: ElevatedButton.styleFrom(
+                          backgroundColor: AppColors.danger,
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(26))),
+                      child: const Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(Icons.save_outlined,
+                              size: 18, color: Colors.white),
+                          SizedBox(width: 8),
+                          Text('Update Password',
+                              style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w700)),
+                        ],
+                      ),
+                    ),
+                  ),
                 ),
-              ),
+              ],
             ),
           ],
         ),
@@ -140,6 +166,21 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
             controller: controller,
             obscureText: obscure,
             decoration: InputDecoration(
+              prefixIcon: Padding(
+                padding: const EdgeInsets.all(10),
+                child: Container(
+                  width: 26,
+                  height: 26,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF4A90E2).withValues(alpha: 0.14),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(Icons.lock,
+                      size: 13, color: Color(0xFF4A90E2)),
+                ),
+              ),
+              prefixIconConstraints:
+                  const BoxConstraints(minWidth: 46, minHeight: 46),
               suffixIcon: IconButton(
                 icon: Icon(
                     obscure

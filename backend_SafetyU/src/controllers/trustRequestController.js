@@ -5,6 +5,42 @@ const TrustedContact = require("../models/TrustedContact");
 
 const normalizePhone = (phone) => phone.trim().replace(/[\s().-]/g, "");
 
+// Unfriending only ever deleted the local TrustedContact row before —
+// the underlying accepted TrustRequest between the two accounts was
+// never touched, so it silently lived on and kept resurfacing this same
+// person (e.g. re-synced into local contacts when a session starts),
+// which then blocked re-adding them with "already used by another
+// contact". This actually revokes the relationship in both directions.
+const removeTrustByPhone = async (req, res) => {
+  const phone =
+    typeof req.body.phone === "string" ? normalizePhone(req.body.phone) : "";
+  if (!phone)
+    return res.status(400).json({ message: "Phone number is required." });
+  try {
+    const contactUser = await User.findOne({ phone });
+    if (!contactUser) {
+      // Nobody registered under that number, so there's nothing to
+      // revoke — treat it as already removed rather than an error.
+      return res.json({ message: "Trust relationship removed." });
+    }
+    await TrustRequest.deleteMany({
+      $or: [
+        { sender: req.user.id, receiver: contactUser._id },
+        { sender: contactUser._id, receiver: req.user.id },
+      ],
+    });
+    await TrustedContact.deleteMany({
+      $or: [
+        { user: req.user.id, contactUser: contactUser._id },
+        { user: contactUser._id, contactUser: req.user.id },
+      ],
+    });
+    return res.json({ message: "Trust relationship removed." });
+  } catch (_) {
+    return res.status(500).json({ message: "Server error" });
+  }
+};
+
 const sendRequest = async (req, res) => {
   const phone =
     typeof req.body.phone === "string" ? normalizePhone(req.body.phone) : "";
@@ -150,4 +186,5 @@ module.exports = {
   receivedRequests,
   acceptRequest: respond("accepted"),
   rejectRequest: respond("rejected"),
+  removeTrustByPhone,
 };

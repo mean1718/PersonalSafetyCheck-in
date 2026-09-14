@@ -375,12 +375,16 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
     _logHistory(SessionOutcome.safe);
     _syncSessionEndToBackend();
 
-    // This session is over — without clearing these, Home kept re-fetching
-    // and displaying status for this same completed check-in forever,
-    // showing contacts as still "Waiting..." even though there's nothing
-    // left to wait for.
+    // This session is over, so stop re-fetching/polling it — but keep
+    // who-was-notified visible on Home as a "Safe" confirmation instead
+    // of silently disappearing. It's cleared for real the next time a
+    // new session starts (see clearCurrentAlertResponses in initState).
     AppSession.instance.activeCheckInId = null;
-    AppSession.instance.clearCurrentAlertResponses();
+    if (AppSession.instance.currentAlertResponses.isNotEmpty) {
+      AppSession.instance.markCurrentSessionSafe();
+    } else {
+      AppSession.instance.clearCurrentAlertResponses();
+    }
 
     // Tell every trusted contact who was actually alerted during this
     // session that the person is safe now — a real chat message, not just
@@ -796,6 +800,13 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
           // have a real (if slightly old) location to send instead of
           // nothing at all.
           AppSession.instance.updateLastKnownPosition(latLng);
+          if (_checkInId != null) {
+            CheckInService.updateLocation(
+              _checkInId!,
+              latitude: position.latitude,
+              longitude: position.longitude,
+            ).catchError((e) => debugPrint('Location sync skipped: $e'));
+          }
         },
         onError: (Object error) {
           debugPrint('[ACTIVE] Location stream error: $error');
