@@ -40,7 +40,7 @@ class AppSession extends ChangeNotifier {
   // It lets the owner reload actual notification recipients and responses.
   String? activeCheckInId;
 
-    // Local file path to the picture the person chose from their own camera
+  // Local file path to the picture the person chose from their own camera
   // or gallery. SafetyU has no backend/cloud storage in this build, so
   // this only points at a file already on the device — nothing is
   // uploaded anywhere.
@@ -423,8 +423,23 @@ class AppSession extends ChangeNotifier {
   // time, who was notified and whether they've responded yet.
   final List<ContactResponseState> currentAlertResponses = [];
 
+  // True once the person taps "I'm Safe" on a session that had actually
+  // alerted contacts. Kept alongside currentAlertResponses (instead of
+  // wiping the list) so Home can show a "Safe" confirmation instead of
+  // the panel just vanishing with no explanation.
+  bool currentSessionMarkedSafe = false;
+
   void clearCurrentAlertResponses() {
     currentAlertResponses.clear();
+    currentSessionMarkedSafe = false;
+    notifyListeners();
+  }
+
+  /// Call this instead of [clearCurrentAlertResponses] when the person
+  /// confirms they're safe — it keeps who-was-notified visible on Home
+  /// but flips the panel into a "Safe" state instead of hiding it.
+  void markCurrentSessionSafe() {
+    currentSessionMarkedSafe = true;
     notifyListeners();
   }
 
@@ -437,7 +452,9 @@ class AppSession extends ChangeNotifier {
           'cannot_help' => ContactResponseStatus.cantHelp,
           _ => ContactResponseStatus.pending,
         };
-        final notifiedAt = DateTime.tryParse(contact['notifiedAt']?.toString() ?? '') ?? DateTime.now();
+        final notifiedAt =
+            DateTime.tryParse(contact['notifiedAt']?.toString() ?? '') ??
+                DateTime.now();
         return ContactResponseState(
           contactId: contact['userId']?.toString() ?? '',
           contactName: contact['name']?.toString() ?? 'Unknown contact',

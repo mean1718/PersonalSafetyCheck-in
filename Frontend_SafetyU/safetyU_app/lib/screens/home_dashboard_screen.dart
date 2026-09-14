@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_bottom_nav.dart';
@@ -37,6 +38,14 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
   List<Map<String, dynamic>> _resolvedAlerts = [];
   final Set<String> _resolvedAlertsWithDismissTimerStarted = {};
 
+  // Without this, this screen only ever loads incoming alerts once, in
+  // initState. So if Dan is just sitting on Home when Theara taps "I'm
+  // Safe", nothing here ever re-fetches — his "You were notified" card
+  // sits there forever even though the session ended, because nothing
+  // told this screen to go check again. Poll while Home is visible so
+  // it picks up her Safe confirmation (and any new alert) on its own.
+  Timer? _incomingAlertsPollTimer;
+
   @override
   void initState() {
     super.initState();
@@ -44,6 +53,16 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
     _loadIncomingAlerts();
     _loadResolvedAlerts();
     _loadPendingTrustRequestCount();
+    _incomingAlertsPollTimer = Timer.periodic(const Duration(seconds: 6), (_) {
+      _loadIncomingAlerts();
+      _loadResolvedAlerts();
+    });
+  }
+
+  @override
+  void dispose() {
+    _incomingAlertsPollTimer?.cancel();
+    super.dispose();
   }
 
   Future<void> _loadResolvedAlerts() async {
@@ -730,6 +749,7 @@ class _ContactResponsesPanel extends StatelessWidget {
         if (responses.isEmpty) {
           return const SizedBox.shrink();
         }
+        final isSafe = AppSession.instance.currentSessionMarkedSafe;
         final respondedCount = responses
             .where((r) => r.status != ContactResponseStatus.pending)
             .length;
@@ -741,7 +761,8 @@ class _ContactResponsesPanel extends StatelessWidget {
             decoration: BoxDecoration(
               color: AppColors.card,
               borderRadius: BorderRadius.circular(18),
-              border: Border.all(color: AppColors.border),
+              border: Border.all(
+                  color: isSafe ? AppColors.success : AppColors.border),
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -751,11 +772,16 @@ class _ContactResponsesPanel extends StatelessWidget {
                     Container(
                       padding: const EdgeInsets.all(8),
                       decoration: BoxDecoration(
-                        color: AppColors.navy.withValues(alpha: 0.08),
+                        color: (isSafe ? AppColors.success : AppColors.navy)
+                            .withValues(alpha: 0.08),
                         shape: BoxShape.circle,
                       ),
-                      child: Icon(Icons.groups_outlined,
-                          size: 16, color: AppColors.navy),
+                      child: Icon(
+                          isSafe
+                              ? Icons.verified_user_outlined
+                              : Icons.groups_outlined,
+                          size: 16,
+                          color: isSafe ? AppColors.success : AppColors.navy),
                     ),
                     const SizedBox(width: 10),
                     Expanded(
@@ -771,28 +797,36 @@ class _ContactResponsesPanel extends StatelessWidget {
                       padding: const EdgeInsets.symmetric(
                           horizontal: 9, vertical: 4),
                       decoration: BoxDecoration(
-                        color: respondedCount == 0
-                            ? AppColors.background
-                            : AppColors.navy.withValues(alpha: 0.08),
+                        color: isSafe
+                            ? AppColors.success.withValues(alpha: 0.12)
+                            : respondedCount == 0
+                                ? AppColors.background
+                                : AppColors.navy.withValues(alpha: 0.08),
                         borderRadius: BorderRadius.circular(20),
                       ),
                       child: Text(
-                        respondedCount == 0
-                            ? 'Not Responded'
-                            : '$respondedCount/${responses.length} responded',
+                        isSafe
+                            ? 'Safe'
+                            : respondedCount == 0
+                                ? 'Not Responded'
+                                : '$respondedCount/${responses.length} responded',
                         style: TextStyle(
                             fontSize: 11,
                             fontWeight: FontWeight.w700,
-                            color: respondedCount == 0
-                                ? AppColors.textSecondary
-                                : AppColors.navy),
+                            color: isSafe
+                                ? AppColors.success
+                                : respondedCount == 0
+                                    ? AppColors.textSecondary
+                                    : AppColors.navy),
                       ),
                     ),
                   ],
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  'Who was notified and who has responded so far.',
+                  isSafe
+                      ? "You confirmed you're safe. Here's who was notified during that session."
+                      : 'Who was notified and who has responded so far.',
                   style:
                       TextStyle(fontSize: 11.5, color: AppColors.textSecondary),
                 ),

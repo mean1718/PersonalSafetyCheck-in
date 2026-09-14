@@ -86,21 +86,10 @@ const startCheckIn = async (req, res) => {
       status: "active",
     });
 
-    // The selected accounts receive the active-session alert now. Each
-    // row is keyed to its receiver, so each trusted contact can answer
-    // independently even before an emergency escalation occurs.
-    if (requestedIds.length > 0) {
-      await Notification.insertMany(
-        requestedIds.map((receiver) => ({
-          receiver,
-          sender: req.user.id,
-          checkIn: checkIn._id,
-          type: "safety_alert",
-          title: "SafetyU Alert",
-          message: `${req.authenticatedUser?.name || "A trusted contact"} started a safety session.`,
-        })),
-      );
-    }
+    // No alert is sent yet. Trusted contacts are only notified if this
+    // person fails to check in / confirm safe by the deadline they set —
+    // that happens later, via needHelpNow() when the app's escalation
+    // timer runs out. Starting a session on its own should be silent.
 
     res.status(201).json({
       message: "Safety check-in started",
@@ -180,20 +169,41 @@ const getAlertStatus = async (req, res) => {
     })
       .populate("receiver", "name phone")
       .sort({ createdAt: 1 });
+    // A contact can end up with more than one safety_alert row for the
+    // same check-in (e.g. a re-alert fired when escalation moved to the
+    // next tier). Collapse those down to ONE entry per contact so the
+    // panel updates in place — "Waiting..." flips to "Can Help" — instead
+    // of listing the same person twice.
+    const byContact = new Map();
+    for (const n of notifications) {
+      if (!n.receiver) continue;
+      const key = n.receiver._id.toString();
+      const existing = byContact.get(key);
+      if (!existing) {
+        byContact.set(key, n);
+        continue;
+      }
+      // Keep the earliest "notified at" (their first alert) but let a
+      // response on ANY of their alerts win over a still-pending one.
+      const existingResponded = (existing.responseStatus || "pending") !== "pending";
+      const thisResponded = (n.responseStatus || "pending") !== "pending";
+      if (thisResponded && !existingResponded) {
+        byContact.set(key, { ...existing.toObject(), ...n.toObject(), createdAt: existing.createdAt });
+      }
+    }
+
     return res.json({
       checkInId: checkIn._id,
       ownerUserId: checkIn.user,
-      notifiedContacts: notifications
-        .filter((n) => n.receiver)
-        .map((n) => ({
-          notificationId: n._id,
-          userId: n.receiver._id,
-          name: n.receiver.name,
-          phone: n.receiver.phone,
-          notifiedAt: n.createdAt,
-          responseStatus: n.responseStatus || "pending",
-          respondedAt: n.respondedAt || null,
-        })),
+      notifiedContacts: [...byContact.values()].map((n) => ({
+        notificationId: n._id,
+        userId: n.receiver._id,
+        name: n.receiver.name,
+        phone: n.receiver.phone,
+        notifiedAt: n.createdAt,
+        responseStatus: n.responseStatus || "pending",
+        respondedAt: n.respondedAt || null,
+      })),
     });
   } catch (error) {
     return res
