@@ -25,6 +25,30 @@ Future<String?> showLimitReachedDialog(
     builder: (context) => _LimitReachedDialog(
       selectedMain: selectedMain,
       selectedOther: selectedOther,
+      triggeredByLimit: true,
+    ),
+  );
+}
+
+/// Shown when the person just wants to browse/manage plans — e.g. tapping
+/// the "Protected" status card on Home, or a CTA inside the inline plan
+/// carousel embedded in that same card — rather than having hit the
+/// contact-notification cap. Same plan picker, QR scan, and payment flow as
+/// [showLimitReachedDialog], just without the "you've reached the limit"
+/// framing.
+///
+/// Returns:
+/// - 'pro' if Pro payment succeeds
+/// - 'pay' if Pay Per Contact payment succeeds
+/// - null if the dialog is closed/cancelled
+Future<String?> showPlansDialog(BuildContext context) {
+  return showDialog<String>(
+    context: context,
+    barrierDismissible: true,
+    builder: (context) => const _LimitReachedDialog(
+      selectedMain: 0,
+      selectedOther: 0,
+      triggeredByLimit: false,
     ),
   );
 }
@@ -51,10 +75,16 @@ enum _LimitStep {
 class _LimitReachedDialog extends StatefulWidget {
   final int selectedMain;
   final int selectedOther;
+  // False when opened as a general "View Plans" browse (e.g. from the Home
+  // status card) rather than because a contact-notification cap was hit —
+  // swaps the "you've reached the limit" copy for a plain plan picker and
+  // hides the selected-contacts box, which has nothing to show in that case.
+  final bool triggeredByLimit;
 
   const _LimitReachedDialog({
     required this.selectedMain,
     required this.selectedOther,
+    this.triggeredByLimit = true,
   });
 
   @override
@@ -279,11 +309,26 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
           width: 56,
           height: 56,
           decoration: BoxDecoration(
-            color: AppColors.navy,
+            gradient: LinearGradient(
+              colors: widget.triggeredByLimit
+                  ? [AppColors.navy, AppColors.navy]
+                  : [const Color(0xFFFFC24B), const Color(0xFFFF9A3C)],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
             shape: BoxShape.circle,
+            boxShadow: widget.triggeredByLimit
+                ? null
+                : [
+                    BoxShadow(
+                      color: const Color(0xFFFF9A3C).withValues(alpha: 0.35),
+                      blurRadius: 16,
+                      offset: const Offset(0, 6),
+                    ),
+                  ],
           ),
-          child: const Icon(
-            Icons.groups,
+          child: Icon(
+            widget.triggeredByLimit ? Icons.groups : Icons.workspace_premium,
             color: Colors.white,
             size: 28,
           ),
@@ -293,7 +338,9 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
 
         // Title
         Text(
-          "You've reached the limit",
+          widget.triggeredByLimit
+              ? "You've reached the limit"
+              : 'Choose Your Plan',
           style: TextStyle(
             fontSize: 17,
             fontWeight: FontWeight.w800,
@@ -305,9 +352,13 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
 
         // Description
         Text(
-          'Free plan allows up to '
-          '${AppSession.freeMainContactLimit} main contacts and '
-          '${AppSession.freeOtherContactLimit} other contacts.',
+          widget.triggeredByLimit
+              ? 'Free plan allows up to '
+                  '${AppSession.freeMainContactLimit} main contacts and '
+                  '${AppSession.freeOtherContactLimit} other contacts.'
+              : AppSession.instance.isProActive
+                  ? "You're on Pro — unlimited contacts and every premium feature."
+                  : 'Pick the plan that fits how you stay safe.',
           textAlign: TextAlign.center,
           style: TextStyle(
             fontSize: 12.5,
@@ -317,36 +368,40 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
 
         const SizedBox(height: 16),
 
-        // Selected contacts
-        Container(
-          width: double.infinity,
-          padding: const EdgeInsets.symmetric(vertical: 14),
-          decoration: BoxDecoration(
-            color: AppColors.background,
-            borderRadius: BorderRadius.circular(14),
-          ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-            children: [
-              _countBlock(
-                '${widget.selectedMain}',
-                'Main Contacts',
-              ),
-              Text(
-                '+',
-                style: TextStyle(
-                  fontSize: 18,
-                  color: AppColors.textMuted,
-                  fontWeight: FontWeight.w700,
+        // Selected contacts — only meaningful when this dialog was opened
+        // because an actual notify-list exceeded the free cap.
+        if (widget.triggeredByLimit) ...[
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(vertical: 14),
+            decoration: BoxDecoration(
+              color: AppColors.background,
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: [
+                _countBlock(
+                  '${widget.selectedMain}',
+                  'Main Contacts',
                 ),
-              ),
-              _countBlock(
-                '${widget.selectedOther}',
-                'Other Contacts',
-              ),
-            ],
+                Text(
+                  '+',
+                  style: TextStyle(
+                    fontSize: 18,
+                    color: AppColors.textMuted,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                _countBlock(
+                  '${widget.selectedOther}',
+                  'Other Contacts',
+                ),
+              ],
+            ),
           ),
-        ),
+          const SizedBox(height: 16),
+        ],
 
         if (_paymentError != null) ...[
           const SizedBox(height: 12),
@@ -368,7 +423,9 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
         const SizedBox(height: 16),
 
         Text(
-          'Upgrade to Pro or pay a small fee to add more contacts.',
+          widget.triggeredByLimit
+              ? 'Upgrade to Pro or pay a small fee to add more contacts.'
+              : 'Upgrade any time — changes apply instantly.',
           textAlign: TextAlign.center,
           style: TextStyle(
             fontSize: 12,
@@ -385,7 +442,7 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
         _PlanOption(
           icon: Icons.card_giftcard,
           title: 'Free Plan',
-          tag: 'Current',
+          tag: AppSession.instance.isProActive ? null : 'Current',
           subtitle: 'Up to ${AppSession.freeMainContactLimit} main + '
               '${AppSession.freeOtherContactLimit} other contacts',
           highlighted: _selectedPlan == 'free',
@@ -406,7 +463,7 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
         _PlanOption(
           icon: Icons.workspace_premium,
           title: 'Pro Plan',
-          tag: 'Most Popular',
+          tag: AppSession.instance.isProActive ? 'Current' : 'Most Popular',
           subtitle: 'Unlimited contacts & all premium features — '
               '\$${_proMonthlyPrice.toStringAsFixed(2)}/month',
           highlighted: _selectedPlan == 'pro',
@@ -470,7 +527,9 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
         TextButton(
           onPressed: () => Navigator.pop(context, null),
           child: Text(
-            'Choose Different Contacts Instead',
+            widget.triggeredByLimit
+                ? 'Choose Different Contacts Instead'
+                : 'Maybe Later',
             style: TextStyle(
               color: AppColors.textSecondary,
             ),
@@ -1521,6 +1580,488 @@ class _PlanOption extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+// ===========================================================================
+// PLAN PROMO SLIDES — shared data for both the inline carousel (embedded in
+// the Home "Protected" card) and the popup carousel below.
+// ===========================================================================
+
+class _PlanPromoSlide {
+  final List<Color> gradient;
+  final IconData icon;
+  final String eyebrow;
+  final String title;
+  final String price;
+  final List<String> bullets;
+  final String ctaLabel;
+
+  const _PlanPromoSlide({
+    required this.gradient,
+    required this.icon,
+    required this.eyebrow,
+    required this.title,
+    required this.price,
+    required this.bullets,
+    required this.ctaLabel,
+  });
+
+  // A muted version of the slide's own accent for icon/text sitting on the
+  // white CTA pill and price chip, so each slide reads as its own color
+  // (navy/orange/teal) rather than all three looking identical.
+  Color get accent => gradient.last;
+}
+
+const List<_PlanPromoSlide> _promoSlides = [
+  _PlanPromoSlide(
+    gradient: [Color(0xFF232B52), Color(0xFF11142A)],
+    icon: Icons.card_giftcard_rounded,
+    eyebrow: 'YOUR CURRENT PLAN',
+    title: 'Free',
+    price: '\$0',
+    bullets: [
+      'Up to 2 main contacts',
+      '1 other contact',
+      'Core safety sessions',
+    ],
+    ctaLabel: 'See All Plans',
+  ),
+  _PlanPromoSlide(
+    gradient: [Color(0xFFFFC24B), Color(0xFFFF7A3C)],
+    icon: Icons.workspace_premium_rounded,
+    eyebrow: 'MOST POPULAR',
+    title: 'Pro',
+    price: '\$2.99/mo',
+    bullets: [
+      'Unlimited contacts',
+      'All premium features',
+      'Priority emergency alerts',
+    ],
+    ctaLabel: 'Upgrade to Pro',
+  ),
+  _PlanPromoSlide(
+    gradient: [Color(0xFF0F9B7E), Color(0xFF29D6A8)],
+    icon: Icons.person_add_alt_1_rounded,
+    eyebrow: 'PAY AS YOU GO',
+    title: 'Pay Per Contact',
+    price: '\$0.20 / person',
+    bullets: [
+      'No subscription',
+      'Add contacts any time',
+      'One-time payment',
+    ],
+    ctaLabel: 'Add Contacts',
+  ),
+];
+
+// ===========================================================================
+// INLINE PLAN CAROUSEL — lives permanently inside the "You are Protected"
+// card on Home for free-plan users (see home_dashboard_screen.dart). This
+// replaces the old "pulsing chip + separate 30s popup" approach: instead of
+// interrupting the person with a modal, the same Free / Pro / Pay-Per-Contact
+// slides just sit right there, always visible, autoplaying and swipeable.
+// Tapping a slide's CTA opens the real [showPlansDialog] flow (QR/Bakong
+// payment) — this widget itself never touches payment.
+// ===========================================================================
+
+class PlanPromoInlineCard extends StatefulWidget {
+  final VoidCallback onSeeAllPlans;
+
+  const PlanPromoInlineCard({super.key, required this.onSeeAllPlans});
+
+  @override
+  State<PlanPromoInlineCard> createState() => _PlanPromoInlineCardState();
+}
+
+class _PlanPromoInlineCardState extends State<PlanPromoInlineCard> {
+  final PageController _pageController = PageController();
+  Timer? _autoplayTimer;
+  int _page = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _restartAutoplay();
+  }
+
+  void _restartAutoplay() {
+    _autoplayTimer?.cancel();
+    _autoplayTimer = Timer.periodic(const Duration(seconds: 4), (_) {
+      if (!mounted || !_pageController.hasClients) return;
+      final next = (_page + 1) % _promoSlides.length;
+      _pageController.animateToPage(
+        next,
+        duration: const Duration(milliseconds: 500),
+        curve: Curves.easeInOutCubic,
+      );
+    });
+  }
+
+  @override
+  void dispose() {
+    _autoplayTimer?.cancel();
+    _pageController.dispose();
+    super.dispose();
+  }
+
+  void _goTo(int index) {
+    _pageController.animateToPage(
+      index,
+      duration: const Duration(milliseconds: 400),
+      curve: Curves.easeInOutCubic,
+    );
+    // Restart the timer so a manual swipe/tap doesn't just get overridden
+    // by autoplay a second later.
+    _restartAutoplay();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 174,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(16),
+        child: Stack(
+          children: [
+            PageView.builder(
+              controller: _pageController,
+              itemCount: _promoSlides.length,
+              onPageChanged: (i) => setState(() => _page = i),
+              itemBuilder: (context, i) => _InlinePromoSlideView(
+                slide: _promoSlides[i],
+                onCta: widget.onSeeAllPlans,
+              ),
+            ),
+            Positioned(
+              left: 2,
+              top: 0,
+              bottom: 0,
+              child: Center(
+                child: _PromoArrow(
+                  icon: Icons.chevron_left,
+                  onTap: () => _goTo(
+                      (_page - 1 + _promoSlides.length) % _promoSlides.length),
+                ),
+              ),
+            ),
+            Positioned(
+              right: 2,
+              top: 0,
+              bottom: 0,
+              child: Center(
+                child: _PromoArrow(
+                  icon: Icons.chevron_right,
+                  onTap: () => _goTo((_page + 1) % _promoSlides.length),
+                ),
+              ),
+            ),
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 8,
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: List.generate(_promoSlides.length, (i) {
+                  final active = i == _page;
+                  return AnimatedContainer(
+                    duration: const Duration(milliseconds: 250),
+                    margin: const EdgeInsets.symmetric(horizontal: 3),
+                    width: active ? 16 : 6,
+                    height: 6,
+                    decoration: BoxDecoration(
+                      color:
+                          Colors.white.withValues(alpha: active ? 0.95 : 0.4),
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                  );
+                }),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _InlinePromoSlideView extends StatelessWidget {
+  final _PlanPromoSlide slide;
+  final VoidCallback onCta;
+
+  const _InlinePromoSlideView({required this.slide, required this.onCta});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: slide.gradient,
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+      ),
+      child: Stack(
+        children: [
+          // Faint full-bleed watermark of the slide's own icon, same idea as
+          // the leaf/shield background texture in the reference mockups.
+          Positioned(
+            right: -22,
+            bottom: -22,
+            child: Icon(
+              slide.icon,
+              size: 130,
+              color: Colors.white.withValues(alpha: 0.06),
+            ),
+          ),
+
+          // The glowing "medallion" standing in for the 3D badge/shield
+          // renders in the reference — an icon on a soft glow disc, ringed
+          // by a thin orbit line and a small sparkle accent.
+          Positioned(
+            right: 14,
+            top: 14,
+            child: _PromoMedallion(icon: slide.icon),
+          ),
+
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Eyebrow pill (crown icon, like "MOST POPULAR" / "PAY AS
+                // YOU GO" in the reference) + coin-style price chip.
+                Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.20),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(Icons.workspace_premium,
+                              color: Colors.white, size: 11),
+                          const SizedBox(width: 4),
+                          Text(
+                            slide.eyebrow,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 9,
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: 0.5,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const Spacer(),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withValues(alpha: 0.16),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(Icons.payments,
+                              color: Colors.white, size: 11),
+                          const SizedBox(width: 4),
+                          Text(
+                            slide.price,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 10.5,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+
+                // Small icon avatar + title/subtitle, mirroring the
+                // "Free / Up to 2 main contacts" row in the reference.
+                Row(
+                  children: [
+                    Container(
+                      width: 34,
+                      height: 34,
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.18),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Icon(slide.icon, color: Colors.white, size: 18),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            slide.title,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 18,
+                              fontWeight: FontWeight.w900,
+                              height: 1.1,
+                            ),
+                          ),
+                          Text(
+                            slide.bullets.first,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: Colors.white.withValues(alpha: 0.85),
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                const Spacer(),
+
+                // CTA pill, same "white pill, colored label + arrow" shape
+                // as the reference's "See All Plans" / "Add Contacts".
+                GestureDetector(
+                  onTap: onCta,
+                  child: Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(20),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.12),
+                          blurRadius: 8,
+                          offset: const Offset(0, 3),
+                        ),
+                      ],
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          slide.ctaLabel,
+                          style: TextStyle(
+                            color: slide.accent,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                        const SizedBox(width: 5),
+                        Icon(Icons.arrow_forward,
+                            color: slide.accent, size: 13),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Glowing icon-on-a-disc with a thin orbit ring and a sparkle accent —
+/// a lightweight, vector stand-in for the 3D crown/shield/people-card
+/// renders in the reference mockups, built entirely from Flutter primitives
+/// so it stays crisp at any size and needs no image assets.
+class _PromoMedallion extends StatelessWidget {
+  final IconData icon;
+  const _PromoMedallion({required this.icon});
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 84,
+      height: 84,
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          // Soft outer glow.
+          Container(
+            width: 84,
+            height: 84,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              gradient: RadialGradient(
+                colors: [
+                  Colors.white.withValues(alpha: 0.22),
+                  Colors.white.withValues(alpha: 0.0),
+                ],
+              ),
+            ),
+          ),
+          // Thin orbit ring.
+          Container(
+            width: 68,
+            height: 68,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              border: Border.all(
+                color: Colors.white.withValues(alpha: 0.35),
+                width: 1.2,
+              ),
+            ),
+          ),
+          // Icon medallion.
+          Container(
+            width: 48,
+            height: 48,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: Colors.white.withValues(alpha: 0.16),
+              border: Border.all(
+                color: Colors.white.withValues(alpha: 0.4),
+                width: 1,
+              ),
+            ),
+            child: Icon(icon, color: Colors.white, size: 24),
+          ),
+          // Sparkle accent, top-right of the medallion.
+          const Positioned(
+            top: 2,
+            right: 2,
+            child: Icon(Icons.auto_awesome, color: Colors.white, size: 14),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PromoArrow extends StatelessWidget {
+  final IconData icon;
+  final VoidCallback onTap;
+  const _PromoArrow({required this.icon, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.all(4),
+        decoration: BoxDecoration(
+          color: Colors.black.withValues(alpha: 0.22),
+          shape: BoxShape.circle,
+        ),
+        child:
+            Icon(icon, color: Colors.white.withValues(alpha: 0.85), size: 20),
       ),
     );
   }
