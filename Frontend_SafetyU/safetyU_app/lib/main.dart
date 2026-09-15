@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'theme/app_theme.dart';
 import 'theme/theme_controller.dart';
 import 'models/contact.dart';
+import 'services/route_observer.dart';
 import 'screens/splash_screen.dart';
 import 'screens/login_screen.dart';
 import 'screens/signup_screen.dart';
@@ -50,6 +51,7 @@ class SafetyUApp extends StatelessWidget {
           debugShowCheckedModeBanner: false,
           theme: AppTheme.current,
           initialRoute: '/',
+          navigatorObservers: [appRouteObserver],
           routes: {
             '/': (context) => const SplashScreen(),
             '/login': (context) => const LoginScreen(),

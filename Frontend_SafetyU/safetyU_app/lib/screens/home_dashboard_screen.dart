@@ -10,8 +10,10 @@ import '../services/alert_sound.dart';
 import '../models/contact_response_state.dart';
 import '../models/contact.dart';
 import '../models/help_request.dart';
+import '../widgets/paywall_dialogs.dart';
 import 'alert_detail_screen.dart';
 import 'dart:io';
+import 'dart:math' as math;
 
 class HomeDashboardScreen extends StatefulWidget {
   const HomeDashboardScreen({super.key});
@@ -63,6 +65,16 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
   void dispose() {
     _incomingAlertsPollTimer?.cancel();
     super.dispose();
+  }
+
+  Future<void> _openPlans() async {
+    // AppSession.upgradeToPro()/purchaseExtraSlots() both call
+    // notifyListeners(), and the status card below is wrapped in an
+    // AnimatedBuilder listening to AppSession.instance, so a successful
+    // purchase here refreshes the card's "FREE"/"PRO" state (and swaps the
+    // inline plan carousel for the Pro summary row) the moment the dialog
+    // closes — no extra setState needed.
+    await showPlansDialog(context);
   }
 
   Future<void> _loadResolvedAlerts() async {
@@ -355,69 +367,15 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                 ],
               ),
               const SizedBox(height: 24),
-              Container(
-                height: 160,
-                width: double.infinity,
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: [AppColors.navy, AppColors.navyDark],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                  ),
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                padding: const EdgeInsets.all(18),
-                child: Stack(
-                  children: [
-                    Positioned(
-                      right: -10,
-                      top: -10,
-                      child: Icon(Icons.shield,
-                          color: Colors.white.withValues(alpha: 0.08),
-                          size: 110),
-                    ),
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.all(10),
-                          decoration: BoxDecoration(
-                            color: Colors.white.withValues(alpha: 0.14),
-                            shape: BoxShape.circle,
-                          ),
-                          child: const Icon(Icons.verified_user,
-                              color: Colors.white, size: 24),
-                        ),
-                        const SizedBox(width: 14),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text('YOU ARE',
-                                  style: TextStyle(
-                                      color: Colors.white60,
-                                      fontSize: 11.5,
-                                      fontWeight: FontWeight.w700,
-                                      letterSpacing: 1)),
-                              const SizedBox(height: 2),
-                              const Text('Protected',
-                                  style: TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 24,
-                                      fontWeight: FontWeight.w800)),
-                              const SizedBox(height: 6),
-                              Text(
-                                'No active safety session',
-                                style: TextStyle(
-                                    color: Colors.white60, fontSize: 12.5),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
+              AnimatedBuilder(
+                animation: AppSession.instance,
+                builder: (context, _) {
+                  final isPro = AppSession.instance.isProActive;
+                  return _ProtectedStatusCard(
+                    isPro: isPro,
+                    onTap: _openPlans,
+                  );
+                },
               ),
               const SizedBox(height: 24),
               Text('Quick Actions',
@@ -479,7 +437,262 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
   }
 }
 
-class _QuickActionCard extends StatelessWidget {
+/// The "YOU ARE Protected" hero card on Home. For free-plan users, this now
+/// embeds the swipeable Free / Pro / Pay-Per-Contact plan carousel directly
+/// ([PlanPromoInlineCard]) instead of showing a single pulsing "Upgrade to
+/// Pro" chip and relying on a separate timed popup — the nudge just lives
+/// here permanently instead of interrupting the person 30s after they land
+/// on Home. Pro users still get the gold-accented card and a plain "Pro"
+/// features row, since there's nothing left to upsell them on.
+class _ProtectedStatusCard extends StatefulWidget {
+  final bool isPro;
+  final VoidCallback onTap;
+
+  const _ProtectedStatusCard({
+    required this.isPro,
+    required this.onTap,
+  });
+
+  @override
+  State<_ProtectedStatusCard> createState() => _ProtectedStatusCardState();
+}
+
+class _ProtectedStatusCardState extends State<_ProtectedStatusCard>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 4),
+    )..repeat();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // IMPORTANT:
+    // Free users use the existing promo card directly.
+    // There is NO extra navy/dark-blue container around it anymore.
+    if (!widget.isPro) {
+      return PlanPromoInlineCard(onSeeAllPlans: widget.onTap);
+    }
+
+    return _buildProCard();
+  }
+
+  Widget _buildProCard() {
+    const accent = Color(0xFFFFC857);
+    const gradient = [Color(0xFF30244E), Color(0xFF141935)];
+
+    return AnimatedBuilder(
+      animation: _controller,
+      builder: (context, _) {
+        final t = _controller.value;
+        final glow = 0.10 + (0.07 * (0.5 + 0.5 * _wave(t)));
+        final sweep = -1.5 + (t * 3.0);
+
+        return Material(
+          color: Colors.transparent,
+          borderRadius: BorderRadius.circular(22),
+          child: InkWell(
+            onTap: widget.onTap,
+            borderRadius: BorderRadius.circular(22),
+            splashColor: accent.withValues(alpha: 0.12),
+            child: Ink(
+              width: double.infinity,
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(
+                  colors: gradient,
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+                borderRadius: BorderRadius.circular(22),
+                border: Border.all(
+                  color: accent.withValues(alpha: 0.12),
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: accent.withValues(alpha: glow),
+                    blurRadius: 26,
+                    offset: const Offset(0, 12),
+                  ),
+                ],
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(22),
+                child: Stack(
+                  children: [
+                    Positioned.fill(
+                      child: IgnorePointer(
+                        child: FractionallySizedBox(
+                          widthFactor: .55,
+                          alignment: Alignment(sweep, 0),
+                          child: Transform.rotate(
+                            angle: -.18,
+                            child: Container(
+                              decoration: BoxDecoration(
+                                gradient: LinearGradient(
+                                  colors: [
+                                    Colors.transparent,
+                                    Colors.white.withValues(alpha: .055),
+                                    Colors.transparent,
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                    Positioned(
+                      top: -65,
+                      right: -35,
+                      child: Container(
+                        width: 160,
+                        height: 160,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          gradient: RadialGradient(
+                            colors: [
+                              accent.withValues(alpha: .17),
+                              accent.withValues(alpha: .03),
+                              Colors.transparent,
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.all(18),
+                      child: _buildProContent(accent),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildProContent(Color accent) {
+    return Row(
+      children: [
+        Transform.scale(
+          scale: 1.0 + (0.025 * (0.5 + 0.5 * _wave(_controller.value))),
+          child: Container(
+            width: 48,
+            height: 48,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: Colors.white.withValues(alpha: .10),
+              border: Border.all(color: accent.withValues(alpha: .32)),
+              boxShadow: [
+                BoxShadow(
+                  color: accent.withValues(alpha: .13),
+                  blurRadius: 16,
+                ),
+              ],
+            ),
+            child: Icon(
+              Icons.workspace_premium_rounded,
+              color: accent,
+              size: 25,
+            ),
+          ),
+        ),
+        const SizedBox(width: 13),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Text(
+                    'YOU ARE PROTECTED',
+                    style: TextStyle(
+                      color: Colors.white.withValues(alpha: .72),
+                      fontSize: 10,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 1.05,
+                    ),
+                  ),
+                  const SizedBox(width: 7),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 7,
+                      vertical: 3,
+                    ),
+                    decoration: BoxDecoration(
+                      color: accent.withValues(alpha: .16),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Text(
+                      'PRO',
+                      style: TextStyle(
+                        color: accent,
+                        fontSize: 9,
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: .6,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 5),
+              const Text(
+                'Premium protection active',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 15,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(height: 3),
+              Text(
+                'Unlimited contacts · all premium features',
+                style: TextStyle(
+                  color: Colors.white.withValues(alpha: .62),
+                  fontSize: 11.5,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(width: 8),
+        Container(
+          width: 34,
+          height: 34,
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: .08),
+            shape: BoxShape.circle,
+          ),
+          child: const Icon(
+            Icons.arrow_forward_ios_rounded,
+            color: Colors.white70,
+            size: 14,
+          ),
+        ),
+      ],
+    );
+  }
+
+  double _wave(double value) {
+    return math.sin(value * 6.283185307179586);
+  }
+}
+
+class _QuickActionCard extends StatefulWidget {
   final IconData icon;
   final String label;
   final Color background;
@@ -497,43 +710,134 @@ class _QuickActionCard extends StatelessWidget {
   });
 
   @override
+  State<_QuickActionCard> createState() => _QuickActionCardState();
+}
+
+class _QuickActionCardState extends State<_QuickActionCard> {
+  bool _pressed = false;
+
+  @override
   Widget build(BuildContext context) {
+    final isDanger = widget.badgeIconColor == AppColors.danger;
+
     return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        height: 150,
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-            color: background, borderRadius: BorderRadius.circular(18)),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Container(
-              padding: const EdgeInsets.all(8),
-              decoration: const BoxDecoration(
-                color: Colors.white,
-                shape: BoxShape.circle,
-              ),
-              child: Icon(icon, color: badgeIconColor, size: 22),
+      behavior: HitTestBehavior.opaque,
+      onTapDown: (_) => setState(() => _pressed = true),
+      onTapUp: (_) {
+        setState(() => _pressed = false);
+        widget.onTap();
+      },
+      onTapCancel: () => setState(() => _pressed = false),
+      child: AnimatedScale(
+        scale: _pressed ? 0.97 : 1.0,
+        duration: const Duration(milliseconds: 120),
+        curve: Curves.easeOut,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          curve: Curves.easeOut,
+          height: 150,
+          padding: const EdgeInsets.fromLTRB(14, 14, 14, 12),
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              colors: isDanger
+                  ? [
+                      widget.background,
+                      widget.background.withValues(alpha: 0.88),
+                    ]
+                  : [
+                      widget.background,
+                      AppColors.navyDark,
+                    ],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
             ),
-            const Spacer(),
-            Text(label,
+            borderRadius: BorderRadius.circular(19),
+            border: Border.all(
+              color: isDanger
+                  ? AppColors.danger.withValues(alpha: 0.13)
+                  : Colors.white.withValues(alpha: 0.06),
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: widget.badgeIconColor.withValues(
+                  alpha: _pressed ? 0.16 : 0.08,
+                ),
+                blurRadius: _pressed ? 18 : 12,
+                offset: const Offset(0, 7),
+              ),
+            ],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Container(
+                    width: 46,
+                    height: 46,
+                    decoration: const BoxDecoration(
+                      color: Colors.white,
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(
+                      widget.icon,
+                      color: widget.badgeIconColor,
+                      size: 22,
+                    ),
+                  ),
+                  Container(
+                    width: 7,
+                    height: 7,
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.42),
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Text(
+                widget.label,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
                 style: TextStyle(
-                    color: textColor,
-                    fontSize: 14.5,
-                    fontWeight: FontWeight.w800,
-                    height: 1.25)),
-            const SizedBox(height: 10),
-            Container(
-              width: 30,
-              height: 30,
-              decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.22),
-                shape: BoxShape.circle,
+                  color: widget.textColor,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w800,
+                  height: 1.16,
+                ),
               ),
-              child: Icon(Icons.arrow_forward, color: textColor, size: 15),
-            ),
-          ],
+              const Spacer(),
+              Row(
+                children: [
+                  Text(
+                    'Open',
+                    style: TextStyle(
+                      color: widget.textColor.withValues(alpha: 0.58),
+                      fontSize: 10.5,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const Spacer(),
+                  AnimatedContainer(
+                    duration: const Duration(milliseconds: 140),
+                    width: _pressed ? 34 : 32,
+                    height: _pressed ? 34 : 32,
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.16),
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(
+                      Icons.arrow_forward_rounded,
+                      color: widget.textColor,
+                      size: 17,
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
         ),
       ),
     );
