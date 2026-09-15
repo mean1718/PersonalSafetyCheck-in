@@ -49,13 +49,22 @@ class AuthService {
     final user = data['user'] as Map<String, dynamic>? ?? {};
 
     AppSession.instance.authToken = data['token'] as String?;
-    AppSession.instance.backendUserId = user['id']?.toString();
+    AppSession.instance.backendUserId = user['_id']?.toString();
 
     AppSession.instance.signIn(
       fullName: (user['name'] as String?) ?? normalizedEmail.split('@').first,
       email: (user['email'] as String?) ?? normalizedEmail,
       phone: (user['phone'] as String?) ?? '',
       role: role,
+    );
+
+    AppSession.instance.syncPlanFromBackend(
+      isPro: user['isPro'] as bool?,
+      proExpiresAt: DateTime.tryParse(user['proExpiresAt']?.toString() ?? ''),
+      purchasedExtraMainSlots:
+          (user['purchasedExtraMainSlots'] as num?)?.toInt(),
+      purchasedExtraOtherSlots:
+          (user['purchasedExtraOtherSlots'] as num?)?.toInt(),
     );
   }
 }

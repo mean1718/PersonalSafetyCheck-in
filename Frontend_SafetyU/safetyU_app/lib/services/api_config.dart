@@ -9,7 +9,11 @@ class ApiConfig {
   /// Android emulator, backend running on the SAME computer:
   /// 10.0.2.2 is the emulator's special alias for your computer's own
   /// localhost. This is the default.
+<<<<<<< HEAD
  /// static const String baseUrl = 'http://10.0.2.2:5000/api';
+=======
+  // static const String baseUrl = 'http://10.0.2.2:5000/api';
+>>>>>>> 49286aee28729612422d3516363fae67ce924fb7
 
   /// iOS Simulator, backend running on the SAME computer (the simulator
   /// shares your Mac's network stack, so plain localhost works):
@@ -21,7 +25,7 @@ class ApiConfig {
   /// Linux); it looks like 192.168.x.x. The phone and computer must be on
   /// the same network, and nothing (like a firewall) can be blocking port
   /// 5000.
-  // static const String baseUrl = 'http://192.168.1.42:5000/api';
+  static const String baseUrl = 'http://192.168.88.90:5000/api';
 
   /// Backend deployed somewhere reachable over the internet (Render,
   /// Railway, an EC2 box, etc.) — use its public URL. Should be https in

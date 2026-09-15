@@ -20,8 +20,12 @@ const emergencyRoutes = require("./routes/emergencyRoutes");
 const notificationRoutes = require("./routes/notificationRoutes");
 const locationRoutes = require("./routes/locationRoutes");
 const chatRoutes = require("./routes/ChatRoutes");
+<<<<<<< HEAD
 const directionsRoutes = require("./routes/directionsRoutes");
 // const paymentRoutes = require("./routes/paymentRoutes");
+=======
+const paymentRoutes = require("./routes/paymentRoutes");
+>>>>>>> 49286aee28729612422d3516363fae67ce924fb7
 
 const app = express();
 
@@ -41,8 +45,12 @@ app.use("/api/emergency", emergencyRoutes);
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/location", locationRoutes);
 app.use("/api/chat", chatRoutes);
+<<<<<<< HEAD
 app.use("/api/directions", directionsRoutes);
 // app.use("/api/payments", paymentRoutes);
+=======
+app.use("/api/payments", paymentRoutes);
+>>>>>>> 49286aee28729612422d3516363fae67ce924fb7
 
 // Test route
 app.get("/", (req, res) => {

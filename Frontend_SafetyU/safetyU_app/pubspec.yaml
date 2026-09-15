@@ -17,12 +17,16 @@ dependencies:
   url_launcher: ^6.3.1
   http: ^1.2.0
   image_picker: ^1.0.7
+  qr_flutter: ^4.1.0
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^3.0.0
+<<<<<<< HEAD
   flutter_native_splash: ^2.4.0
+=======
+>>>>>>> 49286aee28729612422d3516363fae67ce924fb7
 
 flutter:
   uses-material-design: true
@@ -30,6 +34,7 @@ flutter:
     - assets/images/login_illustration.png
     - assets/images/account_type_illustration.png
     - assets/images/add_contact_background.png
+<<<<<<< HEAD
     - assets/images/safetyu_logo.png
     - assets/images/safetyu_logo_android12.png
     - assets/images/marker_blue.png
@@ -52,3 +57,5 @@ flutter_native_splash:
     # around it, so the ring lands inside the safe zone and survives.
     image: assets/images/safetyu_logo_android12.png
     color: "#0B1220"
+=======
+>>>>>>> 49286aee28729612422d3516363fae67ce924fb7

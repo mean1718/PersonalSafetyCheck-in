@@ -81,8 +81,9 @@ class ApiClient {
     }
   }
 
-  static Future<Map<String, dynamic>> get(String path) => _send(
-        () => http.get(_uri(path), headers: _headers()),
+  static Future<Map<String, dynamic>> get(String path, {bool auth = true}) =>
+      _send(
+        () => http.get(_uri(path), headers: _headers(auth: auth)),
       );
 
   static Future<Map<String, dynamic>> post(

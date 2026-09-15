@@ -1,7 +1,11 @@
+import 'dart:async';
 import 'dart:math';
 import 'package:flutter/material.dart';
+import 'package:qr_flutter/qr_flutter.dart';
 import '../theme/app_theme.dart';
 import '../services/app_session.dart';
+import '../services/api_client.dart';
+import '../services/payment_service.dart';
 
 /// Shown when the person tries to notify more contacts than the free plan
 /// allows.
@@ -65,26 +69,94 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
 
   _LimitStep _step = _LimitStep.plans;
 
+  // Real Bakong KHQR payment in flight, if any (see services/payment_service.dart).
+  PendingPayment? _pendingPayment;
+  String? _paymentError;
+  bool _creatingPayment = false;
+  Timer? _pollTimer;
+
+  @override
+  void dispose() {
+    _pollTimer?.cancel();
+    super.dispose();
+  }
+
+  String _friendlyError(Object error) {
+    if (error is ApiException || error is ApiConnectionException) {
+      return error.toString();
+    }
+    return 'Something went wrong creating the payment. Please try again.';
+  }
+
+  /// Polls the backend every 3s for whether the KHQR on screen has actually
+  /// been paid yet (the backend checks the live Bakong network). Stops
+  /// itself once the payment settles, expires, or the dialog is closed.
+  void _startPolling({required VoidCallback onPaid}) {
+    _pollTimer?.cancel();
+    _pollTimer = Timer.periodic(const Duration(seconds: 3), (_) async {
+      final payment = _pendingPayment;
+      if (payment == null || !mounted) return;
+      try {
+        final status = await PaymentService.checkStatus(payment.md5);
+        if (!mounted) return;
+        if (status.isPaid) {
+          _pollTimer?.cancel();
+          onPaid();
+        } else if (status.isExpired) {
+          _pollTimer?.cancel();
+          setState(() {
+            _paymentError =
+                'This QR code expired before payment was received. Please try again.';
+            _step = _LimitStep.plans;
+          });
+        }
+        // isPending: keep waiting quietly, no need to update UI each tick.
+      } catch (_) {
+        // Transient network hiccup while polling — try again next tick
+        // rather than interrupting the person mid-payment.
+      }
+    });
+  }
+
   // ---------------------------------------------------------------------------
   // PRO PAYMENT
   // ---------------------------------------------------------------------------
 
   Future<void> _beginProPayment() async {
+    // Guard against double-tap / accidental re-entry firing a second
+    // create request while the first is still in flight (this is what
+    // was causing the backend's duplicate-md5 crash).
+    if (_creatingPayment) return;
+
     setState(() {
       _step = _LimitStep.proScan;
+      _creatingPayment = true;
+      _paymentError = null;
     });
 
-    // Demo payment delay.
-    await Future.delayed(const Duration(seconds: 4));
-
-    if (!mounted) return;
-
-    // Upgrade only after payment completes.
-    AppSession.instance.upgradeToPro();
-
-    setState(() {
-      _step = _LimitStep.proSuccess;
-    });
+    try {
+      final payment = await PaymentService.createProPayment();
+      if (!mounted) return;
+      setState(() {
+        _pendingPayment = payment;
+        _creatingPayment = false;
+      });
+      _startPolling(
+        onPaid: () {
+          if (!mounted) return;
+          // Credit locally only after the backend confirms the real
+          // Bakong payment settled.
+          AppSession.instance.upgradeToPro();
+          setState(() => _step = _LimitStep.proSuccess);
+        },
+      );
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _creatingPayment = false;
+        _paymentError = _friendlyError(error);
+      });
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -92,18 +164,51 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
   // ---------------------------------------------------------------------------
 
   Future<void> _beginPayPayment() async {
+    // Same double-tap guard as _beginProPayment.
+    if (_creatingPayment) return;
+
+    final extraMain = max(
+      0,
+      widget.selectedMain - AppSession.freeMainContactLimit,
+    );
+    final extraOther = max(
+      0,
+      widget.selectedOther - AppSession.freeOtherContactLimit,
+    );
+
     setState(() {
       _step = _LimitStep.payScan;
+      _creatingPayment = true;
+      _paymentError = null;
     });
 
-    // Demo payment delay.
-    await Future.delayed(const Duration(seconds: 4));
-
-    if (!mounted) return;
-
-    setState(() {
-      _step = _LimitStep.paySuccess;
-    });
+    try {
+      final payment = await PaymentService.createPayPerContactPayment(
+        extraMain: extraMain,
+        extraOther: extraOther,
+      );
+      if (!mounted) return;
+      setState(() {
+        _pendingPayment = payment;
+        _creatingPayment = false;
+      });
+      _startPolling(
+        onPaid: () {
+          if (!mounted) return;
+          AppSession.instance.purchaseExtraSlots(
+            extraMain: extraMain,
+            extraOther: extraOther,
+          );
+          setState(() => _step = _LimitStep.paySuccess);
+        },
+      );
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _creatingPayment = false;
+        _paymentError = _friendlyError(error);
+      });
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -242,6 +347,23 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
             ],
           ),
         ),
+
+        if (_paymentError != null) ...[
+          const SizedBox(height: 12),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: Colors.red.withValues(alpha: 0.08),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Text(
+              _paymentError!,
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontSize: 11.5, color: Colors.red),
+            ),
+          ),
+        ],
 
         const SizedBox(height: 16),
 
@@ -620,7 +742,7 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
         ),
         const SizedBox(height: 6),
         Text(
-          '\$${_proMonthlyPrice.toStringAsFixed(2)}',
+          '\$${(_pendingPayment?.amount ?? _proMonthlyPrice).toStringAsFixed(2)}',
           style: TextStyle(
             fontSize: 26,
             fontWeight: FontWeight.w800,
@@ -628,6 +750,7 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
           ),
         ),
         const SizedBox(height: 18),
+<<<<<<< HEAD
         Container(
           padding: const EdgeInsets.all(14),
           decoration: BoxDecoration(
@@ -652,23 +775,52 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
               child: CircularProgressIndicator(
                 strokeWidth: 2,
                 color: AppColors.navy,
+=======
+        _khqrPanel(),
+        const SizedBox(height: 16),
+        if (_paymentError == null)
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              SizedBox(
+                width: 16,
+                height: 16,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: AppColors.navy,
+                ),
+>>>>>>> 49286aee28729612422d3516363fae67ce924fb7
               ),
-            ),
-            const SizedBox(width: 10),
-            Text(
-              'Waiting for payment confirmation…',
-              style: TextStyle(
-                fontSize: 12.5,
-                fontWeight: FontWeight.w600,
-                color: AppColors.textSecondary,
+              const SizedBox(width: 10),
+              Text(
+                _creatingPayment
+                    ? 'Generating your KHQR code…'
+                    : 'Waiting for payment confirmation…',
+                style: TextStyle(
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.textSecondary,
+                ),
               ),
+<<<<<<< HEAD
             ),
           ],
         ),
+=======
+            ],
+          )
+        else
+          Text(
+            _paymentError!,
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontSize: 12, color: Colors.red),
+          ),
+>>>>>>> 49286aee28729612422d3516363fae67ce924fb7
         const SizedBox(height: 8),
         Text(
-          'Open your banking or e-wallet app and scan this code to complete '
-          'the payment. This screen updates automatically once payment is received.',
+          'Open your Bakong-linked banking or e-wallet app and scan this '
+          'real KHQR code to complete the payment. This screen updates '
+          'automatically once the payment is received.',
           textAlign: TextAlign.center,
           style: TextStyle(
             fontSize: 11,
@@ -678,8 +830,11 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
         const SizedBox(height: 16),
         TextButton(
           onPressed: () {
+            _pollTimer?.cancel();
             setState(() {
               _selectedPlan = 'pro';
+              _pendingPayment = null;
+              _paymentError = null;
               _step = _LimitStep.plans;
             });
           },
@@ -691,6 +846,31 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
           ),
         ),
       ],
+    );
+  }
+
+  /// Shared KHQR-or-loading panel used by both the Pro and Pay Per Contact
+  /// scan steps.
+  Widget _khqrPanel() {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      width: 208,
+      height: 208,
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: _creatingPayment || _pendingPayment == null
+          ? Center(
+              child: CircularProgressIndicator(color: AppColors.navy),
+            )
+          : QrImageView(
+              data: _pendingPayment!.qrString,
+              version: QrVersions.auto,
+              size: 180,
+              gapless: true,
+            ),
     );
   }
 
@@ -961,7 +1141,7 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
         ),
         const SizedBox(height: 6),
         Text(
-          '\$${total.toStringAsFixed(2)}',
+          '\$${(_pendingPayment?.amount ?? total).toStringAsFixed(2)}',
           style: TextStyle(
             fontSize: 26,
             fontWeight: FontWeight.w800,
@@ -977,6 +1157,7 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
           ),
         ),
         const SizedBox(height: 18),
+<<<<<<< HEAD
         Container(
           padding: const EdgeInsets.all(14),
           decoration: BoxDecoration(
@@ -1001,23 +1182,52 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
               child: CircularProgressIndicator(
                 strokeWidth: 2,
                 color: AppColors.navy,
+=======
+        _khqrPanel(),
+        const SizedBox(height: 16),
+        if (_paymentError == null)
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              SizedBox(
+                width: 16,
+                height: 16,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: AppColors.navy,
+                ),
+>>>>>>> 49286aee28729612422d3516363fae67ce924fb7
               ),
-            ),
-            const SizedBox(width: 10),
-            Text(
-              'Waiting for payment confirmation…',
-              style: TextStyle(
-                fontSize: 12.5,
-                fontWeight: FontWeight.w600,
-                color: AppColors.textSecondary,
+              const SizedBox(width: 10),
+              Text(
+                _creatingPayment
+                    ? 'Generating your KHQR code…'
+                    : 'Waiting for payment confirmation…',
+                style: TextStyle(
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.textSecondary,
+                ),
               ),
+<<<<<<< HEAD
             ),
           ],
         ),
+=======
+            ],
+          )
+        else
+          Text(
+            _paymentError!,
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontSize: 12, color: Colors.red),
+          ),
+>>>>>>> 49286aee28729612422d3516363fae67ce924fb7
         const SizedBox(height: 8),
         Text(
-          'Open your banking or e-wallet app and scan this code to complete '
-          'the payment. This screen updates automatically once payment is received.',
+          'Open your Bakong-linked banking or e-wallet app and scan this '
+          'real KHQR code to complete the payment. This screen updates '
+          'automatically once the payment is received.',
           textAlign: TextAlign.center,
           style: TextStyle(
             fontSize: 11,
@@ -1027,8 +1237,11 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
         const SizedBox(height: 16),
         TextButton(
           onPressed: () {
+            _pollTimer?.cancel();
             setState(() {
               _selectedPlan = 'pay';
+              _pendingPayment = null;
+              _paymentError = null;
               _step = _LimitStep.plans;
             });
           },
@@ -1378,6 +1591,7 @@ class _PlanOption extends StatelessWidget {
     );
   }
 }
+<<<<<<< HEAD
 
 // ===========================================================================
 // QR CODE
@@ -1523,3 +1737,5 @@ class _QrPainter extends CustomPainter {
     return oldDelegate.seed != seed;
   }
 }
+=======
+>>>>>>> 49286aee28729612422d3516363fae67ce924fb7

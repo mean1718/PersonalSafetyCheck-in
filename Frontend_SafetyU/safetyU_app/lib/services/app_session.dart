@@ -223,13 +223,40 @@ class AppSession extends ChangeNotifier {
   static const int freeOtherContactLimit = 1;
 
   bool isPro = false;
+  DateTime? proExpiresAt;
   int purchasedExtraMainSlots = 0;
   int purchasedExtraOtherSlots = 0;
 
+  /// True Pro status right now — false once [proExpiresAt] has passed, even
+  /// if the last-synced [isPro] flag from the backend was still true.
+  bool get isProActive =>
+      isPro && (proExpiresAt == null || proExpiresAt!.isAfter(DateTime.now()));
+
   int get maxMainContacts =>
-      isPro ? 1 << 30 : freeMainContactLimit + purchasedExtraMainSlots;
+      isProActive ? 1 << 30 : freeMainContactLimit + purchasedExtraMainSlots;
   int get maxOtherContacts =>
-      isPro ? 1 << 30 : freeOtherContactLimit + purchasedExtraOtherSlots;
+      isProActive ? 1 << 30 : freeOtherContactLimit + purchasedExtraOtherSlots;
+
+  /// Applies the plan fields the backend just returned (on login, or right
+  /// after AuthService confirms a payment) so this device's paywall state
+  /// matches what's actually been paid for, not just what happened locally
+  /// on this device since the app was last opened.
+  void syncPlanFromBackend({
+    bool? isPro,
+    DateTime? proExpiresAt,
+    int? purchasedExtraMainSlots,
+    int? purchasedExtraOtherSlots,
+  }) {
+    if (isPro != null) this.isPro = isPro;
+    this.proExpiresAt = proExpiresAt;
+    if (purchasedExtraMainSlots != null) {
+      this.purchasedExtraMainSlots = purchasedExtraMainSlots;
+    }
+    if (purchasedExtraOtherSlots != null) {
+      this.purchasedExtraOtherSlots = purchasedExtraOtherSlots;
+    }
+    notifyListeners();
+  }
 
   void upgradeToPro() {
     isPro = true;

@@ -241,7 +241,7 @@ class _SelectContactsScreenState extends State<SelectContactsScreen> {
     final hasFriends = AppSession.instance.friends.isNotEmpty;
     final main = _filtered(_mainFriends);
     final other = _filtered(_otherFriends);
-    final isPro = AppSession.instance.isPro;
+    final isPro = AppSession.instance.isProActive;
 
     return Scaffold(
       backgroundColor: AppColors.background,
