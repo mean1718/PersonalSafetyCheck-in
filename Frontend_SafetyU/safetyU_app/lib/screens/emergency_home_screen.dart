@@ -1,8 +1,8 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:flutter_map/flutter_map.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
+import '../services/marker_icons.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:latlong2/latlong.dart';
 import '../theme/app_theme.dart';
 import '../models/incident.dart';
 import '../models/verification_status.dart';
@@ -22,10 +22,33 @@ class EmergencyHomeScreen extends StatefulWidget {
 }
 
 class _EmergencyHomeScreenState extends State<EmergencyHomeScreen> {
-  final MapController _mapController = MapController();
+  GoogleMapController? _mapController;
   StreamSubscription<Position>? _positionSub;
   LatLng? _myPosition;
   int _lastKnownIncidentCount = 0;
+  BitmapDescriptor? _meIcon;
+  BitmapDescriptor? _incidentIcon;
+  bool _markerIconsRequested = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // BitmapDescriptor.defaultMarkerWithHue doesn't render on web — load
+    // real pin images instead, same as every other map screen.
+    if (!_markerIconsRequested) {
+      _markerIconsRequested = true;
+      Future.wait([
+        MarkerIcons.me(context),
+        MarkerIcons.destination(context),
+      ]).then((icons) {
+        if (!mounted) return;
+        setState(() {
+          _meIcon = icons[0];
+          _incidentIcon = icons[1];
+        });
+      });
+    }
+  }
 
   @override
   void initState() {
@@ -238,33 +261,27 @@ class _EmergencyHomeScreenState extends State<EmergencyHomeScreen> {
                 borderRadius: BorderRadius.circular(16),
                 child: SizedBox(
                   height: 160,
-                  child: FlutterMap(
-                    mapController: _mapController,
-                    options: MapOptions(
-                        initialCenter:
+                  child: GoogleMap(
+                    onMapCreated: (c) => _mapController = c,
+                    initialCameraPosition: CameraPosition(
+                        target:
                             _myPosition ?? const LatLng(11.5696, 104.9210),
-                        initialZoom: 13.0),
-                    children: [
-                      TileLayer(
-                          urlTemplate:
-                              'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                          userAgentPackageName: 'com.safetyu.app'),
-                      MarkerLayer(
-                        markers: [
-                          if (_myPosition != null)
-                            Marker(
-                                point: _myPosition!,
-                                child: const Icon(Icons.my_location,
-                                    color: Colors.blueAccent, size: 26)),
-                          for (final incident in incidents.where(
-                              (i) => i.status != IncidentStatus.resolved))
-                            Marker(
-                                point: incident.location,
-                                child: Icon(Icons.location_on,
-                                    color: AppColors.danger, size: 30)),
-                        ],
-                      ),
-                    ],
+                        zoom: 13.0),
+                    markers: {
+                      if (_myPosition != null)
+                        Marker(
+                          markerId: const MarkerId('me'),
+                          position: _myPosition!,
+                          icon: _meIcon ?? BitmapDescriptor.defaultMarker,
+                        ),
+                      for (final incident in incidents.where(
+                          (i) => i.status != IncidentStatus.resolved))
+                        Marker(
+                          markerId: MarkerId(incident.id),
+                          position: incident.location,
+                          icon: _incidentIcon ?? BitmapDescriptor.defaultMarker,
+                        ),
+                    },
                   ),
                 ),
               ),

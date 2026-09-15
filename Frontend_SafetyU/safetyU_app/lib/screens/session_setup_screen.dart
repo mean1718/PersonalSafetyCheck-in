@@ -3,9 +3,10 @@ import 'package:flutter/material.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
-import 'package:flutter_map/flutter_map.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:latlong2/latlong.dart';
+import '../services/marker_icons.dart';
+import '../services/directions_service.dart';
 import '../theme/app_theme.dart';
 import '../models/contact.dart';
 import '../services/app_session.dart';
@@ -31,7 +32,69 @@ class _SessionSetupScreenState extends State<SessionSetupScreen> {
   final _formKey = GlobalKey<FormState>();
   final TextEditingController _destinationController = TextEditingController();
   final FocusNode _destinationFocusNode = FocusNode();
-  final MapController _mapController = MapController();
+  GoogleMapController? _mapController;
+  BitmapDescriptor? _meIcon;
+  BitmapDescriptor? _destIcon;
+  bool _markerIconsRequested = false;
+  // The actual road-following path from here to the destination — without
+  // this, the map only ever drew a straight line cutting through whatever
+  // buildings happened to be between the two points.
+  RouteResult? _walkingRoute;
+  int _routeRequestId = 0;
+
+  Future<void> _fetchWalkingRoute() async {
+    debugPrint('[SETUP] _fetchWalkingRoute called. '
+        'currentPosition=$_currentPosition destinationCoords=$_destinationCoords');
+    if (_currentPosition == null || _destinationCoords == null) {
+      debugPrint(
+          '[SETUP] Skipping route fetch — position or destination not set yet.');
+      setState(() => _walkingRoute = null);
+      return;
+    }
+    final requestId = ++_routeRequestId;
+    debugPrint(
+        '[SETUP] Requesting route from $_currentPosition to $_destinationCoords');
+    try {
+      final route = await DirectionsService.route(
+        from: _currentPosition!,
+        to: _destinationCoords!,
+        walking: true,
+      );
+      // A newer request may have started (destination changed again) while
+      // this one was in flight — drop the stale result instead of
+      // overwriting a more current route with an outdated one.
+      if (!mounted || requestId != _routeRequestId) return;
+      debugPrint('[SETUP] Route fetched successfully: '
+          '${route.points.length} points, ${route.distanceLabel}, ${route.durationLabel}');
+      setState(() => _walkingRoute = route);
+    } catch (e) {
+      debugPrint('[SETUP] Route fetch failed: $e');
+      if (!mounted || requestId != _routeRequestId) return;
+      setState(() => _walkingRoute = null);
+    }
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // BitmapDescriptor.defaultMarkerWithHue doesn't render on web, so this
+    // loads real pin images instead — same look everywhere, not just
+    // Android/iOS. Needs a valid context, hence didChangeDependencies
+    // rather than initState.
+    if (!_markerIconsRequested) {
+      _markerIconsRequested = true;
+      () async {
+        final me = await MarkerIcons.me(context);
+        final dest = await MarkerIcons.destination(context);
+        if (!mounted) return;
+        setState(() {
+          _meIcon = me;
+          _destIcon = dest;
+        });
+      }();
+    }
+  }
+
   final ScrollController _scrollController = ScrollController();
 
   int _durationMinutes = 0;
@@ -84,6 +147,10 @@ class _SessionSetupScreenState extends State<SessionSetupScreen> {
     _minuteController.dispose();
     _scrollController.dispose();
     super.dispose();
+  }
+
+  void _moveCamera(LatLng target, double zoom) {
+    _mapController?.animateCamera(CameraUpdate.newLatLngZoom(target, zoom));
   }
 
   // =========================================================
@@ -196,8 +263,9 @@ class _SessionSetupScreenState extends State<SessionSetupScreen> {
       });
       AppSession.instance.updateLastKnownPosition(initialLatLng);
       try {
-        _mapController.move(initialLatLng, _zoom);
+        _moveCamera(initialLatLng, _zoom);
       } catch (_) {}
+      _fetchWalkingRoute();
 
       _positionSub?.cancel();
       _positionSub = Geolocator.getPositionStream(
@@ -216,7 +284,7 @@ class _SessionSetupScreenState extends State<SessionSetupScreen> {
           // on them every GPS tick.
           if (_destinationCoords == null) {
             try {
-              _mapController.move(latLng, _zoom);
+              _moveCamera(latLng, _zoom);
             } catch (_) {}
           }
         },
@@ -243,13 +311,13 @@ class _SessionSetupScreenState extends State<SessionSetupScreen> {
       return;
     }
     setState(() => _zoom = 15.0);
-    _mapController.move(_currentPosition!, _zoom);
+    _moveCamera(_currentPosition!, _zoom);
   }
 
   void _zoomBy(double delta) {
     final center = _destinationCoords ?? _currentPosition ?? _defaultCenter;
     setState(() => _zoom = (_zoom + delta).clamp(3.0, 18.0));
-    _mapController.move(center, _zoom);
+    _moveCamera(center, _zoom);
   }
 
   // =========================================================
@@ -274,6 +342,7 @@ class _SessionSetupScreenState extends State<SessionSetupScreen> {
           _suggestions = [];
           _resolvedAddress = null;
           _destinationCoords = null;
+          _walkingRoute = null;
           _previewFailed = false;
           _isSearching = false;
         });
@@ -379,10 +448,11 @@ class _SessionSetupScreenState extends State<SessionSetupScreen> {
       _zoom = 16.0;
     });
     try {
-      _mapController.move(LatLng(s.lat, s.lon), _zoom);
+      _moveCamera(LatLng(s.lat, s.lon), _zoom);
     } catch (_) {}
     _destinationFocusNode.unfocus();
     _maybeEstimateDuration();
+    _fetchWalkingRoute();
   }
 
   void _pickQuickCategory(_QuickCategory category) {
@@ -871,7 +941,7 @@ class _SessionSetupScreenState extends State<SessionSetupScreen> {
                           Expanded(
                             child: _buildTimeInputBox(
                               controller: _minuteController,
-                              unit: 'Minutes',
+                              unit: 'Min',
                             ),
                           ),
                         ],
@@ -1021,7 +1091,7 @@ class _SessionSetupScreenState extends State<SessionSetupScreen> {
                         child: ElevatedButton(
                           onPressed: _canStartSession ? _startSession : null,
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: AppColors.navy,
+                            backgroundColor: AppColors.primaryButton,
                             disabledBackgroundColor:
                                 AppColors.navy.withValues(alpha: 0.35),
                             shape: RoundedRectangleBorder(
@@ -1073,60 +1143,55 @@ class _SessionSetupScreenState extends State<SessionSetupScreen> {
       child: Stack(
         clipBehavior: Clip.none,
         children: [
-          FlutterMap(
-            mapController: _mapController,
-            options: MapOptions(
-              initialCenter:
-                  _currentPosition ?? _destinationCoords ?? _defaultCenter,
-              initialZoom: _zoom,
+          GoogleMap(
+            // google_maps_flutter_web has a known gap where updating just
+            // the `polylines` set on an already-built GoogleMap doesn't
+            // always propagate to the underlying JS map instance (markers
+            // and camera updates work fine; polylines specifically don't
+            // reliably redraw in place). Keying on the route forces Flutter
+            // to fully remount the widget whenever a new route comes in,
+            // which sidesteps that gap entirely instead of relying on the
+            // plugin's in-place diffing for this one property.
+            key: ValueKey(
+                'map-${_walkingRoute?.distanceMeters ?? 0}-${_walkingRoute?.durationSeconds ?? 0}'),
+            onMapCreated: (c) => _mapController = c,
+            initialCameraPosition: CameraPosition(
+              target: _currentPosition ?? _destinationCoords ?? _defaultCenter,
+              zoom: _zoom,
             ),
-            children: [
-              // CartoDB's Voyager basemap — free, no API key, and much
-              // closer to a Google-Maps look (labeled roads, shaded land
-              // use, points of interest) than the plain OSM default tiles.
-              TileLayer(
-                urlTemplate:
-                    'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
-                subdomains: const ['a', 'b', 'c', 'd'],
-                userAgentPackageName: 'com.safetyu.app',
-                maxZoom: 19,
-              ),
-              if (_currentPosition != null && _destinationCoords != null)
-                PolylineLayer(
-                  polylines: [
+            polylines: _walkingRoute != null
+                ? {
                     Polyline(
-                      points: [_currentPosition!, _destinationCoords!],
-                      strokeWidth: 3,
-                      color: AppColors.navy.withValues(alpha: 0.4),
+                      polylineId: const PolylineId('to-destination'),
+                      points: _walkingRoute!.points,
+                      width: 4,
+                      color: _accent,
                     ),
-                  ],
-                ),
-              MarkerLayer(
-                markers: [
-                  if (_destinationCoords != null)
-                    Marker(
-                      point: _destinationCoords!,
-                      width: 40,
-                      height: 40,
-                      child: const Icon(Icons.location_on,
-                          color: Colors.redAccent, size: 36),
-                    ),
-                  if (_currentPosition != null)
-                    Marker(
-                      point: _currentPosition!,
-                      width: 20,
-                      height: 20,
-                      child: Container(
-                        decoration: BoxDecoration(
-                          color: _accent,
-                          shape: BoxShape.circle,
-                          border: Border.all(color: Colors.white, width: 2.5),
+                  }
+                : (_currentPosition != null && _destinationCoords != null)
+                    ? {
+                        Polyline(
+                          polylineId: const PolylineId('to-destination'),
+                          points: [_currentPosition!, _destinationCoords!],
+                          width: 3,
+                          color: AppColors.navy.withValues(alpha: 0.4),
                         ),
-                      ),
-                    ),
-                ],
-              ),
-            ],
+                      }
+                    : {},
+            markers: {
+              if (_destinationCoords != null)
+                Marker(
+                  markerId: const MarkerId('destination'),
+                  position: _destinationCoords!,
+                  icon: _destIcon ?? BitmapDescriptor.defaultMarker,
+                ),
+              if (_currentPosition != null)
+                Marker(
+                  markerId: const MarkerId('me'),
+                  position: _currentPosition!,
+                  icon: _meIcon ?? BitmapDescriptor.defaultMarker,
+                ),
+            },
           ),
           Positioned(
             top: 10,
@@ -1185,6 +1250,7 @@ class _SessionSetupScreenState extends State<SessionSetupScreen> {
                             setState(() {
                               _suggestions = [];
                               _destinationCoords = null;
+                              _walkingRoute = null;
                               _resolvedAddress = null;
                               _previewFailed = false;
                               _showDestinationError = false;
@@ -1307,17 +1373,21 @@ class _SessionSetupScreenState extends State<SessionSetupScreen> {
                                       ],
                                     ),
                                     child: Row(
+                                      mainAxisSize: MainAxisSize.min,
                                       children: [
                                         Icon(cat.icon,
                                             size: 14,
                                             color: AppColors.textPrimary),
                                         const SizedBox(width: 4),
-                                        Text(
-                                          cat.label,
-                                          style: TextStyle(
-                                            fontSize: 11,
-                                            fontWeight: FontWeight.w600,
-                                            color: AppColors.textPrimary,
+                                        Flexible(
+                                          child: Text(
+                                            cat.label,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: TextStyle(
+                                              fontSize: 11,
+                                              fontWeight: FontWeight.w600,
+                                              color: AppColors.textPrimary,
+                                            ),
                                           ),
                                         ),
                                       ],
@@ -1334,6 +1404,7 @@ class _SessionSetupScreenState extends State<SessionSetupScreen> {
                         tooltip: 'More options',
                         padding: EdgeInsets.zero,
                         color: AppColors.card,
+                        constraints: const BoxConstraints(minWidth: 200),
                         shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(12)),
                         onSelected: (value) {
@@ -1348,6 +1419,7 @@ class _SessionSetupScreenState extends State<SessionSetupScreen> {
                             setState(() {
                               _suggestions = [];
                               _destinationCoords = null;
+                              _walkingRoute = null;
                               _resolvedAddress = null;
                               _previewFailed = false;
                             });
@@ -1357,26 +1429,34 @@ class _SessionSetupScreenState extends State<SessionSetupScreen> {
                           PopupMenuItem(
                             value: 'refresh',
                             child: Row(
+                              mainAxisSize: MainAxisSize.min,
                               children: [
                                 Icon(Icons.my_location,
                                     size: 18, color: AppColors.textPrimary),
                                 const SizedBox(width: 10),
-                                Text('Refresh my location',
-                                    style: TextStyle(
-                                        color: AppColors.textPrimary)),
+                                Flexible(
+                                  child: Text('Refresh my location',
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(
+                                          color: AppColors.textPrimary)),
+                                ),
                               ],
                             ),
                           ),
                           PopupMenuItem(
                             value: 'clear',
                             child: Row(
+                              mainAxisSize: MainAxisSize.min,
                               children: [
                                 Icon(Icons.clear,
                                     size: 18, color: AppColors.textPrimary),
                                 const SizedBox(width: 10),
-                                Text('Clear destination',
-                                    style: TextStyle(
-                                        color: AppColors.textPrimary)),
+                                Flexible(
+                                  child: Text('Clear destination',
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(
+                                          color: AppColors.textPrimary)),
+                                ),
                               ],
                             ),
                           ),
@@ -1408,74 +1488,6 @@ class _SessionSetupScreenState extends State<SessionSetupScreen> {
                 const SizedBox(height: 6),
                 _buildCircularIconButton(Icons.remove, () => _zoomBy(-1)),
               ],
-            ),
-          ),
-          Positioned(
-            left: 14,
-            right: 14,
-            bottom: 12,
-            child: GestureDetector(
-              onTap: _focusDestinationSearch,
-              child: Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                decoration: BoxDecoration(
-                  color: AppColors.card,
-                  borderRadius: BorderRadius.circular(16),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.08),
-                      blurRadius: 10,
-                      offset: const Offset(0, 4),
-                    ),
-                  ],
-                ),
-                child: Row(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.all(8),
-                      decoration: const BoxDecoration(
-                        color: _accent,
-                        shape: BoxShape.circle,
-                      ),
-                      child: const Icon(Icons.place,
-                          color: Colors.white, size: 20),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            _destinationController.text.isEmpty
-                                ? 'Select Destination'
-                                : _destinationController.text,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 14,
-                              color: AppColors.textPrimary,
-                            ),
-                          ),
-                          if (_resolvedAddress != null)
-                            Text(
-                              _resolvedAddress!,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                fontSize: 11,
-                                color: AppColors.textSecondary,
-                              ),
-                            ),
-                        ],
-                      ),
-                    ),
-                    Icon(Icons.chevron_right, color: AppColors.textPrimary),
-                  ],
-                ),
-              ),
             ),
           ),
         ],
@@ -1524,6 +1536,7 @@ class _SessionSetupScreenState extends State<SessionSetupScreen> {
           ),
           Text(
             unit,
+            overflow: TextOverflow.ellipsis,
             style: TextStyle(
               fontSize: 12,
               fontWeight: FontWeight.w600,

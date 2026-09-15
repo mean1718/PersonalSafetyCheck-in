@@ -143,7 +143,7 @@ class _VerifyPhoneScreenState extends State<VerifyPhoneScreen> {
                 child: ElevatedButton(
                   onPressed: _verifying ? null : _verify,
                   style: ElevatedButton.styleFrom(
-                      backgroundColor: AppColors.navy,
+                      backgroundColor: AppColors.primaryButton,
                       shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(26))),
                   child: _verifying

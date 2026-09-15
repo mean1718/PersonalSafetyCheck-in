@@ -1,4 +1,4 @@
-import 'package:latlong2/latlong.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
 
 /// Read-only context for one "can you help" request shown to a trusted
 /// contact. SafetyU has no backend, so there's no live feed from the

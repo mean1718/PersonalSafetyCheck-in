@@ -113,8 +113,7 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
   @override
   Widget build(BuildContext context) {
     return PopScope(
-      canPop: _step != _LimitStep.proScan &&
-          _step != _LimitStep.payScan,
+      canPop: _step != _LimitStep.proScan && _step != _LimitStep.payScan,
       child: Dialog(
         backgroundColor: AppColors.card,
         shape: RoundedRectangleBorder(
@@ -265,8 +264,7 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
           icon: Icons.card_giftcard,
           title: 'Free Plan',
           tag: 'Current',
-          subtitle:
-              'Up to ${AppSession.freeMainContactLimit} main + '
+          subtitle: 'Up to ${AppSession.freeMainContactLimit} main + '
               '${AppSession.freeOtherContactLimit} other contacts',
           highlighted: _selectedPlan == 'free',
           onTap: () {
@@ -287,8 +285,7 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
           icon: Icons.workspace_premium,
           title: 'Pro Plan',
           tag: 'Most Popular',
-          subtitle:
-              'Unlimited contacts & all premium features — '
+          subtitle: 'Unlimited contacts & all premium features — '
               '\$${_proMonthlyPrice.toStringAsFixed(2)}/month',
           highlighted: _selectedPlan == 'pro',
           onTap: () {
@@ -309,8 +306,7 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
           icon: Icons.person_add_alt_1,
           title: 'Pay Per Contact',
           tag: 'One-Pay-Per-Person',
-          subtitle:
-              'Add extra contacts without upgrading — '
+          subtitle: 'Add extra contacts without upgrading — '
               '\$${_pricePerContact.toStringAsFixed(2)}/person',
           highlighted: _selectedPlan == 'pay',
           onTap: () {
@@ -342,7 +338,7 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
               });
             },
             style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.navy,
+              backgroundColor: AppColors.primaryButton,
               minimumSize: const Size(0, 46),
             ),
             child: const Text('View Options'),
@@ -377,7 +373,6 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
             });
           },
         ),
-
         Container(
           width: 56,
           height: 56,
@@ -391,9 +386,7 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
             size: 26,
           ),
         ),
-
         const SizedBox(height: 14),
-
         Text(
           'Free Plan',
           style: TextStyle(
@@ -402,9 +395,7 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
             color: AppColors.textPrimary,
           ),
         ),
-
         const SizedBox(height: 6),
-
         Text(
           'You are currently using the Free Plan.',
           textAlign: TextAlign.center,
@@ -413,9 +404,7 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
             color: AppColors.textSecondary,
           ),
         ),
-
         const SizedBox(height: 16),
-
         Container(
           width: double.infinity,
           padding: const EdgeInsets.all(14),
@@ -442,9 +431,7 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
             ],
           ),
         ),
-
         const SizedBox(height: 16),
-
         Text(
           'You can continue using the Free Plan, but you cannot add more '
           'contacts until you choose another option.',
@@ -454,9 +441,7 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
             color: AppColors.textMuted,
           ),
         ),
-
         const SizedBox(height: 16),
-
         SizedBox(
           width: double.infinity,
           child: ElevatedButton(
@@ -464,13 +449,12 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
               Navigator.pop(context, null);
             },
             style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.navy,
+              backgroundColor: AppColors.primaryButton,
               minimumSize: const Size(0, 46),
             ),
             child: const Text('Continue with Free Plan'),
           ),
         ),
-
         TextButton(
           onPressed: () {
             setState(() {
@@ -592,7 +576,7 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
           child: ElevatedButton(
             onPressed: _beginProPayment,
             style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.navy,
+              backgroundColor: AppColors.primaryButton,
               minimumSize: const Size(0, 46),
             ),
             child: const Text('Continue to Payment'),
@@ -634,9 +618,7 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
             color: AppColors.textPrimary,
           ),
         ),
-
         const SizedBox(height: 6),
-
         Text(
           '\$${_proMonthlyPrice.toStringAsFixed(2)}',
           style: TextStyle(
@@ -645,9 +627,7 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
             color: AppColors.navy,
           ),
         ),
-
         const SizedBox(height: 18),
-
         Container(
           padding: const EdgeInsets.all(14),
           decoration: BoxDecoration(
@@ -662,9 +642,7 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
             size: 180,
           ),
         ),
-
         const SizedBox(height: 16),
-
         Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
@@ -687,9 +665,7 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
             ),
           ],
         ),
-
         const SizedBox(height: 8),
-
         Text(
           'Open your banking or e-wallet app and scan this code to complete '
           'the payment. This screen updates automatically once payment is received.',
@@ -699,9 +675,7 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
             color: AppColors.textMuted,
           ),
         ),
-
         const SizedBox(height: 16),
-
         TextButton(
           onPressed: () {
             setState(() {
@@ -741,9 +715,7 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
             size: 34,
           ),
         ),
-
         const SizedBox(height: 16),
-
         Text(
           "You're Pro Now",
           style: TextStyle(
@@ -752,9 +724,7 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
             color: AppColors.textPrimary,
           ),
         ),
-
         const SizedBox(height: 6),
-
         Text(
           'Unlimited contacts and all premium features are unlocked.',
           textAlign: TextAlign.center,
@@ -763,15 +733,13 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
             color: AppColors.textSecondary,
           ),
         ),
-
         const SizedBox(height: 20),
-
         SizedBox(
           width: double.infinity,
           child: ElevatedButton(
             onPressed: () => Navigator.pop(context, 'pro'),
             style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.navy,
+              backgroundColor: AppColors.primaryButton,
               minimumSize: const Size(0, 46),
             ),
             child: const Text('Continue'),
@@ -865,16 +833,12 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
                   'Main Contact',
                   extraMain,
                 ),
-
-              if (extraMain > 0 && extraOther > 0)
-                const SizedBox(height: 10),
-
+              if (extraMain > 0 && extraOther > 0) const SizedBox(height: 10),
               if (extraOther > 0)
                 _extraRow(
                   'Other Contact',
                   extraOther,
                 ),
-
               if (extraTotal == 0)
                 Text(
                   'No extra contacts are required.',
@@ -995,9 +959,7 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
             color: AppColors.textPrimary,
           ),
         ),
-
         const SizedBox(height: 6),
-
         Text(
           '\$${total.toStringAsFixed(2)}',
           style: TextStyle(
@@ -1006,9 +968,7 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
             color: AppColors.navy,
           ),
         ),
-
         const SizedBox(height: 6),
-
         Text(
           '$extraTotal extra contact${extraTotal == 1 ? '' : 's'}',
           style: TextStyle(
@@ -1016,9 +976,7 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
             color: AppColors.textSecondary,
           ),
         ),
-
         const SizedBox(height: 18),
-
         Container(
           padding: const EdgeInsets.all(14),
           decoration: BoxDecoration(
@@ -1033,9 +991,7 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
             size: 180,
           ),
         ),
-
         const SizedBox(height: 16),
-
         Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
@@ -1058,9 +1014,7 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
             ),
           ],
         ),
-
         const SizedBox(height: 8),
-
         Text(
           'Open your banking or e-wallet app and scan this code to complete '
           'the payment. This screen updates automatically once payment is received.',
@@ -1070,9 +1024,7 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
             color: AppColors.textMuted,
           ),
         ),
-
         const SizedBox(height: 16),
-
         TextButton(
           onPressed: () {
             setState(() {
@@ -1125,9 +1077,7 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
             size: 34,
           ),
         ),
-
         const SizedBox(height: 16),
-
         Text(
           'Payment Successful',
           style: TextStyle(
@@ -1136,9 +1086,7 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
             color: AppColors.textPrimary,
           ),
         ),
-
         const SizedBox(height: 6),
-
         Text(
           extraTotal == 1
               ? '1 extra contact has been added.'
@@ -1149,9 +1097,7 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
             color: AppColors.textSecondary,
           ),
         ),
-
         const SizedBox(height: 16),
-
         Container(
           width: double.infinity,
           padding: const EdgeInsets.all(14),
@@ -1189,15 +1135,13 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
             ],
           ),
         ),
-
         const SizedBox(height: 20),
-
         SizedBox(
           width: double.infinity,
           child: ElevatedButton(
             onPressed: () => Navigator.pop(context, 'pay'),
             style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.navy,
+              backgroundColor: AppColors.primaryButton,
               minimumSize: const Size(0, 46),
             ),
             child: const Text('Continue'),
@@ -1365,9 +1309,7 @@ class _PlanOption extends StatelessWidget {
               : AppColors.background,
           borderRadius: BorderRadius.circular(14),
           border: Border.all(
-            color: highlighted
-                ? AppColors.navy
-                : AppColors.border,
+            color: highlighted ? AppColors.navy : AppColors.border,
             width: highlighted ? 1.4 : 1,
           ),
         ),
@@ -1376,13 +1318,9 @@ class _PlanOption extends StatelessWidget {
             Icon(
               icon,
               size: 20,
-              color: highlighted
-                  ? AppColors.navy
-                  : AppColors.textSecondary,
+              color: highlighted ? AppColors.navy : AppColors.textSecondary,
             ),
-
             const SizedBox(width: 10),
-
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -1397,19 +1335,16 @@ class _PlanOption extends StatelessWidget {
                           color: AppColors.textPrimary,
                         ),
                       ),
-
                       if (tag != null) ...[
                         const SizedBox(width: 6),
-
                         Container(
                           padding: const EdgeInsets.symmetric(
                             horizontal: 6,
                             vertical: 1,
                           ),
                           decoration: BoxDecoration(
-                            color: highlighted
-                                ? AppColors.navy
-                                : AppColors.border,
+                            color:
+                                highlighted ? AppColors.navy : AppColors.border,
                             borderRadius: BorderRadius.circular(8),
                           ),
                           child: Text(
@@ -1426,9 +1361,7 @@ class _PlanOption extends StatelessWidget {
                       ],
                     ],
                   ),
-
                   const SizedBox(height: 2),
-
                   Text(
                     subtitle,
                     style: TextStyle(
@@ -1494,8 +1427,7 @@ class _QrPainter extends CustomPainter {
     final cell = size.width / _grid;
     final random = Random(seed);
 
-    final paint = Paint()
-      ..color = const Color(0xFF0B1F3A);
+    final paint = Paint()..color = const Color(0xFF0B1F3A);
 
     // White background
     canvas.drawRect(
@@ -1515,10 +1447,7 @@ class _QrPainter extends CustomPainter {
       ];
 
       for (final p in positions) {
-        if (r >= p[0] &&
-            r < p[0] + 7 &&
-            c >= p[1] &&
-            c < p[1] + 7) {
+        if (r >= p[0] && r < p[0] + 7 && c >= p[1] && c < p[1] + 7) {
           return true;
         }
       }
@@ -1594,4 +1523,3 @@ class _QrPainter extends CustomPainter {
     return oldDelegate.seed != seed;
   }
 }
-

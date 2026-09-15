@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_map/flutter_map.dart';
-import 'package:latlong2/latlong.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
+import '../services/marker_icons.dart';
 import '../theme/app_theme.dart';
 import '../models/incident.dart';
 import '../services/app_session.dart';
@@ -15,6 +15,23 @@ class CaseDetailScreen extends StatefulWidget {
 }
 
 class _CaseDetailScreenState extends State<CaseDetailScreen> {
+  BitmapDescriptor? _incidentIcon;
+  bool _markerIconRequested = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // BitmapDescriptor.defaultMarkerWithHue doesn't render on web — load a
+    // real pin image instead, same as every other map screen.
+    if (!_markerIconRequested) {
+      _markerIconRequested = true;
+      MarkerIcons.destination(context).then((icon) {
+        if (!mounted) return;
+        setState(() => _incidentIcon = icon);
+      });
+    }
+  }
+
   Incident? _findIncident(BuildContext context) {
     final id = ModalRoute.of(context)?.settings.arguments as String?;
     if (id == null) return null;
@@ -59,24 +76,16 @@ class _CaseDetailScreenState extends State<CaseDetailScreen> {
         height: 320,
         child: ClipRRect(
           borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
-          child: FlutterMap(
-            options:
-                MapOptions(initialCenter: incident.location, initialZoom: 15),
-            children: [
-              TileLayer(
-                urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                userAgentPackageName: 'com.safetyu.app',
+          child: GoogleMap(
+            initialCameraPosition:
+                CameraPosition(target: incident.location, zoom: 15),
+            markers: {
+              Marker(
+                markerId: const MarkerId('incident'),
+                position: incident.location,
+                icon: _incidentIcon ?? BitmapDescriptor.defaultMarker,
               ),
-              MarkerLayer(
-                markers: [
-                  Marker(
-                    point: incident.location,
-                    child: Icon(Icons.location_on,
-                        color: AppColors.danger, size: 38),
-                  ),
-                ],
-              ),
-            ],
+            },
           ),
         ),
       ),
@@ -171,21 +180,16 @@ class _CaseDetailScreenState extends State<CaseDetailScreen> {
                   borderRadius: BorderRadius.circular(16),
                   child: SizedBox(
                     height: 180,
-                    child: FlutterMap(
-                      options: MapOptions(
-                          initialCenter: incident.location, initialZoom: 15.0),
-                      children: [
-                        TileLayer(
-                            urlTemplate:
-                                'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                            userAgentPackageName: 'com.safetyu.app'),
-                        MarkerLayer(markers: [
-                          Marker(
-                              point: incident.location,
-                              child: Icon(Icons.location_on,
-                                  color: AppColors.danger, size: 36))
-                        ]),
-                      ],
+                    child: GoogleMap(
+                      initialCameraPosition:
+                          CameraPosition(target: incident.location, zoom: 15.0),
+                      markers: {
+                        Marker(
+                          markerId: const MarkerId('incident'),
+                          position: incident.location,
+                          icon: _incidentIcon ?? BitmapDescriptor.defaultMarker,
+                        ),
+                      },
                     ),
                   ),
                 ),
@@ -225,7 +229,7 @@ class _CaseDetailScreenState extends State<CaseDetailScreen> {
                       if (result == true && mounted) setState(() {});
                     },
                     style: ElevatedButton.styleFrom(
-                        backgroundColor: AppColors.navy,
+                        backgroundColor: AppColors.primaryButton,
                         shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(26))),
                     child: const Text('Update Status',
@@ -274,7 +278,7 @@ class _CaseDetailScreenState extends State<CaseDetailScreen> {
                   child: ElevatedButton(
                     onPressed: () => _takeCase(incident),
                     style: ElevatedButton.styleFrom(
-                        backgroundColor: AppColors.navy,
+                        backgroundColor: AppColors.primaryButton,
                         shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(26))),
                     child: const Text('Take Case',

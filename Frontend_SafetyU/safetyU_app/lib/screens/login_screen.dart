@@ -145,30 +145,13 @@ class _LoginScreenState extends State<LoginScreen> {
                       ),
                       const SizedBox(height: 8),
                       Center(
-                        child: Column(
-                          children: [
-                            Container(
-                              width: 56,
-                              height: 56,
-                              decoration: BoxDecoration(
-                                color: AppColors.navy,
-                                borderRadius: BorderRadius.circular(16),
-                              ),
-                              child: Icon(Icons.shield,
-                                  color: AppColors.danger, size: 28),
-                            ),
-                            const SizedBox(height: 10),
-                            Text(
-                              'SafetyU',
-                              style: TextStyle(
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.w800,
-                                  color: AppColors.textPrimary),
-                            ),
-                          ],
+                        child: Image.asset(
+                          'assets/images/safetyu_logo.png',
+                          width: 140,
+                          height: 140,
                         ),
                       ),
-                      const SizedBox(height: 32),
+                      const SizedBox(height: 16),
                       Text(
                         'Welcome Back',
                         style: TextStyle(
@@ -208,6 +191,30 @@ class _LoginScreenState extends State<LoginScreen> {
                         },
                         autovalidateMode: AutovalidateMode.onUserInteraction,
                       ),
+                      if (_emailBackendError != null) ...[
+                        const SizedBox(height: 6),
+                        GestureDetector(
+                          onTap: () => Navigator.pushNamed(context, '/signup'),
+                          child: RichText(
+                            text: TextSpan(
+                              style: TextStyle(
+                                  fontSize: 12.5,
+                                  color: AppColors.textSecondary),
+                              children: [
+                                const TextSpan(
+                                    text: "Don't have an account yet? "),
+                                TextSpan(
+                                  text: 'Sign Up',
+                                  style: TextStyle(
+                                      color: AppColors.danger,
+                                      fontWeight: FontWeight.w700,
+                                      decoration: TextDecoration.underline),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
                       const SizedBox(height: 18),
                       const _FieldLabel('Password'),
                       const SizedBox(height: 8),
@@ -398,6 +405,11 @@ class _RoleOption extends StatelessWidget {
         children: [
           Container(
             width: double.infinity,
+            // A fixed height (not just vertical padding) is what actually
+            // keeps these two the same size — "User" is one line and
+            // "Emergency Responder" wraps to two, so sizing purely off
+            // content made this box taller than the other one.
+            height: 92,
             padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 10),
             decoration: BoxDecoration(
               color: selected
@@ -410,6 +422,7 @@ class _RoleOption extends StatelessWidget {
               ),
             ),
             child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 Icon(icon,
                     size: 22,

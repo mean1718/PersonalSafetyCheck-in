@@ -2,7 +2,6 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_bottom_nav.dart';
-import '../widgets/safety_illustration.dart';
 import '../models/contact.dart';
 import '../models/help_request.dart';
 import '../services/app_session.dart';
@@ -18,6 +17,41 @@ import 'live_location_map_screen.dart';
 /// A sent request sits under Requests as [ContactStatus.pending] until the
 /// other person confirms; only then do they move to Your Friends and
 /// become eligible to be notified, chatted with, or escalated to.
+
+// Each contact gets a consistent color pulled from this palette (keyed off
+// their id, so the same person always lands on the same color instead of
+// shuffling every rebuild) — this is what puts color back into the avatar
+// circles instead of every one being the same flat navy tint.
+const List<Color> _avatarBg = [
+  Color(0xFFE3F0FF),
+  Color(0xFFEEE8FF),
+  Color(0xFFFFE9DE),
+  Color(0xFFE1F7EA),
+  Color(0xFFFFF3D6),
+  Color(0xFFFFE0EC),
+];
+const List<Color> _avatarFg = [
+  Color(0xFF2F6FED),
+  Color(0xFF7C5CFC),
+  Color(0xFFFF7A45),
+  Color(0xFF23A26D),
+  Color(0xFFE0A500),
+  Color(0xFFF0508C),
+];
+int _avatarColorIndex(String key) => key.hashCode.abs() % _avatarBg.length;
+
+// The peach/orange pair — used for the location icon on each friend card.
+const Color _actionIconBg = Color(0xFFFDF2E0);
+const Color _actionIconFg = Color(0xFFF5A622);
+// Message and edit icons use these blue tones instead, matching the
+// reference design.
+// Message icon uses the purple that the notification bell used to have
+// in the reference design (that icon itself was removed earlier).
+const Color _messageIconBg = Color(0xFFF1ECFF);
+const Color _messageIconFg = Color(0xFF4B26D2);
+const Color _editIconBg = Color(0xFFE3F0FF);
+const Color _editIconFg = Color(0xFF0C48DC);
+
 class TrustedContactsScreen extends StatefulWidget {
   const TrustedContactsScreen({super.key});
 
@@ -233,6 +267,143 @@ class _TrustedContactsScreenState extends State<TrustedContactsScreen> {
     );
   }
 
+  void _confirmUnfriend(Contact contact) {
+    showDialog(
+      context: context,
+      builder: (dialogContext) => Dialog(
+        backgroundColor: Colors.white,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(24, 20, 24, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  GestureDetector(
+                    onTap: () => Navigator.pop(dialogContext),
+                    child: Icon(Icons.close,
+                        size: 20, color: AppColors.textSecondary),
+                  ),
+                ],
+              ),
+              SizedBox(
+                width: 96,
+                height: 96,
+                child: Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    Positioned.fill(
+                      child: Container(
+                        margin: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: AppColors.navy.withValues(alpha: 0.08),
+                          shape: BoxShape.circle,
+                        ),
+                        child: Icon(Icons.people_alt_rounded,
+                            size: 42, color: AppColors.primaryButton),
+                      ),
+                    ),
+                    Positioned(
+                      right: 4,
+                      bottom: 4,
+                      child: Container(
+                        width: 26,
+                        height: 26,
+                        decoration: BoxDecoration(
+                          color: AppColors.danger,
+                          shape: BoxShape.circle,
+                          border: Border.all(color: Colors.white, width: 2),
+                        ),
+                        child: const Icon(Icons.remove,
+                            size: 14, color: Colors.white),
+                      ),
+                    ),
+                    Positioned(
+                        top: 0,
+                        left: 2,
+                        child: Icon(Icons.favorite,
+                            size: 12, color: Colors.pink.shade200)),
+                    Positioned(
+                        bottom: 6,
+                        right: 20,
+                        child: Icon(Icons.favorite,
+                            size: 12, color: Colors.pink.shade200)),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+              Text('Unfriend',
+                  style: TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.w800,
+                      color: AppColors.textPrimary)),
+              const SizedBox(height: 10),
+              Text(
+                'Are you sure you want to unfriend ${contact.fullName}?',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.textPrimary),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                "You won't be able to see each other's updates or send messages anymore.",
+                textAlign: TextAlign.center,
+                style:
+                    TextStyle(fontSize: 12.5, color: AppColors.textSecondary),
+              ),
+              const SizedBox(height: 20),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () => Navigator.pop(dialogContext),
+                      style: OutlinedButton.styleFrom(
+                        minimumSize: const Size(0, 48),
+                        side: BorderSide(
+                            color: AppColors.navy.withValues(alpha: 0.25)),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(24)),
+                      ),
+                      child: Text('Cancel',
+                          style: TextStyle(
+                              color: AppColors.textPrimary,
+                              fontWeight: FontWeight.w700)),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: ElevatedButton.icon(
+                      onPressed: () {
+                        Navigator.pop(dialogContext);
+                        _delete(contact);
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.danger,
+                        minimumSize: const Size(0, 48),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(24)),
+                      ),
+                      icon: const Icon(Icons.person_remove,
+                          size: 16, color: Colors.white),
+                      label: const Text('Unfriend',
+                          style: TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w700)),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   void _delete(Contact contact) {
     setState(() => AppSession.instance.removeContact(contact.id));
     // Revoke the underlying Trust relationship on the backend too — see
@@ -340,7 +511,6 @@ class _TrustedContactsScreenState extends State<TrustedContactsScreen> {
                       ],
                     ),
                   ),
-                  const HeaderAccent(),
                 ],
               ),
               const SizedBox(height: 18),
@@ -365,11 +535,18 @@ class _TrustedContactsScreenState extends State<TrustedContactsScreen> {
                               ),
                             )
                           else ...[
-                            Text('Trust Requests',
-                                style: TextStyle(
-                                    fontSize: 13,
-                                    fontWeight: FontWeight.w800,
-                                    color: AppColors.textPrimary)),
+                            Row(
+                              children: [
+                                Icon(Icons.people_alt_rounded,
+                                    size: 16, color: AppColors.navy),
+                                const SizedBox(width: 6),
+                                Text('Trust Requests',
+                                    style: TextStyle(
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w800,
+                                        color: AppColors.textPrimary)),
+                              ],
+                            ),
                             const SizedBox(height: 10),
                             if (_incomingRequests.isEmpty)
                               Container(
@@ -391,8 +568,7 @@ class _TrustedContactsScreenState extends State<TrustedContactsScreen> {
                                       children: [
                                         Icon(Icons.people_alt_rounded,
                                             size: 42,
-                                            color: AppColors.navy
-                                                .withValues(alpha: 0.35)),
+                                            color: AppColors.primaryButton),
                                         Positioned(
                                           right: -4,
                                           bottom: -2,
@@ -400,7 +576,7 @@ class _TrustedContactsScreenState extends State<TrustedContactsScreen> {
                                             width: 20,
                                             height: 20,
                                             decoration: BoxDecoration(
-                                              color: AppColors.navy,
+                                              color: AppColors.primaryButton,
                                               shape: BoxShape.circle,
                                               border: Border.all(
                                                   color: AppColors.card,
@@ -436,12 +612,19 @@ class _TrustedContactsScreenState extends State<TrustedContactsScreen> {
                                   )),
                           ],
                           if (requests.isNotEmpty) ...[
-                            Text(
-                              'Requests',
-                              style: TextStyle(
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w800,
-                                  color: AppColors.textPrimary),
+                            Row(
+                              children: [
+                                Icon(Icons.people_alt_rounded,
+                                    size: 16, color: AppColors.navy),
+                                const SizedBox(width: 6),
+                                Text(
+                                  'Requests',
+                                  style: TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w800,
+                                      color: AppColors.textPrimary),
+                                ),
+                              ],
                             ),
                             const SizedBox(height: 10),
                             ...requests.map((c) => Padding(
@@ -455,12 +638,19 @@ class _TrustedContactsScreenState extends State<TrustedContactsScreen> {
                             const SizedBox(height: 8),
                           ],
                           if (friends.isNotEmpty) ...[
-                            Text(
-                              'Your Friends',
-                              style: TextStyle(
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w800,
-                                  color: AppColors.textPrimary),
+                            Row(
+                              children: [
+                                Icon(Icons.people_alt_rounded,
+                                    size: 16, color: AppColors.navy),
+                                const SizedBox(width: 6),
+                                Text(
+                                  'Your Friends',
+                                  style: TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w800,
+                                      color: AppColors.textPrimary),
+                                ),
+                              ],
                             ),
                             const SizedBox(height: 10),
                             ...friends.map((c) => Padding(
@@ -474,7 +664,7 @@ class _TrustedContactsScreenState extends State<TrustedContactsScreen> {
                                         .length,
                                     unreadMessageCount:
                                         _unreadMessageCounts[c.id] ?? 0,
-                                    onUnfriend: () => _delete(c),
+                                    onUnfriend: () => _confirmUnfriend(c),
                                     onOpenChat: () => _openChat(c),
                                     onOpenRespond: () => _openRespondFlow(c),
                                     onEdit: () => _openEditScreen(c),
@@ -491,22 +681,12 @@ class _TrustedContactsScreenState extends State<TrustedContactsScreen> {
       ),
       floatingActionButton: isEmpty
           ? null
-          : Container(
-              decoration: const BoxDecoration(
-                shape: BoxShape.circle,
-                gradient: LinearGradient(
-                  colors: [Color(0xFF6C63F7), Color(0xFF4A90E2)],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                ),
-              ),
-              child: FloatingActionButton(
-                onPressed: _addContact,
-                backgroundColor: Colors.transparent,
-                elevation: 0,
-                shape: const CircleBorder(),
-                child: const Icon(Icons.add, color: Colors.white, size: 28),
-              ),
+          : FloatingActionButton(
+              onPressed: _addContact,
+              backgroundColor: AppColors.primaryButton,
+              elevation: 0,
+              shape: const CircleBorder(),
+              child: const Icon(Icons.add, color: Colors.white, size: 28),
             ),
       bottomNavigationBar:
           AppBottomNav(currentIndex: _navIndex, onTap: _onNavTap),
@@ -633,7 +813,7 @@ class _EmptyFriendsState extends StatelessWidget {
               icon: const Icon(Icons.add, size: 18),
               label: const Text('Add Contact'),
               style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.navy,
+                backgroundColor: AppColors.primaryButton,
                 minimumSize: const Size(0, 46),
                 padding: const EdgeInsets.symmetric(horizontal: 20),
               ),
@@ -682,11 +862,11 @@ class _FriendCard extends StatelessWidget {
             children: [
               CircleAvatar(
                 radius: 24,
-                backgroundColor: AppColors.navy.withValues(alpha: 0.1),
+                backgroundColor: _avatarBg[_avatarColorIndex(contact.id)],
                 child: Text(
                   contact.initials,
                   style: TextStyle(
-                      color: AppColors.navy,
+                      color: _avatarFg[_avatarColorIndex(contact.id)],
                       fontWeight: FontWeight.w700,
                       fontSize: 16),
                 ),
@@ -718,9 +898,7 @@ class _FriendCard extends StatelessWidget {
                               borderRadius: BorderRadius.circular(10),
                             ),
                             child: Text(
-                              contact.isMainContact
-                                  ? 'Main'
-                                  : contact.relationship,
+                              contact.relationship,
                               style: TextStyle(
                                   fontSize: 10.5,
                                   fontWeight: FontWeight.w700,
@@ -753,11 +931,11 @@ class _FriendCard extends StatelessWidget {
                       width: 34,
                       height: 34,
                       decoration: const BoxDecoration(
-                        color: Color(0xFFF5F7FA),
+                        color: _messageIconBg,
                         shape: BoxShape.circle,
                       ),
                       child: Icon(Icons.chat_bubble_outline,
-                          size: 16, color: AppColors.navy),
+                          size: 16, color: _messageIconFg),
                     ),
                     if (unreadMessageCount > 0)
                       Positioned(
@@ -792,61 +970,15 @@ class _FriendCard extends StatelessWidget {
               ),
               const SizedBox(width: 8),
               GestureDetector(
-                onTap: onOpenRespond,
-                child: Stack(
-                  clipBehavior: Clip.none,
-                  children: [
-                    Container(
-                      width: 34,
-                      height: 34,
-                      decoration: const BoxDecoration(
-                        color: Color(0xFFF5F7FA),
-                        shape: BoxShape.circle,
-                      ),
-                      child: Icon(Icons.notifications_active_outlined,
-                          size: 16, color: AppColors.navy),
-                    ),
-                    if (alertCount > 0)
-                      Positioned(
-                        top: -4,
-                        right: -4,
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 5, vertical: 1),
-                          constraints:
-                              const BoxConstraints(minWidth: 16, minHeight: 16),
-                          decoration: BoxDecoration(
-                            color: AppColors.danger,
-                            borderRadius: BorderRadius.circular(10),
-                            border: Border.all(color: AppColors.card, width: 2),
-                          ),
-                          child: Text(
-                            alertCount > 9 ? '9+' : '$alertCount',
-                            textAlign: TextAlign.center,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 9,
-                              fontWeight: FontWeight.w800,
-                              height: 1.2,
-                            ),
-                          ),
-                        ),
-                      ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 8),
-              GestureDetector(
                 onTap: onEdit,
                 child: Container(
                   width: 34,
                   height: 34,
                   decoration: const BoxDecoration(
-                    color: Color(0xFFF5F7FA),
+                    color: _editIconBg,
                     shape: BoxShape.circle,
                   ),
-                  child:
-                      Icon(Icons.edit_square, size: 16, color: AppColors.navy),
+                  child: Icon(Icons.edit_square, size: 16, color: _editIconFg),
                 ),
               ),
               const SizedBox(width: 8),
@@ -856,11 +988,11 @@ class _FriendCard extends StatelessWidget {
                   width: 34,
                   height: 34,
                   decoration: const BoxDecoration(
-                    color: Color(0xFFF5F7FA),
+                    color: _actionIconBg,
                     shape: BoxShape.circle,
                   ),
                   child: Icon(Icons.location_on_outlined,
-                      size: 16, color: AppColors.navy),
+                      size: 16, color: _actionIconFg),
                 ),
               ),
               const Spacer(),
@@ -879,11 +1011,7 @@ class _FriendCard extends StatelessWidget {
                 child: Ink(
                   decoration: BoxDecoration(
                     borderRadius: BorderRadius.circular(20),
-                    gradient: const LinearGradient(
-                      colors: [Color(0xFF6C63F7), Color(0xFF4A90E2)],
-                      begin: Alignment.centerLeft,
-                      end: Alignment.centerRight,
-                    ),
+                    color: AppColors.danger,
                   ),
                   child: Container(
                     padding:

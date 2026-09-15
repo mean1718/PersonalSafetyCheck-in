@@ -144,15 +144,10 @@ class _AccountTypeScreenState extends State<AccountTypeScreen> {
                     Center(
                       child: Column(
                         children: [
-                          Container(
+                          Image.asset(
+                            'assets/images/safetyu_logo.png',
                             width: 52,
                             height: 52,
-                            decoration: BoxDecoration(
-                              color: AppColors.navy,
-                              borderRadius: BorderRadius.circular(15),
-                            ),
-                            child: Icon(Icons.shield,
-                                color: AppColors.danger, size: 26),
                           ),
                           const SizedBox(height: 8),
                           Text(

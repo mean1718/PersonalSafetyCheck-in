@@ -63,12 +63,6 @@ class _PersonalInfoScreenState extends State<PersonalInfoScreen> {
                 fontSize: 20,
                 fontWeight: FontWeight.w800,
                 color: AppColors.textPrimary)),
-        actions: [
-          Padding(
-            padding: const EdgeInsets.only(right: 16),
-            child: Icon(Icons.favorite, color: AppColors.danger, size: 22),
-          ),
-        ],
       ),
       body: SafeArea(
         child: Column(

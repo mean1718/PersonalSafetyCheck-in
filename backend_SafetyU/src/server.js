@@ -20,6 +20,7 @@ const emergencyRoutes = require("./routes/emergencyRoutes");
 const notificationRoutes = require("./routes/notificationRoutes");
 const locationRoutes = require("./routes/locationRoutes");
 const chatRoutes = require("./routes/ChatRoutes");
+const directionsRoutes = require("./routes/directionsRoutes");
 // const paymentRoutes = require("./routes/paymentRoutes");
 
 const app = express();
@@ -40,6 +41,7 @@ app.use("/api/emergency", emergencyRoutes);
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/location", locationRoutes);
 app.use("/api/chat", chatRoutes);
+app.use("/api/directions", directionsRoutes);
 // app.use("/api/payments", paymentRoutes);
 
 // Test route

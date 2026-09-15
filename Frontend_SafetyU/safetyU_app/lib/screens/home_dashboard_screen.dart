@@ -710,7 +710,7 @@ class _IncomingAlertRow extends StatelessWidget {
               icon: const Icon(Icons.location_on_outlined, size: 17),
               label: const Text('View Location'),
               style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.navy,
+                backgroundColor: AppColors.primaryButton,
                 foregroundColor: Colors.white,
                 padding: const EdgeInsets.symmetric(vertical: 10),
               ),

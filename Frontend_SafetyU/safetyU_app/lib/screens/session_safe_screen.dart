@@ -68,7 +68,7 @@ class SessionSafeScreen extends StatelessWidget {
                     );
                   },
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.navy,
+                    backgroundColor: AppColors.primaryButton,
                     shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(26)),
                   ),

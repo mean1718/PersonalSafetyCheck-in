@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_map/flutter_map.dart';
-import 'package:latlong2/latlong.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
+import '../services/marker_icons.dart';
 
 import '../theme/app_theme.dart';
 import '../models/contact.dart';
@@ -50,6 +50,22 @@ class _AlertDetailScreenState extends State<AlertDetailScreen> {
   LatLng? _liveLocation;
   bool _isLoadingLocation = true;
   bool _sending = false;
+  BitmapDescriptor? _incidentIcon;
+  bool _markerIconRequested = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // BitmapDescriptor.defaultMarkerWithHue doesn't render on web — load a
+    // real pin image instead, same as every other map screen.
+    if (!_markerIconRequested) {
+      _markerIconRequested = true;
+      MarkerIcons.destination(context).then((icon) {
+        if (!mounted) return;
+        setState(() => _incidentIcon = icon);
+      });
+    }
+  }
 
   @override
   void initState() {
@@ -192,28 +208,19 @@ class _AlertDetailScreenState extends State<AlertDetailScreen> {
                                 child: const CircularProgressIndicator(),
                               )
                             : location != null
-                                ? FlutterMap(
-                                    options: MapOptions(
-                                      initialCenter: location,
-                                      initialZoom: 14.5,
+                                ? GoogleMap(
+                                    initialCameraPosition: CameraPosition(
+                                      target: location,
+                                      zoom: 14.5,
                                     ),
-                                    children: [
-                                      TileLayer(
-                                        urlTemplate:
-                                            'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                                        userAgentPackageName: 'com.safetyu.app',
+                                    markers: {
+                                      Marker(
+                                        markerId: const MarkerId('requester'),
+                                        position: location,
+                                        icon: _incidentIcon ??
+                                            BitmapDescriptor.defaultMarker,
                                       ),
-                                      MarkerLayer(
-                                        markers: [
-                                          Marker(
-                                            point: location,
-                                            child: Icon(Icons.location_on,
-                                                color: AppColors.danger,
-                                                size: 38),
-                                          ),
-                                        ],
-                                      ),
-                                    ],
+                                    },
                                   )
                                 : Container(
                                     color: AppColors.card,

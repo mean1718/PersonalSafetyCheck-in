@@ -44,15 +44,10 @@ class _SplashScreenState extends State<SplashScreen> {
                         ),
                       ),
                       const SizedBox(height: 22),
-                      Container(
+                      Image.asset(
+                        'assets/images/safetyu_logo.png',
                         width: 100,
                         height: 100,
-                        decoration: BoxDecoration(
-                          color: AppColors.danger.withValues(alpha: 0.15),
-                          shape: BoxShape.circle,
-                        ),
-                        child: Icon(Icons.shield,
-                            color: AppColors.danger, size: 48),
                       ),
                       const SizedBox(height: 24),
                       const Text(

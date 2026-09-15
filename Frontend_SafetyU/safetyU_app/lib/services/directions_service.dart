@@ -1,6 +1,5 @@
-import 'dart:convert';
-import 'package:http/http.dart' as http;
-import 'package:latlong2/latlong.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'api_client.dart';
 
 class RouteResult {
   final List<LatLng> points;
@@ -23,42 +22,76 @@ class RouteResult {
   }
 }
 
-/// Draws the actual walkable/drivable road path between two points using
-/// OSRM's public routing server (https://project-osrm.org — free, no API
-/// key, fine for development/light use). For production traffic, swap the
-/// base URL for a self-hosted OSRM instance or a paid provider (Google
-/// Directions, Mapbox) — the parsing below only needs the base URL to change.
+/// Draws the actual walkable/drivable road path between two points — the
+/// same routing data the Google Maps app itself uses, so the line on our
+/// map follows real streets and turns instead of cutting a straight
+/// diagonal through buildings.
+///
+/// This goes through OUR OWN backend (see directionsController.js) rather
+/// than calling Google's Directions REST endpoint directly from here.
+/// That endpoint has no CORS headers, so a direct call works fine on
+/// Android/iOS (no browser involved) but is silently blocked by the
+/// browser on Flutter Web — which was exactly what was happening before.
+/// Google's own fix for web pages is a separate JS-only class
+/// (google.maps.DirectionsService) that isn't a real CORS-checked fetch;
+/// since we don't have access to that from Dart, proxying through our
+/// backend (a server calling another server — no CORS involved at all)
+/// is the actual fix, and also stops the API key from ever appearing in
+/// the browser's network tab.
 class DirectionsService {
-  static const _baseUrl = 'https://router.project-osrm.org/route/v1';
-
   static Future<RouteResult> route({
     required LatLng from,
     required LatLng to,
     bool walking = true,
   }) async {
-    final profile = walking ? 'foot' : 'driving';
-    final uri = Uri.parse(
-      '$_baseUrl/$profile/${from.longitude},${from.latitude};'
-      '${to.longitude},${to.latitude}'
-      '?overview=full&geometries=geojson',
+    final body = await ApiClient.get(
+      '/directions'
+      '?originLat=${from.latitude}&originLng=${from.longitude}'
+      '&destLat=${to.latitude}&destLng=${to.longitude}'
+      '&mode=${walking ? 'walking' : 'driving'}',
     );
-    final res = await http.get(uri).timeout(const Duration(seconds: 12));
-    if (res.statusCode != 200) {
-      throw Exception('Could not fetch a route (${res.statusCode}).');
-    }
-    final body = jsonDecode(res.body) as Map<String, dynamic>;
-    final routes = body['routes'] as List<dynamic>?;
-    if (routes == null || routes.isEmpty) {
-      throw Exception('No route found between these two points.');
-    }
-    final route = routes.first as Map<String, dynamic>;
-    final coords = (route['geometry']['coordinates'] as List<dynamic>)
-        .map((c) => LatLng((c as List)[1] as double, c[0] as double))
-        .toList();
+    final encoded = body['encodedPolyline'] as String;
+    final points = _decodePolyline(encoded);
+    // ignore: avoid_print
+    print('[DIRECTIONS] encoded length=${encoded.length}, '
+        'decoded ${points.length} points. '
+        'First 3: ${points.take(3).toList()} '
+        'Last 3: ${points.skip(points.length > 3 ? points.length - 3 : 0).toList()}');
     return RouteResult(
-      points: coords,
-      distanceMeters: (route['distance'] as num).toDouble(),
-      durationSeconds: (route['duration'] as num).toDouble(),
+      points: points,
+      distanceMeters: (body['distanceMeters'] as num).toDouble(),
+      durationSeconds: (body['durationSeconds'] as num).toDouble(),
     );
+  }
+
+  /// Decodes Google's polyline encoding format into a list of coordinates.
+  /// This is the standard algorithm Google documents at
+  /// https://developers.google.com/maps/documentation/utilities/polylinealgorithm
+  static List<LatLng> _decodePolyline(String encoded) {
+    final points = <LatLng>[];
+    int index = 0, lat = 0, lng = 0;
+    while (index < encoded.length) {
+      int shift = 0, result = 0, b;
+      do {
+        b = encoded.codeUnitAt(index++) - 63;
+        result |= (b & 0x1f) << shift;
+        shift += 5;
+      } while (b >= 0x20);
+      final dlat = (result & 1) != 0 ? ~(result >> 1) : (result >> 1);
+      lat += dlat;
+
+      shift = 0;
+      result = 0;
+      do {
+        b = encoded.codeUnitAt(index++) - 63;
+        result |= (b & 0x1f) << shift;
+        shift += 5;
+      } while (b >= 0x20);
+      final dlng = (result & 1) != 0 ? ~(result >> 1) : (result >> 1);
+      lng += dlng;
+
+      points.add(LatLng(lat / 1e5, lng / 1e5));
+    }
+    return points;
   }
 }

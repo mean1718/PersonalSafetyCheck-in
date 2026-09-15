@@ -58,7 +58,7 @@ class UpdateCaseScreen extends StatelessWidget {
                     Navigator.pushReplacementNamed(context, '/case-resolved');
                   },
                   style: ElevatedButton.styleFrom(
-                      backgroundColor: AppColors.navy,
+                      backgroundColor: AppColors.primaryButton,
                       shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(26))),
                   child: const Text('Mark as Resolved',

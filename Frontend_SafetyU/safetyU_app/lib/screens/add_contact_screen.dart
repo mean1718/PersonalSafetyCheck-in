@@ -231,7 +231,7 @@ class _AddContactScreenState extends State<AddContactScreen> {
                           child: ElevatedButton(
                             onPressed: _isSubmitting ? null : _sendRequest,
                             style: ElevatedButton.styleFrom(
-                              backgroundColor: AppColors.navy,
+                              backgroundColor: AppColors.primaryButton,
                               shape: RoundedRectangleBorder(
                                   borderRadius: BorderRadius.circular(25)),
                             ),

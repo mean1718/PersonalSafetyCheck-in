@@ -203,21 +203,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
         elevation: 0,
         foregroundColor: AppColors.textPrimary,
         automaticallyImplyLeading: false,
-        title: const Text('Setting',
-            style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700)),
-        actions: [
-          Padding(
-            padding: const EdgeInsets.only(right: 12),
-            child: Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: AppColors.navy.withValues(alpha: 0.08),
-                shape: BoxShape.circle,
-              ),
-              child: Icon(Icons.settings, size: 18, color: AppColors.navy),
-            ),
-          ),
-        ],
       ),
       body: SafeArea(
         child: ListView(

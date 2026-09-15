@@ -1,8 +1,8 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:flutter_map/flutter_map.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
+import '../services/marker_icons.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:latlong2/latlong.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../theme/app_theme.dart';
@@ -25,11 +25,27 @@ class EmergencySosScreen extends StatefulWidget {
 }
 
 class _EmergencySosScreenState extends State<EmergencySosScreen> {
-  final MapController _mapController = MapController();
+  GoogleMapController? _mapController;
   StreamSubscription<Position>? _positionSub;
   LatLng? _currentPosition;
   String? _locationStatusMessage;
   bool _sosSent = false;
+  BitmapDescriptor? _meIcon;
+  bool _markerIconsRequested = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // BitmapDescriptor.defaultMarkerWithHue doesn't render on web — load a
+    // real pin image instead, same as every other map screen.
+    if (!_markerIconsRequested) {
+      _markerIconsRequested = true;
+      MarkerIcons.me(context).then((icon) {
+        if (!mounted) return;
+        setState(() => _meIcon = icon);
+      });
+    }
+  }
 
   @override
   void initState() {
@@ -75,7 +91,9 @@ class _EmergencySosScreenState extends State<EmergencySosScreen> {
         _currentPosition = LatLng(initial.latitude, initial.longitude);
         _locationStatusMessage = null;
       });
-      _mapController.move(_currentPosition!, 16.0);
+      _mapController?.animateCamera(
+        CameraUpdate.newLatLngZoom(_currentPosition!, 16.0),
+      );
     } catch (_) {
       _setLocationStatus('Could not get your current location.');
     }
@@ -279,30 +297,22 @@ class _EmergencySosScreenState extends State<EmergencySosScreen> {
                 borderRadius: BorderRadius.circular(16),
                 child: SizedBox(
                   height: 200,
-                  child: FlutterMap(
-                    mapController: _mapController,
-                    options: MapOptions(
-                      initialCenter:
+                  child: GoogleMap(
+                    onMapCreated: (c) => _mapController = c,
+                    initialCameraPosition: CameraPosition(
+                      target:
                           _currentPosition ?? const LatLng(11.5696, 104.9210),
-                      initialZoom: 15.0,
+                      zoom: 15.0,
                     ),
-                    children: [
-                      TileLayer(
-                        urlTemplate:
-                            'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                        userAgentPackageName: 'com.safetyu.app',
-                      ),
-                      if (_currentPosition != null)
-                        MarkerLayer(
-                          markers: [
+                    markers: _currentPosition == null
+                        ? {}
+                        : {
                             Marker(
-                              point: _currentPosition!,
-                              child: const Icon(Icons.my_location,
-                                  color: Colors.blueAccent, size: 32),
+                              markerId: const MarkerId('me'),
+                              position: _currentPosition!,
+                              icon: _meIcon ?? BitmapDescriptor.defaultMarker,
                             ),
-                          ],
-                        ),
-                    ],
+                          },
                   ),
                 ),
               ),

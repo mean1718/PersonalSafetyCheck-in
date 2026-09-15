@@ -144,7 +144,7 @@ const respond = (status) => async (req, res) => {
             name: receiver.name,
             phone: receiver.phone,
             email: receiver.email,
-            relationship: "Trusted Contact",
+            relationship: request.relationship,
             priority: "secondary",
             availability: "available",
             isActive: true,

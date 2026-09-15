@@ -292,7 +292,7 @@ class _SelectContactsScreenState extends State<SelectContactsScreen> {
                               icon: const Icon(Icons.add, size: 18),
                               label: const Text('Add a Friend'),
                               style: ElevatedButton.styleFrom(
-                                backgroundColor: AppColors.navy,
+                                backgroundColor: AppColors.primaryButton,
                                 minimumSize: const Size(0, 46),
                                 padding:
                                     const EdgeInsets.symmetric(horizontal: 20),
@@ -455,7 +455,7 @@ class _SelectContactsScreenState extends State<SelectContactsScreen> {
                             ? _onConfirm
                             : null,
                         style: ElevatedButton.styleFrom(
-                            backgroundColor: AppColors.navy,
+                            backgroundColor: AppColors.primaryButton,
                             disabledBackgroundColor:
                                 AppColors.navy.withValues(alpha: 0.35),
                             shape: RoundedRectangleBorder(
