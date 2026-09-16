@@ -7,13 +7,6 @@ import '../services/app_session.dart';
 import '../services/api_client.dart';
 import '../services/payment_service.dart';
 
-/// Shown when the person tries to notify more contacts than the free plan
-/// allows.
-///
-/// Returns:
-/// - 'pro' if Pro payment succeeds
-/// - 'pay' if Pay Per Contact payment succeeds
-/// - null if the dialog is closed/cancelled
 Future<String?> showLimitReachedDialog(
   BuildContext context, {
   required int selectedMain,
@@ -30,17 +23,6 @@ Future<String?> showLimitReachedDialog(
   );
 }
 
-/// Shown when the person just wants to browse/manage plans — e.g. tapping
-/// the "Protected" status card on Home, or a CTA inside the inline plan
-/// carousel embedded in that same card — rather than having hit the
-/// contact-notification cap. Same plan picker, QR scan, and payment flow as
-/// [showLimitReachedDialog], just without the "you've reached the limit"
-/// framing.
-///
-/// Returns:
-/// - 'pro' if Pro payment succeeds
-/// - 'pay' if Pay Per Contact payment succeeds
-/// - null if the dialog is closed/cancelled
 Future<String?> showPlansDialog(BuildContext context) {
   return showDialog<String>(
     context: context,
@@ -55,12 +37,6 @@ Future<String?> showPlansDialog(BuildContext context) {
 
 const double _pricePerContact = 0.20;
 
-/// Cambodia commonly prices things in either USD or KHR (Riel) side by
-/// side. `_usdToKhrRate` is only used to show an *estimated* KHR figure on
-/// the plan-picker/summary screens before a real payment has been created.
-/// Once a real KHQR payment exists, the amount actually shown on the scan
-/// screen should come from the backend response (`PendingPayment`), not
-/// this local conversion — see the TODO further down.
 enum _Currency { usd, khr }
 
 const double _usdToKhrRate = 4100;
@@ -148,10 +124,6 @@ enum _LimitStep {
 class _LimitReachedDialog extends StatefulWidget {
   final int selectedMain;
   final int selectedOther;
-  // False when opened as a general "View Plans" browse (e.g. from the Home
-  // status card) rather than because a contact-notification cap was hit —
-  // swaps the "you've reached the limit" copy for a plain plan picker and
-  // hides the selected-contacts box, which has nothing to show in that case.
   final bool triggeredByLimit;
 
   const _LimitReachedDialog({
@@ -177,25 +149,9 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
   // that currency (see the TODO on _beginProPayment/_beginPayPayment).
   _Currency _currency = _Currency.usd;
 
-  // Chosen quantities when this dialog is opened as a general "View Plans"
-  // browse (Home's status card / "See All Plans") rather than because an
-  // actual notify-list exceeded the free cap — i.e. widget.triggeredByLimit
-  // is false. In that case widget.selectedMain/selectedOther are always 0
-  // (showPlansDialog passes 0, 0), so there is nothing to derive "extra"
-  // contacts from. Without these, Pay Per Contact opened from the
-  // dashboard always computed 0 extra contacts and its "Continue to
-  // Payment" button stayed permanently disabled — the person had no way
-  // to say how many slots they wanted. These let them pick the quantity
-  // directly via the steppers on the summary screen.
   int _manualExtraMain = 0;
   int _manualExtraOther = 0;
 
-  /// Number of extra Main/Other contact slots being purchased.
-  /// - triggeredByLimit: derived from how many contacts they actually
-  ///   tried to notify past the free cap (the old behavior).
-  /// - browse mode (opened from Home): there's no over-the-cap list to
-  ///   derive from, so this reflects what the person picked with the
-  ///   quantity steppers instead.
   (int, int) get _extraCounts {
     if (widget.triggeredByLimit) {
       return (
@@ -225,9 +181,6 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
     return 'Something went wrong creating the payment. Please try again.';
   }
 
-  /// Polls the backend every 3s for whether the KHQR on screen has actually
-  /// been paid yet (the backend checks the live Bakong network). Stops
-  /// itself once the payment settles, expires, or the dialog is closed.
   void _startPolling({required VoidCallback onPaid}) {
     _pollTimer?.cancel();
     _pollTimer = Timer.periodic(const Duration(seconds: 3), (_) async {
@@ -633,7 +586,7 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
               });
             },
             style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.primaryButton,
+              backgroundColor: AppColors.navy,
               minimumSize: const Size(0, 46),
             ),
             child: const Text('View Options'),
@@ -746,7 +699,7 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
               Navigator.pop(context, null);
             },
             style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.primaryButton,
+              backgroundColor: AppColors.navy,
               minimumSize: const Size(0, 46),
             ),
             child: const Text('Continue with Free Plan'),
@@ -880,7 +833,7 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
           child: ElevatedButton(
             onPressed: _beginProPayment,
             style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.primaryButton,
+              backgroundColor: AppColors.navy,
               minimumSize: const Size(0, 46),
             ),
             child: const Text('Continue to Payment'),
@@ -970,32 +923,6 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
           ),
         ],
         const SizedBox(height: 18),
-<<<<<<< HEAD
-        Container(
-          padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(
-              color: AppColors.border,
-            ),
-          ),
-          child: _QrCode(
-            seed: (_proMonthlyPrice * 100).round(),
-            size: 180,
-          ),
-        ),
-        const SizedBox(height: 16),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            SizedBox(
-              width: 16,
-              height: 16,
-              child: CircularProgressIndicator(
-                strokeWidth: 2,
-                color: AppColors.navy,
-=======
         _khqrPanel(),
         const SizedBox(height: 16),
         if (_paymentError == null)
@@ -1009,7 +936,6 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
                   strokeWidth: 2,
                   color: AppColors.navy,
                 ),
->>>>>>> 49286aee28729612422d3516363fae67ce924fb7
               ),
               const SizedBox(width: 10),
               Text(
@@ -1022,11 +948,6 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
                   color: AppColors.textSecondary,
                 ),
               ),
-<<<<<<< HEAD
-            ),
-          ],
-        ),
-=======
             ],
           )
         else
@@ -1035,7 +956,6 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
             textAlign: TextAlign.center,
             style: const TextStyle(fontSize: 12, color: Colors.red),
           ),
->>>>>>> 49286aee28729612422d3516363fae67ce924fb7
         const SizedBox(height: 8),
         Text(
           'Open your Bakong-linked banking or e-wallet app and scan this '
@@ -1139,7 +1059,7 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
           child: ElevatedButton(
             onPressed: () => Navigator.pop(context, 'pro'),
             style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.primaryButton,
+              backgroundColor: AppColors.navy,
               minimumSize: const Size(0, 46),
             ),
             child: const Text('Continue'),
@@ -1427,32 +1347,6 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
           ),
         ),
         const SizedBox(height: 18),
-<<<<<<< HEAD
-        Container(
-          padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(
-              color: AppColors.border,
-            ),
-          ),
-          child: _QrCode(
-            seed: (total * 100).round(),
-            size: 180,
-          ),
-        ),
-        const SizedBox(height: 16),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            SizedBox(
-              width: 16,
-              height: 16,
-              child: CircularProgressIndicator(
-                strokeWidth: 2,
-                color: AppColors.navy,
-=======
         _khqrPanel(),
         const SizedBox(height: 16),
         if (_paymentError == null)
@@ -1466,7 +1360,6 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
                   strokeWidth: 2,
                   color: AppColors.navy,
                 ),
->>>>>>> 49286aee28729612422d3516363fae67ce924fb7
               ),
               const SizedBox(width: 10),
               Text(
@@ -1479,11 +1372,6 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
                   color: AppColors.textSecondary,
                 ),
               ),
-<<<<<<< HEAD
-            ),
-          ],
-        ),
-=======
             ],
           )
         else
@@ -1492,7 +1380,6 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
             textAlign: TextAlign.center,
             style: const TextStyle(fontSize: 12, color: Colors.red),
           ),
->>>>>>> 49286aee28729612422d3516363fae67ce924fb7
         const SizedBox(height: 8),
         Text(
           'Open your Bakong-linked banking or e-wallet app and scan this '
@@ -1616,7 +1503,7 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
           child: ElevatedButton(
             onPressed: () => Navigator.pop(context, 'pay'),
             style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.primaryButton,
+              backgroundColor: AppColors.navy,
               minimumSize: const Size(0, 46),
             ),
             child: const Text('Continue'),
@@ -1928,31 +1815,6 @@ class _PlanOption extends StatelessWidget {
     );
   }
 }
-<<<<<<< HEAD
-<<<<<<< HEAD
-
-// ===========================================================================
-// QR CODE
-// ===========================================================================
-
-class _QrCode extends StatelessWidget {
-  final int seed;
-  final double size;
-
-  const _QrCode({
-    required this.seed,
-    required this.size,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      width: size,
-      height: size,
-      child: CustomPaint(
-        painter: _QrPainter(
-          seed: seed,
-=======
 
 // ===========================================================================
 // PLAN PROMO SLIDES — shared data for both the inline carousel (embedded in
@@ -2150,134 +2012,12 @@ class _PlanPromoInlineCardState extends State<PlanPromoInlineCard> {
               ),
             ),
           ],
->>>>>>> 0807a06ae082dca191b691f6e568ebef76f483d5
         ),
       ),
     );
   }
 }
 
-<<<<<<< HEAD
-// ===========================================================================
-// QR PAINTER
-// ===========================================================================
-
-class _QrPainter extends CustomPainter {
-  final int seed;
-
-  static const int _grid = 21;
-
-  _QrPainter({
-    required this.seed,
-  });
-
-  @override
-  void paint(
-    Canvas canvas,
-    Size size,
-  ) {
-    final cell = size.width / _grid;
-    final random = Random(seed);
-
-    final paint = Paint()..color = const Color(0xFF0B1F3A);
-
-    // White background
-    canvas.drawRect(
-      Offset.zero & size,
-      Paint()..color = Colors.white,
-    );
-
-    // Finder pattern positions
-    bool isFinder(
-      int r,
-      int c,
-    ) {
-      const positions = [
-        [0, 0],
-        [0, _grid - 7],
-        [_grid - 7, 0],
-      ];
-
-      for (final p in positions) {
-        if (r >= p[0] && r < p[0] + 7 && c >= p[1] && c < p[1] + 7) {
-          return true;
-        }
-      }
-
-      return false;
-    }
-
-    // Draw finder pattern
-    void drawFinder(
-      int r,
-      int c,
-    ) {
-      canvas.drawRect(
-        Rect.fromLTWH(
-          c * cell,
-          r * cell,
-          cell * 7,
-          cell * 7,
-        ),
-        paint,
-      );
-
-      canvas.drawRect(
-        Rect.fromLTWH(
-          (c + 1) * cell,
-          (r + 1) * cell,
-          cell * 5,
-          cell * 5,
-        ),
-        Paint()..color = Colors.white,
-      );
-
-      canvas.drawRect(
-        Rect.fromLTWH(
-          (c + 2) * cell,
-          (r + 2) * cell,
-          cell * 3,
-          cell * 3,
-        ),
-        paint,
-      );
-    }
-
-    // Random QR-like blocks
-    for (var r = 0; r < _grid; r++) {
-      for (var c = 0; c < _grid; c++) {
-        if (isFinder(r, c)) continue;
-
-        if (random.nextDouble() < 0.42) {
-          canvas.drawRect(
-            Rect.fromLTWH(
-              c * cell,
-              r * cell,
-              cell,
-              cell,
-            ),
-            paint,
-          );
-        }
-      }
-    }
-
-    // Finder patterns
-    drawFinder(0, 0);
-    drawFinder(0, _grid - 7);
-    drawFinder(_grid - 7, 0);
-  }
-
-  @override
-  bool shouldRepaint(
-    covariant _QrPainter oldDelegate,
-  ) {
-    return oldDelegate.seed != seed;
-  }
-}
-=======
->>>>>>> 49286aee28729612422d3516363fae67ce924fb7
-=======
 class _InlinePromoSlideView extends StatelessWidget {
   final _PlanPromoSlide slide;
   final VoidCallback onCta;
@@ -2557,4 +2297,3 @@ class _PromoArrow extends StatelessWidget {
     );
   }
 }
->>>>>>> 0807a06ae082dca191b691f6e568ebef76f483d5
