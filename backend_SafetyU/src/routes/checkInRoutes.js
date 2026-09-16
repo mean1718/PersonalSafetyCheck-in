@@ -6,6 +6,7 @@ const {
   getSessionTrustedContacts,
   startCheckIn,
   completeCheckIn,
+  completeAllMyActiveCheckIns,
   getMyCheckIns,
   getAlertStatus,
   updateLocation,
@@ -18,6 +19,9 @@ router.get("/trusted-contacts", protect, getSessionTrustedContacts);
 
 // Start check-in
 router.post("/", protect, startCheckIn);
+
+// One-time cleanup: complete every one of MY OWN stuck-active check-ins.
+router.post("/complete-all-active", protect, completeAllMyActiveCheckIns);
 
 // Complete check-in
 router.put("/:id/complete", protect, completeCheckIn);

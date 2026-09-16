@@ -215,6 +215,10 @@ class _ChatScreenState extends State<ChatScreen> {
             _ChatInputBar(
               controller: _controller,
               onSend: () => _send(),
+              onSendHelp: () => _send(
+                presetText: 'Need Help',
+                kind: ChatMessageKind.helpRequest,
+              ),
               onSendSafe: () => _send(
                 presetText: 'Safe',
                 kind: ChatMessageKind.safeCheckIn,
@@ -251,7 +255,7 @@ class _EmptyChat extends StatelessWidget {
             ),
             const SizedBox(height: 6),
             Text(
-              'Say hello to $contactName, or send a quick "Safe" check-in.',
+              'Say hello to $contactName, or send a quick "Safe" or "Need Help" check-in.',
               textAlign: TextAlign.center,
               style: TextStyle(
                   fontSize: 12.5, color: AppColors.textSecondary, height: 1.4),
@@ -389,11 +393,13 @@ class _MessageBubble extends StatelessWidget {
 class _ChatInputBar extends StatelessWidget {
   final TextEditingController controller;
   final VoidCallback onSend;
+  final VoidCallback onSendHelp;
   final VoidCallback onSendSafe;
 
   const _ChatInputBar({
     required this.controller,
     required this.onSend,
+    required this.onSendHelp,
     required this.onSendSafe,
   });
 
@@ -407,63 +413,102 @@ class _ChatInputBar extends StatelessWidget {
       ),
       child: SafeArea(
         top: false,
-        child: Row(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
           children: [
-            GestureDetector(
-              onTap: onSendSafe,
-              child: Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                decoration: BoxDecoration(
-                  color: AppColors.success.withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(Icons.check_circle_outline,
-                        size: 16, color: AppColors.success),
-                    const SizedBox(width: 4),
-                    Text('Safe',
-                        style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w700,
-                            color: AppColors.success)),
-                  ],
-                ),
-              ),
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: TextField(
-                controller: controller,
-                textInputAction: TextInputAction.send,
-                onSubmitted: (_) => onSend(),
-                decoration: InputDecoration(
-                  hintText: 'Message...',
-                  filled: true,
-                  fillColor: AppColors.background,
-                  contentPadding:
-                      const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(24),
-                    borderSide: BorderSide.none,
+            Row(
+              children: [
+                Expanded(
+                  child: GestureDetector(
+                    onTap: onSendHelp,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(vertical: 8),
+                      decoration: BoxDecoration(
+                        color: AppColors.danger.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.error_outline,
+                              size: 16, color: AppColors.danger),
+                          const SizedBox(width: 4),
+                          Text('Need Help',
+                              style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w700,
+                                  color: AppColors.danger)),
+                        ],
+                      ),
+                    ),
                   ),
                 ),
-              ),
-            ),
-            const SizedBox(width: 8),
-            GestureDetector(
-              onTap: onSend,
-              child: Container(
-                width: 42,
-                height: 42,
-                decoration: BoxDecoration(
-                  color: AppColors.navy,
-                  shape: BoxShape.circle,
+                const SizedBox(width: 8),
+                Expanded(
+                  child: GestureDetector(
+                    onTap: onSendSafe,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(vertical: 8),
+                      decoration: BoxDecoration(
+                        color: AppColors.success.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.check_circle_outline,
+                              size: 16, color: AppColors.success),
+                          const SizedBox(width: 4),
+                          Text('Safe',
+                              style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w700,
+                                  color: AppColors.success)),
+                        ],
+                      ),
+                    ),
+                  ),
                 ),
-                child: const Icon(Icons.send, color: Colors.white, size: 18),
-              ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: controller,
+                    textInputAction: TextInputAction.send,
+                    onSubmitted: (_) => onSend(),
+                    decoration: InputDecoration(
+                      hintText: 'Message...',
+                      filled: true,
+                      fillColor: AppColors.background,
+                      contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 16, vertical: 12),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(24),
+                        borderSide: BorderSide.none,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                GestureDetector(
+                  onTap: onSend,
+                  child: Container(
+                    width: 42,
+                    height: 42,
+                    decoration: BoxDecoration(
+                      color: AppColors.navy,
+                      shape: BoxShape.circle,
+                    ),
+                    child:
+                        const Icon(Icons.send, color: Colors.white, size: 18),
+                  ),
+                ),
+              ],
             ),
           ],
         ),

@@ -196,7 +196,7 @@ class _EditContactScreenState extends State<EditContactScreen> {
                           child: ElevatedButton(
                             onPressed: _saveContact,
                             style: ElevatedButton.styleFrom(
-                              backgroundColor: AppColors.navy,
+                              backgroundColor: AppColors.primaryButton,
                               shape: RoundedRectangleBorder(
                                   borderRadius: BorderRadius.circular(25)),
                             ),

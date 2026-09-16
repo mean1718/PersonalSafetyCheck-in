@@ -51,12 +51,6 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
                 fontSize: 20,
                 fontWeight: FontWeight.w800,
                 color: AppColors.textPrimary)),
-        actions: const [
-          Padding(
-            padding: EdgeInsets.only(right: 16),
-            child: HeaderAccent(),
-          ),
-        ],
       ),
       body: SafeArea(
         child: Column(

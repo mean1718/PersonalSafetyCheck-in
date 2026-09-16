@@ -1,5 +1,5 @@
 import 'package:flutter/foundation.dart';
-import 'package:latlong2/latlong.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
 import '../models/contact.dart';
 import '../models/user_role.dart';
 import '../models/session_record.dart';

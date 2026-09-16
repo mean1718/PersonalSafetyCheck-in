@@ -1,4 +1,4 @@
-import 'package:latlong2/latlong.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
 
 /// Lifecycle of a real escalated incident, as an officer works it.
 enum IncidentStatus { newCase, inProgress, resolved }

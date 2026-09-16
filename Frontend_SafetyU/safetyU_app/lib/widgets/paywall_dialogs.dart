@@ -633,7 +633,7 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
               });
             },
             style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.navy,
+              backgroundColor: AppColors.primaryButton,
               minimumSize: const Size(0, 46),
             ),
             child: const Text('View Options'),
@@ -746,7 +746,7 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
               Navigator.pop(context, null);
             },
             style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.navy,
+              backgroundColor: AppColors.primaryButton,
               minimumSize: const Size(0, 46),
             ),
             child: const Text('Continue with Free Plan'),
@@ -880,7 +880,7 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
           child: ElevatedButton(
             onPressed: _beginProPayment,
             style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.navy,
+              backgroundColor: AppColors.primaryButton,
               minimumSize: const Size(0, 46),
             ),
             child: const Text('Continue to Payment'),
@@ -970,6 +970,32 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
           ),
         ],
         const SizedBox(height: 18),
+<<<<<<< HEAD
+        Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: AppColors.border,
+            ),
+          ),
+          child: _QrCode(
+            seed: (_proMonthlyPrice * 100).round(),
+            size: 180,
+          ),
+        ),
+        const SizedBox(height: 16),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            SizedBox(
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: AppColors.navy,
+=======
         _khqrPanel(),
         const SizedBox(height: 16),
         if (_paymentError == null)
@@ -983,6 +1009,7 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
                   strokeWidth: 2,
                   color: AppColors.navy,
                 ),
+>>>>>>> 49286aee28729612422d3516363fae67ce924fb7
               ),
               const SizedBox(width: 10),
               Text(
@@ -995,6 +1022,11 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
                   color: AppColors.textSecondary,
                 ),
               ),
+<<<<<<< HEAD
+            ),
+          ],
+        ),
+=======
             ],
           )
         else
@@ -1003,6 +1035,7 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
             textAlign: TextAlign.center,
             style: const TextStyle(fontSize: 12, color: Colors.red),
           ),
+>>>>>>> 49286aee28729612422d3516363fae67ce924fb7
         const SizedBox(height: 8),
         Text(
           'Open your Bakong-linked banking or e-wallet app and scan this '
@@ -1106,7 +1139,7 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
           child: ElevatedButton(
             onPressed: () => Navigator.pop(context, 'pro'),
             style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.navy,
+              backgroundColor: AppColors.primaryButton,
               minimumSize: const Size(0, 46),
             ),
             child: const Text('Continue'),
@@ -1394,6 +1427,32 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
           ),
         ),
         const SizedBox(height: 18),
+<<<<<<< HEAD
+        Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: AppColors.border,
+            ),
+          ),
+          child: _QrCode(
+            seed: (total * 100).round(),
+            size: 180,
+          ),
+        ),
+        const SizedBox(height: 16),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            SizedBox(
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: AppColors.navy,
+=======
         _khqrPanel(),
         const SizedBox(height: 16),
         if (_paymentError == null)
@@ -1407,6 +1466,7 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
                   strokeWidth: 2,
                   color: AppColors.navy,
                 ),
+>>>>>>> 49286aee28729612422d3516363fae67ce924fb7
               ),
               const SizedBox(width: 10),
               Text(
@@ -1419,6 +1479,11 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
                   color: AppColors.textSecondary,
                 ),
               ),
+<<<<<<< HEAD
+            ),
+          ],
+        ),
+=======
             ],
           )
         else
@@ -1427,6 +1492,7 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
             textAlign: TextAlign.center,
             style: const TextStyle(fontSize: 12, color: Colors.red),
           ),
+>>>>>>> 49286aee28729612422d3516363fae67ce924fb7
         const SizedBox(height: 8),
         Text(
           'Open your Bakong-linked banking or e-wallet app and scan this '
@@ -1550,7 +1616,7 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
           child: ElevatedButton(
             onPressed: () => Navigator.pop(context, 'pay'),
             style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.navy,
+              backgroundColor: AppColors.primaryButton,
               minimumSize: const Size(0, 46),
             ),
             child: const Text('Continue'),
@@ -1862,6 +1928,31 @@ class _PlanOption extends StatelessWidget {
     );
   }
 }
+<<<<<<< HEAD
+<<<<<<< HEAD
+
+// ===========================================================================
+// QR CODE
+// ===========================================================================
+
+class _QrCode extends StatelessWidget {
+  final int seed;
+  final double size;
+
+  const _QrCode({
+    required this.seed,
+    required this.size,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: size,
+      height: size,
+      child: CustomPaint(
+        painter: _QrPainter(
+          seed: seed,
+=======
 
 // ===========================================================================
 // PLAN PROMO SLIDES — shared data for both the inline carousel (embedded in
@@ -2059,12 +2150,134 @@ class _PlanPromoInlineCardState extends State<PlanPromoInlineCard> {
               ),
             ),
           ],
+>>>>>>> 0807a06ae082dca191b691f6e568ebef76f483d5
         ),
       ),
     );
   }
 }
 
+<<<<<<< HEAD
+// ===========================================================================
+// QR PAINTER
+// ===========================================================================
+
+class _QrPainter extends CustomPainter {
+  final int seed;
+
+  static const int _grid = 21;
+
+  _QrPainter({
+    required this.seed,
+  });
+
+  @override
+  void paint(
+    Canvas canvas,
+    Size size,
+  ) {
+    final cell = size.width / _grid;
+    final random = Random(seed);
+
+    final paint = Paint()..color = const Color(0xFF0B1F3A);
+
+    // White background
+    canvas.drawRect(
+      Offset.zero & size,
+      Paint()..color = Colors.white,
+    );
+
+    // Finder pattern positions
+    bool isFinder(
+      int r,
+      int c,
+    ) {
+      const positions = [
+        [0, 0],
+        [0, _grid - 7],
+        [_grid - 7, 0],
+      ];
+
+      for (final p in positions) {
+        if (r >= p[0] && r < p[0] + 7 && c >= p[1] && c < p[1] + 7) {
+          return true;
+        }
+      }
+
+      return false;
+    }
+
+    // Draw finder pattern
+    void drawFinder(
+      int r,
+      int c,
+    ) {
+      canvas.drawRect(
+        Rect.fromLTWH(
+          c * cell,
+          r * cell,
+          cell * 7,
+          cell * 7,
+        ),
+        paint,
+      );
+
+      canvas.drawRect(
+        Rect.fromLTWH(
+          (c + 1) * cell,
+          (r + 1) * cell,
+          cell * 5,
+          cell * 5,
+        ),
+        Paint()..color = Colors.white,
+      );
+
+      canvas.drawRect(
+        Rect.fromLTWH(
+          (c + 2) * cell,
+          (r + 2) * cell,
+          cell * 3,
+          cell * 3,
+        ),
+        paint,
+      );
+    }
+
+    // Random QR-like blocks
+    for (var r = 0; r < _grid; r++) {
+      for (var c = 0; c < _grid; c++) {
+        if (isFinder(r, c)) continue;
+
+        if (random.nextDouble() < 0.42) {
+          canvas.drawRect(
+            Rect.fromLTWH(
+              c * cell,
+              r * cell,
+              cell,
+              cell,
+            ),
+            paint,
+          );
+        }
+      }
+    }
+
+    // Finder patterns
+    drawFinder(0, 0);
+    drawFinder(0, _grid - 7);
+    drawFinder(_grid - 7, 0);
+  }
+
+  @override
+  bool shouldRepaint(
+    covariant _QrPainter oldDelegate,
+  ) {
+    return oldDelegate.seed != seed;
+  }
+}
+=======
+>>>>>>> 49286aee28729612422d3516363fae67ce924fb7
+=======
 class _InlinePromoSlideView extends StatelessWidget {
   final _PlanPromoSlide slide;
   final VoidCallback onCta;
@@ -2344,3 +2557,4 @@ class _PromoArrow extends StatelessWidget {
     );
   }
 }
+>>>>>>> 0807a06ae082dca191b691f6e568ebef76f483d5

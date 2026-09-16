@@ -103,6 +103,28 @@ const startCheckIn = async (req, res) => {
   }
 };
 
+// One-time cleanup for sessions that got stuck "active" forever because of
+// the race condition where Safe was confirmed before the app had received
+// its checkInId back from the server (fixed on the client now, but this is
+// what lets someone clear out whatever already got stuck from before that
+// fix existed) — completes every one of the caller's own still-active/
+// emergency check-ins at once.
+const completeAllMyActiveCheckIns = async (req, res) => {
+  try {
+    const result = await CheckIn.updateMany(
+      { user: req.user.id, status: { $in: ["active", "emergency"] } },
+      { $set: { status: "completed", completedAt: new Date() } },
+    );
+    return res.json({
+      message: "Stuck sessions cleared.",
+      matched: result.matchedCount ?? result.n,
+      modified: result.modifiedCount ?? result.nModified,
+    });
+  } catch (error) {
+    return res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
+
 // Complete a safety check-in
 const completeCheckIn = async (req, res) => {
   try {
@@ -372,6 +394,7 @@ module.exports = {
   getSessionTrustedContacts,
   startCheckIn,
   completeCheckIn,
+  completeAllMyActiveCheckIns,
   getMyCheckIns,
   getAlertStatus,
   updateLocation,

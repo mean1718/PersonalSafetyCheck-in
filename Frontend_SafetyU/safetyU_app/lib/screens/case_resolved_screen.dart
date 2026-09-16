@@ -44,7 +44,7 @@ class CaseResolvedScreen extends StatelessWidget {
                   onPressed: () => Navigator.pushNamedAndRemoveUntil(
                       context, '/cases', (route) => route.isFirst),
                   style: ElevatedButton.styleFrom(
-                      backgroundColor: AppColors.navy,
+                      backgroundColor: AppColors.primaryButton,
                       shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(26))),
                   child: const Text('Done',

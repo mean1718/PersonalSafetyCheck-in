@@ -20,15 +20,22 @@ const getMyActiveSafetyAlerts = async (req, res) => {
       .populate("checkIn", "status message startedAt")
       .sort({ createdAt: -1 });
     const alerts = notifications
-      .filter((notification) => notification.checkIn && ["active", "emergency"].includes(notification.checkIn.status))
+      .filter((notification) =>
+        notification.checkIn
+          ? ["active", "emergency"].includes(notification.checkIn.status)
+          // No session behind this one (a "Need Help" sent from chat) —
+          // it's active until the sender confirms Safe, not until a
+          // CheckIn status changes.
+          : !notification.resolved,
+      )
       .map((notification) => ({
         notificationId: notification._id,
-        sessionId: notification.checkIn._id,
+        sessionId: notification.checkIn?._id || null,
         ownerUserId: notification.sender?._id,
         ownerName: notification.sender?.name || "A trusted contact",
         ownerPhone: notification.sender?.phone || "",
-        sessionStatus: notification.checkIn.status,
-        message: notification.checkIn.message || notification.message,
+        sessionStatus: notification.checkIn?.status || null,
+        message: notification.checkIn?.message || notification.message,
         notifiedAt: notification.createdAt,
         responseStatus: notification.responseStatus || "pending",
         respondedAt: notification.respondedAt || null,

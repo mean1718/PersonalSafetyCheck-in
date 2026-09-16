@@ -16,6 +16,11 @@ class AppColors {
 
   static Color get navy =>
       _dark ? const Color(0xFF3A4472) : const Color(0xFF1C2340);
+  // The sky-blue ring from the SafetyU logo — every primary (filled)
+  // button in the app uses this now, while navy is kept for everything
+  // else (icon badges, borders, selected states, dark backgrounds) so
+  // this stays a deliberate, single change rather than a full re-theme.
+  static Color get primaryButton => const Color(0xFF70B2FC);
   static Color get navyDark =>
       _dark ? const Color(0xFF0E1226) : const Color(0xFF141935);
   static Color get danger =>
@@ -92,7 +97,7 @@ class AppTheme {
       ),
       elevatedButtonTheme: ElevatedButtonThemeData(
         style: ElevatedButton.styleFrom(
-          backgroundColor: AppColors.navy,
+          backgroundColor: AppColors.primaryButton,
           foregroundColor: Colors.white,
           minimumSize: const Size.fromHeight(54),
           shape:

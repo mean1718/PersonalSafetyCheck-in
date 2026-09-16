@@ -43,7 +43,10 @@ class NotificationService {
       // separate "X is safe now" card instead (see
       // recentlyResolvedSafetyAlerts below), rather than staying stuck
       // asking for a response to something that's already resolved.
-      if (checkInStatus == 'completed') continue;
+      // A checkIn-less alert (sent straight from chat) uses the
+      // 'resolved' flag for the same purpose, since there's no session
+      // status to check instead.
+      if (checkInStatus == 'completed' || n['resolved'] == true) continue;
       final id = n['_id']?.toString();
       if (id == null || seenIds.contains(id)) continue;
       final sender = n['sender'] as Map<String, dynamic>?;
@@ -73,7 +76,9 @@ class NotificationService {
     for (final n in all) {
       if (n['type'] != 'safety_alert') continue;
       final checkIn = n['checkIn'] as Map<String, dynamic>?;
-      if (checkIn?['status'] != 'completed') continue;
+      final isResolved =
+          checkIn?['status'] == 'completed' || n['resolved'] == true;
+      if (!isResolved) continue;
       // Already shown once before (marked read) — this is what stops the
       // same "is safe now" card from reappearing on every future login.
       if (n['isRead'] == true) continue;

@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:flutter_map/flutter_map.dart';
-import 'package:latlong2/latlong.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
+import '../services/marker_icons.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../theme/app_theme.dart';
 import '../services/live_location_service.dart';
@@ -24,7 +24,33 @@ class LiveLocationMapScreen extends StatefulWidget {
 }
 
 class _LiveLocationMapScreenState extends State<LiveLocationMapScreen> {
-  final MapController _mapController = MapController();
+  GoogleMapController? _mapController;
+  BitmapDescriptor? _meIcon;
+  BitmapDescriptor? _contactIcon;
+  BitmapDescriptor? _contactSelectedIcon;
+  bool _markerIconsRequested = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // BitmapDescriptor.defaultMarkerWithHue doesn't render on web — load
+    // real pin images instead, same as every other map screen.
+    if (!_markerIconsRequested) {
+      _markerIconsRequested = true;
+      Future.wait([
+        MarkerIcons.me(context),
+        MarkerIcons.contact(context),
+        MarkerIcons.contactSelected(context),
+      ]).then((icons) {
+        if (!mounted) return;
+        setState(() {
+          _meIcon = icons[0];
+          _contactIcon = icons[1];
+          _contactSelectedIcon = icons[2];
+        });
+      });
+    }
+  }
   Timer? _refreshTimer;
 
   List<ContactLocation> _contacts = [];
@@ -114,12 +140,7 @@ class _LiveLocationMapScreenState extends State<LiveLocationMapScreen> {
         _route = route;
         _routing = false;
       });
-      _mapController.fitCamera(
-        CameraFit.coordinates(
-          coordinates: route.points,
-          padding: const EdgeInsets.fromLTRB(40, 120, 40, 220),
-        ),
-      );
+      _fitCameraToRoute(route.points);
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -130,6 +151,27 @@ class _LiveLocationMapScreenState extends State<LiveLocationMapScreen> {
         SnackBar(content: Text('Could not draw a route: $e')),
       );
     }
+  }
+
+  void _fitCameraToRoute(List<LatLng> points) {
+    if (points.isEmpty || _mapController == null) return;
+    var minLat = points.first.latitude, maxLat = points.first.latitude;
+    var minLng = points.first.longitude, maxLng = points.first.longitude;
+    for (final p in points) {
+      if (p.latitude < minLat) minLat = p.latitude;
+      if (p.latitude > maxLat) maxLat = p.latitude;
+      if (p.longitude < minLng) minLng = p.longitude;
+      if (p.longitude > maxLng) maxLng = p.longitude;
+    }
+    _mapController!.animateCamera(
+      CameraUpdate.newLatLngBounds(
+        LatLngBounds(
+          southwest: LatLng(minLat, minLng),
+          northeast: LatLng(maxLat, maxLng),
+        ),
+        60,
+      ),
+    );
   }
 
   Future<void> _openInMapsApp() async {
@@ -187,49 +229,42 @@ class _LiveLocationMapScreenState extends State<LiveLocationMapScreen> {
                 ))
               : Stack(
                   children: [
-                    FlutterMap(
-                      mapController: _mapController,
-                      options: MapOptions(
-                        initialCenter: _myPosition ?? const LatLng(0, 0),
-                        initialZoom: 14,
+                    GoogleMap(
+                      onMapCreated: (c) => _mapController = c,
+                      initialCameraPosition: CameraPosition(
+                        target: _myPosition ?? const LatLng(0, 0),
+                        zoom: 14,
                       ),
-                      children: [
-                        TileLayer(
-                          urlTemplate:
-                              'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                          userAgentPackageName: 'com.safetyu.app',
-                        ),
-                        if (_route != null)
-                          PolylineLayer(polylines: [
-                            Polyline(
-                              points: _route!.points,
-                              strokeWidth: 5,
-                              color: AppColors.navy,
-                            ),
-                          ]),
-                        MarkerLayer(markers: [
-                          if (_myPosition != null)
-                            Marker(
-                              point: _myPosition!,
-                              width: 40,
-                              height: 40,
-                              child: const _MeMarker(),
-                            ),
-                          for (final c in _contacts)
-                            Marker(
-                              point: LatLng(c.latitude, c.longitude),
-                              width: 44,
-                              height: 44,
-                              child: GestureDetector(
-                                onTap: () => _selectContact(c),
-                                child: _ContactMarker(
-                                  initial: c.name.isNotEmpty ? c.name[0] : '?',
-                                  selected: _selected?.contactId == c.contactId,
-                                ),
+                      polylines: _route == null
+                          ? {}
+                          : {
+                              Polyline(
+                                polylineId: const PolylineId('route'),
+                                points: _route!.points,
+                                width: 5,
+                                color: AppColors.navy,
                               ),
-                            ),
-                        ]),
-                      ],
+                            },
+                      markers: {
+                        if (_myPosition != null)
+                          Marker(
+                            markerId: const MarkerId('me'),
+                            position: _myPosition!,
+                            icon: _meIcon ?? BitmapDescriptor.defaultMarker,
+                            infoWindow: const InfoWindow(title: 'You'),
+                          ),
+                        for (final c in _contacts)
+                          Marker(
+                            markerId: MarkerId(c.contactId),
+                            position: LatLng(c.latitude, c.longitude),
+                            icon: (_selected?.contactId == c.contactId
+                                    ? _contactSelectedIcon
+                                    : _contactIcon) ??
+                                BitmapDescriptor.defaultMarker,
+                            infoWindow: InfoWindow(title: c.name),
+                            onTap: () => _selectContact(c),
+                          ),
+                      },
                     ),
                     if (_contacts.isEmpty) const _EmptyStateCard(),
                     Positioned(
@@ -247,45 +282,6 @@ class _LiveLocationMapScreenState extends State<LiveLocationMapScreen> {
                     ),
                   ],
                 ),
-    );
-  }
-}
-
-class _MeMarker extends StatelessWidget {
-  const _MeMarker();
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.blue,
-        shape: BoxShape.circle,
-        border: Border.all(color: Colors.white, width: 3),
-        boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 6)],
-      ),
-      child: const Icon(Icons.person, color: Colors.white, size: 20),
-    );
-  }
-}
-
-class _ContactMarker extends StatelessWidget {
-  final String initial;
-  final bool selected;
-  const _ContactMarker({required this.initial, required this.selected});
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        color: selected ? AppColors.navy : Colors.deepOrange,
-        shape: BoxShape.circle,
-        border: Border.all(color: Colors.white, width: 3),
-        boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 6)],
-      ),
-      alignment: Alignment.center,
-      child: Text(
-        initial.toUpperCase(),
-        style:
-            const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-      ),
     );
   }
 }
@@ -393,7 +389,7 @@ class _BottomPanel extends StatelessWidget {
                 icon: const Icon(Icons.directions),
                 label: const Text('Start navigation'),
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.navy,
+                  backgroundColor: AppColors.primaryButton,
                   foregroundColor: Colors.white,
                   padding: const EdgeInsets.symmetric(vertical: 14),
                 ),

@@ -2,9 +2,10 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
-import 'package:flutter_map/flutter_map.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
+import '../services/marker_icons.dart';
+import '../services/directions_service.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:latlong2/latlong.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -39,7 +40,30 @@ class ActiveSessionScreen extends StatefulWidget {
 class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
   Timer? _timer;
   StreamSubscription<Position>? _positionSub;
-  final MapController _mapController = MapController();
+  GoogleMapController? _mapController;
+  BitmapDescriptor? _meIcon;
+  BitmapDescriptor? _destIcon;
+  bool _markerIconsRequested = false;
+  // The real road-following path to the destination — without this the
+  // map just drew a straight line cutting through whatever was in between.
+  RouteResult? _walkingRoute;
+  int _routeRequestId = 0;
+
+  Future<void> _fetchWalkingRoute() async {
+    if (_currentPosition == null) return;
+    final requestId = ++_routeRequestId;
+    try {
+      final route = await DirectionsService.route(
+        from: _currentPosition!,
+        to: _destinationCoords,
+        walking: true,
+      );
+      if (!mounted || requestId != _routeRequestId) return;
+      setState(() => _walkingRoute = route);
+    } catch (e) {
+      debugPrint('Route fetch failed: $e');
+    }
+  }
 
   bool _isInitialized = false;
 
@@ -56,6 +80,11 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
   bool _hadDelay = false;
   bool _historyLogged = false;
 
+  // Shows the "Trust Confirmed!" popup the first (and only the first)
+  // time a trusted contact actually responds this session — never on a
+  // fixed delay or just because the session started.
+  bool _trustConfirmedDialogShown = false;
+
   // ---- Backend sync (see services/check_in_service.dart and
   // emergency_service.dart) ----
   // Both are best-effort: every session in this screen already works
@@ -63,6 +92,12 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
   // logged in via the backend, etc.) is swallowed rather than shown —
   // it never blocks or changes the local escalation flow above.
   String? _checkInId;
+  // If "I'm Safe" is tapped quickly after starting a session, the network
+  // call that gives us _checkInId might not have finished yet — this lets
+  // _syncSessionEndToBackend wait for it instead of just giving up, which
+  // was leaving the session stuck "active" on the server forever (so the
+  // contact's alert never cleared, even though Safe really was confirmed).
+  Future<String?>? _startBackendCheckInFuture;
   String? _emergencyId;
   bool _emergencyStartInFlight = false;
 
@@ -140,16 +175,27 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
     // Someone confirmed they can help — stop escalating.
     _stageTimer?.cancel();
     setState(() => _isAwaitingResponse = false);
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-          content:
-              Text('${helper.contactName} can help — pausing further alerts.')),
-    );
+    _maybeShowTrustConfirmedDialog();
   }
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    // BitmapDescriptor.defaultMarkerWithHue doesn't render on web — load
+    // real pin images instead, same as every other map screen.
+    if (!_markerIconsRequested) {
+      _markerIconsRequested = true;
+      Future.wait([
+        MarkerIcons.me(context),
+        MarkerIcons.destination(context),
+      ]).then((icons) {
+        if (!mounted) return;
+        setState(() {
+          _meIcon = icons[0];
+          _destIcon = icons[1];
+        });
+      });
+    }
     if (_isInitialized) {
       return;
     }
@@ -229,7 +275,7 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
 
   void _startBackendCheckIn() {
     final pos = AppSession.instance.lastKnownPosition;
-    CheckInService.start(
+    _startBackendCheckInFuture = CheckInService.start(
       contactUserIds: _confirmedNotifyContactIds,
       message: 'Safety session to $_destination',
       latitude: pos?.latitude,
@@ -247,8 +293,10 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
           _startAlertStatusPolling(id);
         }
       }
+      return id;
     }).catchError((e) {
       debugPrint('CheckIn sync skipped: $e');
+      return null;
     });
   }
 
@@ -274,6 +322,7 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
           // right now rather than waiting for its own timer to notice.
           _stageTimer?.cancel();
           setState(() {});
+          _maybeShowTrustConfirmedDialog();
         }
       } catch (e) {
         debugPrint('Alert status poll skipped: $e');
@@ -338,6 +387,13 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
       if (_emergencyId != null) {
         await EmergencyService.resolve(_emergencyId!);
       }
+      // The network call that gives us _checkInId may still be in flight
+      // if Safe was tapped right after starting — wait for it (briefly)
+      // rather than concluding there's no session to complete.
+      _checkInId ??= await _startBackendCheckInFuture?.timeout(
+        const Duration(seconds: 8),
+        onTimeout: () => null,
+      );
       if (_checkInId != null) {
         await CheckInService.complete(_checkInId!);
       }
@@ -505,6 +561,66 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
   bool _someoneConfirmedHelp() => AppSession.instance.currentAlertResponses
       .any((r) => r.status == ContactResponseStatus.canHelp);
 
+  // The popup itself. Its message only ever gets shown from the two call
+  // sites above — both of which only fire once currentAlertResponses has
+  // actually flipped a contact to "canHelp" — so there's no path where
+  // this appears before a trusted contact has genuinely responded.
+  void _maybeShowTrustConfirmedDialog() {
+    if (_trustConfirmedDialogShown || !mounted) return;
+    _trustConfirmedDialogShown = true;
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) {
+        // No "OK" button — this is a quick reassurance, not a decision
+        // the person needs to make, so it clears itself on its own.
+        Future.delayed(const Duration(seconds: 4), () {
+          if (Navigator.of(dialogContext).canPop()) {
+            Navigator.of(dialogContext).pop();
+          }
+        });
+        return Dialog(
+          backgroundColor: Colors.white,
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(28, 32, 28, 28),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 64,
+                  height: 64,
+                  decoration: BoxDecoration(
+                    color: AppColors.success.withValues(alpha: 0.15),
+                    shape: BoxShape.circle,
+                  ),
+                  child:
+                      Icon(Icons.check, color: AppColors.success, size: 32),
+                ),
+                const SizedBox(height: 18),
+                Text('Trust Confirmed!',
+                    style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.w800,
+                        color: AppColors.textPrimary)),
+                const SizedBox(height: 10),
+                Text(
+                  'Your trusted contact has confirmed your alert. They are now aware that you are safe.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                      fontSize: 14,
+                      color: AppColors.textSecondary,
+                      height: 1.4),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   // AppSession.sendChatMessage only ever wrote to this device's own local
   // thread — the trusted contact never actually received "Need Help" or
   // "I'm Safe" at all, they were only ever visible on the sender's own
@@ -512,29 +628,8 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
   void _sendRealChatMessage(String contactId, String text,
       {required ChatMessageKind kind, required String backendKind}) {
     AppSession.instance.sendChatMessage(contactId, text, kind: kind);
-    ChatService.send(contactId, text, kind: backendKind).then((_) {
-      // TODO(debug): remove once delivery is confirmed working.
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            duration: const Duration(seconds: 6),
-            backgroundColor: Colors.green,
-            content: Text('DEBUG: delivered to $contactId'),
-          ),
-        );
-      }
-    }).catchError((e) {
+    ChatService.send(contactId, text, kind: backendKind).catchError((e) {
       debugPrint('Chat delivery skipped: $e');
-      // TODO(debug): remove once delivery is confirmed working.
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            duration: const Duration(seconds: 8),
-            backgroundColor: Colors.red,
-            content: Text('DEBUG: FAILED to $contactId -> $e'),
-          ),
-        );
-      }
     });
   }
 
@@ -779,9 +874,12 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
         _locationStatusMessage = null;
       });
       AppSession.instance.updateLastKnownPosition(initialLatLng);
+      _fetchWalkingRoute();
 
       try {
-        _mapController.move(_currentPosition!, 15.0);
+        _mapController?.animateCamera(
+          CameraUpdate.newLatLngZoom(_currentPosition!, 15.0),
+        );
       } catch (_) {}
 
       _positionSub?.cancel();
@@ -988,45 +1086,46 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
                     margin: const EdgeInsets.all(20),
                     child: ClipRRect(
                       borderRadius: BorderRadius.circular(16),
-                      child: FlutterMap(
-                        mapController: _mapController,
-                        options: MapOptions(
-                            initialCenter:
-                                _currentPosition ?? _destinationCoords,
-                            initialZoom: 15.0),
-                        children: [
-                          TileLayer(
-                            urlTemplate:
-                                'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                            userAgentPackageName: 'com.safetyu.app',
+                      child: GoogleMap(
+                        onMapCreated: (c) => _mapController = c,
+                        initialCameraPosition: CameraPosition(
+                            target: _currentPosition ?? _destinationCoords,
+                            zoom: 15.0),
+                        polylines: _walkingRoute != null
+                            ? {
+                                Polyline(
+                                  polylineId: const PolylineId('to-destination'),
+                                  points: _walkingRoute!.points,
+                                  width: 4,
+                                  color: AppColors.navy,
+                                ),
+                              }
+                            : _currentPosition == null
+                                ? {}
+                                : {
+                                    Polyline(
+                                      polylineId: const PolylineId('to-destination'),
+                                      points: [
+                                        _currentPosition!,
+                                        _destinationCoords,
+                                      ],
+                                      width: 3,
+                                      color: AppColors.navy.withValues(alpha: 0.4),
+                                    ),
+                              },
+                        markers: {
+                          Marker(
+                            markerId: const MarkerId('destination'),
+                            position: _destinationCoords,
+                            icon: _destIcon ?? BitmapDescriptor.defaultMarker,
                           ),
                           if (_currentPosition != null)
-                            PolylineLayer(
-                              polylines: [
-                                Polyline(
-                                    points: [
-                                      _currentPosition!,
-                                      _destinationCoords
-                                    ],
-                                    strokeWidth: 3,
-                                    color:
-                                        AppColors.navy.withValues(alpha: 0.4)),
-                              ],
+                            Marker(
+                              markerId: const MarkerId('me'),
+                              position: _currentPosition!,
+                              icon: _meIcon ?? BitmapDescriptor.defaultMarker,
                             ),
-                          MarkerLayer(
-                            markers: [
-                              Marker(
-                                  point: _destinationCoords,
-                                  child: Icon(Icons.location_on,
-                                      color: AppColors.navy, size: 38)),
-                              if (_currentPosition != null)
-                                Marker(
-                                    point: _currentPosition!,
-                                    child: const Icon(Icons.my_location,
-                                        color: Colors.blueAccent, size: 30)),
-                            ],
-                          ),
-                        ],
+                        },
                       ),
                     ),
                   ),
@@ -1098,7 +1197,7 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
                         child: ElevatedButton(
                           onPressed: _confirmSafe,
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: AppColors.navy,
+                            backgroundColor: AppColors.primaryButton,
                             elevation: 0,
                             shape: RoundedRectangleBorder(
                                 borderRadius: BorderRadius.circular(26)),
@@ -1150,6 +1249,7 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
                                 }
                                 if (newLat != null && newLng != null) {
                                   _destinationCoords = LatLng(newLat, newLng);
+                                  _walkingRoute = null;
                                 }
                                 if (_isAwaitingResponse &&
                                     !_emergencyTriggered) {
@@ -1161,6 +1261,9 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
                                 }
                               });
 
+                              if (newLat != null && newLng != null) {
+                                _fetchWalkingRoute();
+                              }
                               if (extraSeconds > 0 && !_emergencyTriggered) {
                                 _startTimer();
                               }

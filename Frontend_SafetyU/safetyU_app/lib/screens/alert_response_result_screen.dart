@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_map/flutter_map.dart';
-import 'package:latlong2/latlong.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
+import '../services/marker_icons.dart';
 
 import '../theme/app_theme.dart';
 import '../models/contact.dart';
@@ -52,23 +52,26 @@ class AlertResponseResultScreen extends StatelessWidget {
         height: 320,
         child: ClipRRect(
           borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
-          child: FlutterMap(
-            options: MapOptions(initialCenter: location, initialZoom: 15),
-            children: [
-              TileLayer(
-                urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                userAgentPackageName: 'com.safetyu.app',
-              ),
-              MarkerLayer(
-                markers: [
+          child: FutureBuilder<BitmapDescriptor>(
+            // BitmapDescriptor.defaultMarkerWithHue doesn't render on web —
+            // load a real pin image instead. This is a StatelessWidget
+            // shown as a one-off bottom sheet, so a FutureBuilder is used
+            // here rather than the didChangeDependencies pattern the
+            // stateful map screens use.
+            future: MarkerIcons.destination(context),
+            builder: (context, snapshot) {
+              return GoogleMap(
+                initialCameraPosition:
+                    CameraPosition(target: location, zoom: 15),
+                markers: {
                   Marker(
-                    point: location,
-                    child: Icon(Icons.location_on,
-                        color: AppColors.danger, size: 38),
+                    markerId: const MarkerId('requester'),
+                    position: location,
+                    icon: snapshot.data ?? BitmapDescriptor.defaultMarker,
                   ),
-                ],
-              ),
-            ],
+                },
+              );
+            },
           ),
         ),
       ),

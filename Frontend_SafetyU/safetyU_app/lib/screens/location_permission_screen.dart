@@ -105,7 +105,7 @@ class _LocationPermissionScreenState extends State<LocationPermissionScreen> {
                     child: ElevatedButton(
                       onPressed: _requestPermission,
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: AppColors.navy,
+                        backgroundColor: AppColors.primaryButton,
                         shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(26)),
                       ),

@@ -10,8 +10,7 @@ dependencies:
   flutter:
     sdk: flutter
   cupertino_icons: ^1.0.6
-  flutter_map: ^6.1.0
-  latlong2: ^0.9.1
+  google_maps_flutter: ^2.9.0
   geolocator: ^10.1.0
   geocoding: ^4.0.0
   share_plus: ^7.2.1
@@ -24,6 +23,10 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^3.0.0
+<<<<<<< HEAD
+  flutter_native_splash: ^2.4.0
+=======
+>>>>>>> 49286aee28729612422d3516363fae67ce924fb7
 
 flutter:
   uses-material-design: true
@@ -31,3 +34,28 @@ flutter:
     - assets/images/login_illustration.png
     - assets/images/account_type_illustration.png
     - assets/images/add_contact_background.png
+<<<<<<< HEAD
+    - assets/images/safetyu_logo.png
+    - assets/images/safetyu_logo_android12.png
+    - assets/images/marker_blue.png
+    - assets/images/marker_red.png
+    - assets/images/marker_orange.png
+    - assets/images/marker_violet.png
+    - assets/images/marker_blue.png
+    - assets/images/marker_red.png
+    - assets/images/marker_orange.png
+    - assets/images/marker_violet.png
+
+flutter_native_splash:
+  color: "#0B1220"
+  image: assets/images/safetyu_logo.png
+  android_12:
+    # Android 12+ forces every splash icon through its own circular mask
+    # that only keeps roughly the inner 2/3 of the image — the outer blue
+    # ring was getting clipped by that, not by anything in our config.
+    # This version has the same logo scaled down with transparent padding
+    # around it, so the ring lands inside the safe zone and survives.
+    image: assets/images/safetyu_logo_android12.png
+    color: "#0B1220"
+=======
+>>>>>>> 49286aee28729612422d3516363fae67ce924fb7

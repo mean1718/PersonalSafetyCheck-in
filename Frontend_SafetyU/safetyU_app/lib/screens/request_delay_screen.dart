@@ -371,7 +371,7 @@ class _RequestDelayScreenState extends State<RequestDelayScreen> {
                     child: ElevatedButton(
                       onPressed: _isConfirming ? null : _confirmDelay,
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: AppColors.navy,
+                        backgroundColor: AppColors.primaryButton,
                         elevation: 0,
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(25),
