@@ -11,6 +11,14 @@ const ACCOUNT_CURRENCY = (
   process.env.BAKONG_ACCOUNT_CURRENCY || "KHR"
 ).toUpperCase();
 
+// Which currencies a customer is allowed to request the KHQR in. Cambodian
+// bank/Bakong accounts (ABA etc.) commonly hold both a USD and a KHR
+// balance under the SAME account ID/username — Bakong routes an incoming
+// transfer into whichever sub-balance matches the currency printed on the
+// QR. So the same BAKONG_ACCOUNT_USERNAME can issue either currency; we
+// don't need a second account to support both.
+const ALLOWED_QR_CURRENCIES = ["USD", "KHR"];
+
 const accountInfo = () => {
   const bakongAccountId = process.env.BAKONG_ACCOUNT_USERNAME;
   const merchantName = process.env.BAKONG_ACCOUNT_NAME;
@@ -30,6 +38,18 @@ const accountInfo = () => {
 const usdToKhr = (usd) => {
   const rate = Number(process.env.BAKONG_USD_TO_KHR_RATE) || 4100;
   return Math.round(usd * rate);
+};
+
+// Picks the currency to actually print on the KHQR for this request.
+// Falls back to the account's configured default (ACCOUNT_CURRENCY) if the
+// client didn't send a recognized one, rather than rejecting the request —
+// keeps older app builds that don't send `currency` at all working exactly
+// as before.
+const resolveQrCurrency = (requested) => {
+  const normalized = String(requested || "").toUpperCase();
+  return ALLOWED_QR_CURRENCIES.includes(normalized)
+    ? normalized
+    : ACCOUNT_CURRENCY;
 };
 
 const hasKhqrAmount = (qrString) => {
@@ -55,13 +75,14 @@ const getPricing = async (req, res) => {
 };
 
 // POST /api/payments/khqr
-// Body: { purpose: 'pro_subscription' }
-//    or { purpose: 'pay_per_contact', extraMain?, extraOther? }
+// Body: { purpose: 'pro_subscription', currency?: 'USD' | 'KHR' }
+//    or { purpose: 'pay_per_contact', extraMain?, extraOther?, currency?: 'USD' | 'KHR' }
 const createKhqrPayment = async (req, res) => {
   const purpose = req.body.purpose;
   const extraMain = Math.max(0, Number(req.body.extraMain) || 0);
   const extraOther = Math.max(0, Number(req.body.extraOther) || 0);
   const extraContacts = extraMain + extraOther;
+  const qrCurrency = resolveQrCurrency(req.body.currency);
 
   if (!["pro_subscription", "pay_per_contact"].includes(purpose)) {
     return res.status(400).json({ message: "Invalid purpose." });
@@ -83,6 +104,10 @@ const createKhqrPayment = async (req, res) => {
       purpose,
       status: "pending",
       expiresAt: { $gt: new Date() },
+      // Scope the reuse check to the requested currency too — otherwise a
+      // pending KHR payment could get handed back to someone who just
+      // asked for a USD one (and vice versa).
+      qrCurrency,
       ...(purpose === "pay_per_contact"
         ? { extraMainSlots: extraMain, extraOtherSlots: extraOther }
         : {}),
@@ -93,7 +118,7 @@ const createKhqrPayment = async (req, res) => {
         await existing.save();
       } else {
         const qrAmount =
-          ACCOUNT_CURRENCY === "USD"
+          existing.qrCurrency === "USD"
             ? existing.amount
             : usdToKhr(existing.amount);
         return res.status(200).json({
@@ -103,22 +128,21 @@ const createKhqrPayment = async (req, res) => {
           amount: existing.amount,
           currency: existing.currency,
           qrAmount,
-          qrCurrency: ACCOUNT_CURRENCY,
+          qrCurrency: existing.qrCurrency,
           expiresAt: existing.expiresAt,
         });
       }
     }
 
-    // USD account -> exact charge, no conversion at all.
-    // KHR account -> converted at BAKONG_USD_TO_KHR_RATE (not live; update
-    // that env var periodically to track the real exchange rate).
-    const qrAmount =
-      ACCOUNT_CURRENCY === "USD" ? amountUsd : usdToKhr(amountUsd);
+    // USD requested -> exact charge, no conversion at all.
+    // KHR requested -> converted at BAKONG_USD_TO_KHR_RATE (not live;
+    // update that env var periodically to track the real exchange rate).
+    const qrAmount = qrCurrency === "USD" ? amountUsd : usdToKhr(amountUsd);
 
     const billNumber = crypto.randomBytes(6).toString("hex");
     const { qrString, md5, expiresAt } = buildIndividualKHQR({
       ...accountInfo(),
-      currency: ACCOUNT_CURRENCY,
+      currency: qrCurrency,
       amount: qrAmount,
       billNumber,
     });
@@ -134,6 +158,9 @@ const createKhqrPayment = async (req, res) => {
       extraOtherSlots: purpose === "pay_per_contact" ? extraOther : 0,
       amount: amountUsd,
       currency: "USD",
+      // The currency actually printed on this specific QR — separate from
+      // `currency` above, which is always the internal USD ledger amount.
+      qrCurrency,
       qrString,
       md5,
       expiresAt,
@@ -149,7 +176,7 @@ const createKhqrPayment = async (req, res) => {
       // show "≈ 12,259 ៛" next to the USD price when a conversion happened,
       // so the person isn't surprised by what their banking app shows them.
       qrAmount,
-      qrCurrency: ACCOUNT_CURRENCY,
+      qrCurrency,
       expiresAt: payment.expiresAt,
     });
   } catch (error) {

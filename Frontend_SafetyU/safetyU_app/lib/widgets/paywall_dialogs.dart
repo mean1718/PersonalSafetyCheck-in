@@ -55,6 +55,79 @@ Future<String?> showPlansDialog(BuildContext context) {
 
 const double _pricePerContact = 0.20;
 
+/// Cambodia commonly prices things in either USD or KHR (Riel) side by
+/// side. `_usdToKhrRate` is only used to show an *estimated* KHR figure on
+/// the plan-picker/summary screens before a real payment has been created.
+/// Once a real KHQR payment exists, the amount actually shown on the scan
+/// screen should come from the backend response (`PendingPayment`), not
+/// this local conversion — see the TODO further down.
+enum _Currency { usd, khr }
+
+const double _usdToKhrRate = 4100;
+
+String _formatPrice(double usdAmount, _Currency currency) {
+  if (currency == _Currency.usd) {
+    return '\$${usdAmount.toStringAsFixed(2)}';
+  }
+  final khr = (usdAmount * _usdToKhrRate).round();
+  final withCommas = khr
+      .toString()
+      .replaceAllMapped(RegExp(r'\B(?=(\d{3})+(?!\d))'), (m) => ',');
+  return '៛$withCommas';
+}
+
+String _currencyCode(_Currency c) => c == _Currency.usd ? 'USD' : 'KHR';
+
+/// Small USD / KHR segmented switch shown on the plan picker and both
+/// payment summary screens, before a KHQR code is generated.
+class _CurrencyToggle extends StatelessWidget {
+  final _Currency value;
+  final ValueChanged<_Currency> onChanged;
+
+  const _CurrencyToggle({required this.value, required this.onChanged});
+
+  Widget _segment(_Currency c, String label) {
+    final selected = value == c;
+    return GestureDetector(
+      onTap: () => onChanged(c),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 7),
+        decoration: BoxDecoration(
+          color: selected ? AppColors.navy : Colors.transparent,
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 11.5,
+            fontWeight: FontWeight.w700,
+            color: selected ? Colors.white : AppColors.textSecondary,
+          ),
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(3),
+      decoration: BoxDecoration(
+        color: AppColors.background,
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _segment(_Currency.usd, 'USD'),
+          _segment(_Currency.khr, 'KHR'),
+        ],
+      ),
+    );
+  }
+}
+
 enum _LimitStep {
   plans,
 
@@ -98,6 +171,40 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
   String _selectedPlan = 'free';
 
   _LimitStep _step = _LimitStep.plans;
+
+  // Which currency the person wants to pay in. Chosen before a payment is
+  // created; forwarded to PaymentService so the KHQR itself is generated in
+  // that currency (see the TODO on _beginProPayment/_beginPayPayment).
+  _Currency _currency = _Currency.usd;
+
+  // Chosen quantities when this dialog is opened as a general "View Plans"
+  // browse (Home's status card / "See All Plans") rather than because an
+  // actual notify-list exceeded the free cap — i.e. widget.triggeredByLimit
+  // is false. In that case widget.selectedMain/selectedOther are always 0
+  // (showPlansDialog passes 0, 0), so there is nothing to derive "extra"
+  // contacts from. Without these, Pay Per Contact opened from the
+  // dashboard always computed 0 extra contacts and its "Continue to
+  // Payment" button stayed permanently disabled — the person had no way
+  // to say how many slots they wanted. These let them pick the quantity
+  // directly via the steppers on the summary screen.
+  int _manualExtraMain = 0;
+  int _manualExtraOther = 0;
+
+  /// Number of extra Main/Other contact slots being purchased.
+  /// - triggeredByLimit: derived from how many contacts they actually
+  ///   tried to notify past the free cap (the old behavior).
+  /// - browse mode (opened from Home): there's no over-the-cap list to
+  ///   derive from, so this reflects what the person picked with the
+  ///   quantity steppers instead.
+  (int, int) get _extraCounts {
+    if (widget.triggeredByLimit) {
+      return (
+        max(0, widget.selectedMain - AppSession.freeMainContactLimit),
+        max(0, widget.selectedOther - AppSession.freeOtherContactLimit),
+      );
+    }
+    return (_manualExtraMain, _manualExtraOther);
+  }
 
   // Real Bakong KHQR payment in flight, if any (see services/payment_service.dart).
   PendingPayment? _pendingPayment;
@@ -165,7 +272,14 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
     });
 
     try {
-      final payment = await PaymentService.createProPayment();
+      // currency now flows into PaymentService.createProPayment, which
+      // sends it to the backend as body key 'currency' (matching the
+      // Payment mongoose schema's field name). Not yet confirmed against
+      // paymentController.js itself — if the backend reads req.body under
+      // a different key, this silently falls back to its 'USD' default.
+      final payment = await PaymentService.createProPayment(
+        currency: _currencyCode(_currency),
+      );
       if (!mounted) return;
       setState(() {
         _pendingPayment = payment;
@@ -197,14 +311,7 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
     // Same double-tap guard as _beginProPayment.
     if (_creatingPayment) return;
 
-    final extraMain = max(
-      0,
-      widget.selectedMain - AppSession.freeMainContactLimit,
-    );
-    final extraOther = max(
-      0,
-      widget.selectedOther - AppSession.freeOtherContactLimit,
-    );
+    final (extraMain, extraOther) = _extraCounts;
 
     setState(() {
       _step = _LimitStep.payScan;
@@ -213,9 +320,11 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
     });
 
     try {
+      // Same currency wiring as _beginProPayment — see the note there.
       final payment = await PaymentService.createPayPerContactPayment(
         extraMain: extraMain,
         extraOther: extraOther,
+        currency: _currencyCode(_currency),
       );
       if (!mounted) return;
       setState(() {
@@ -433,6 +542,13 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
           ),
         ),
 
+        const SizedBox(height: 12),
+
+        _CurrencyToggle(
+          value: _currency,
+          onChanged: (c) => setState(() => _currency = c),
+        ),
+
         const SizedBox(height: 16),
 
         // -------------------------------------------------------------------
@@ -465,7 +581,7 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
           title: 'Pro Plan',
           tag: AppSession.instance.isProActive ? 'Current' : 'Most Popular',
           subtitle: 'Unlimited contacts & all premium features — '
-              '\$${_proMonthlyPrice.toStringAsFixed(2)}/month',
+              '${_formatPrice(_proMonthlyPrice, _currency)}/month',
           highlighted: _selectedPlan == 'pro',
           onTap: () {
             setState(() {
@@ -486,7 +602,7 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
           title: 'Pay Per Contact',
           tag: 'One-Pay-Per-Person',
           subtitle: 'Add extra contacts without upgrading — '
-              '\$${_pricePerContact.toStringAsFixed(2)}/person',
+              '${_formatPrice(_pricePerContact, _currency)}/person',
           highlighted: _selectedPlan == 'pay',
           onTap: () {
             setState(() {
@@ -705,7 +821,14 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
           ),
         ),
 
-        const SizedBox(height: 16),
+        const SizedBox(height: 14),
+
+        _CurrencyToggle(
+          value: _currency,
+          onChanged: (c) => setState(() => _currency = c),
+        ),
+
+        const SizedBox(height: 14),
 
         Container(
           width: double.infinity,
@@ -728,7 +851,7 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
                 ),
               ),
               Text(
-                '\$${_proMonthlyPrice.toStringAsFixed(2)}/month',
+                '${_formatPrice(_proMonthlyPrice, _currency)}/month',
                 style: TextStyle(
                   fontSize: 16,
                   fontWeight: FontWeight.w800,
@@ -799,15 +922,53 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
             color: AppColors.textPrimary,
           ),
         ),
+        const SizedBox(height: 4),
+        Text(
+          // qrCurrency is what's actually encoded on the KHQR — normally
+          // the same as the locally-selected currency, since the backend
+          // now honors it. Only fall back to the local selection while no
+          // payment exists yet and we're still showing a pre-payment
+          // estimate, or if an older backend build ignores the request.
+          _pendingPayment?.qrCurrency ?? _currencyCode(_currency),
+          style: TextStyle(
+            fontSize: 11,
+            fontWeight: FontWeight.w700,
+            color: AppColors.textMuted,
+            letterSpacing: 1,
+          ),
+        ),
         const SizedBox(height: 6),
         Text(
-          '\$${(_pendingPayment?.amount ?? _proMonthlyPrice).toStringAsFixed(2)}',
+          // Once a real payment is created, qrAmount/qrCurrency is exactly
+          // what your banking app will show when this code is scanned —
+          // the local _formatPrice conversion is only a placeholder while
+          // that request is still in flight.
+          _pendingPayment != null
+              ? _pendingPayment!.qrAmount
+                  .toStringAsFixed(_pendingPayment!.qrCurrency == 'USD' ? 2 : 0)
+              : _formatPrice(_proMonthlyPrice, _currency),
           style: TextStyle(
             fontSize: 26,
             fontWeight: FontWeight.w800,
             color: AppColors.navy,
           ),
         ),
+        if (_pendingPayment != null &&
+            _pendingPayment!.qrCurrency != 'USD') ...[
+          const SizedBox(height: 2),
+          Text(
+            // The account is charged/tracked in USD internally even though
+            // the QR itself is in another currency — surface both so the
+            // amount on screen never looks disconnected from what gets
+            // scanned.
+            '≈ \$${_pendingPayment!.amount.toStringAsFixed(2)} USD',
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+              color: AppColors.textMuted,
+            ),
+          ),
+        ],
         const SizedBox(height: 18),
         _khqrPanel(),
         const SizedBox(height: 16),
@@ -960,15 +1121,7 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
   // ---------------------------------------------------------------------------
 
   Widget _buildPaySummaryStep(BuildContext context) {
-    final extraMain = max(
-      0,
-      widget.selectedMain - AppSession.freeMainContactLimit,
-    );
-
-    final extraOther = max(
-      0,
-      widget.selectedOther - AppSession.freeOtherContactLimit,
-    );
+    final (extraMain, extraOther) = _extraCounts;
 
     final extraTotal = extraMain + extraOther;
     final total = extraTotal * _pricePerContact;
@@ -1012,9 +1165,11 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
         const SizedBox(height: 6),
 
         Text(
-          extraTotal == 1
-              ? 'You need 1 extra contact.'
-              : 'You need $extraTotal extra contacts.',
+          widget.triggeredByLimit
+              ? (extraTotal == 1
+                  ? 'You need 1 extra contact.'
+                  : 'You need $extraTotal extra contacts.')
+              : 'Choose how many extra contact slots to add.',
           textAlign: TextAlign.center,
           style: TextStyle(
             fontSize: 12.5,
@@ -1022,42 +1177,79 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
           ),
         ),
 
-        const SizedBox(height: 16),
+        const SizedBox(height: 14),
 
-        // Extra contact breakdown
-        Container(
-          width: double.infinity,
-          padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(
-            color: AppColors.background,
-            borderRadius: BorderRadius.circular(14),
-          ),
-          child: Column(
-            children: [
-              if (extraMain > 0)
-                _extraRow(
-                  'Main Contact',
-                  extraMain,
-                ),
-              if (extraMain > 0 && extraOther > 0) const SizedBox(height: 10),
-              if (extraOther > 0)
-                _extraRow(
-                  'Other Contact',
-                  extraOther,
-                ),
-              if (extraTotal == 0)
-                Text(
-                  'No extra contacts are required.',
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: AppColors.textSecondary,
-                  ),
-                ),
-            ],
-          ),
+        _CurrencyToggle(
+          value: _currency,
+          onChanged: (c) => setState(() => _currency = c),
         ),
 
-        const SizedBox(height: 16),
+        const SizedBox(height: 14),
+
+        // Browse mode (opened from Home, not from hitting the free-plan
+        // cap): there's no already-selected contact list to base the
+        // purchase on, so the person picks the quantity directly here.
+        if (!widget.triggeredByLimit) ...[
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: AppColors.background,
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: Column(
+              children: [
+                _quantityStepper(
+                  label: 'Main Contact',
+                  value: _manualExtraMain,
+                  onChanged: (v) => setState(() => _manualExtraMain = v),
+                ),
+                const SizedBox(height: 12),
+                _quantityStepper(
+                  label: 'Other Contact',
+                  value: _manualExtraOther,
+                  onChanged: (v) => setState(() => _manualExtraOther = v),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 14),
+        ] else ...[
+          // Limit-triggered mode: just show the breakdown of what's
+          // already been selected on the previous screen.
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: AppColors.background,
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: Column(
+              children: [
+                if (extraMain > 0)
+                  _extraRow(
+                    'Main Contact',
+                    extraMain,
+                  ),
+                if (extraMain > 0 && extraOther > 0) const SizedBox(height: 10),
+                if (extraOther > 0)
+                  _extraRow(
+                    'Other Contact',
+                    extraOther,
+                  ),
+                if (extraTotal == 0)
+                  Text(
+                    'No extra contacts are required.',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: AppColors.textSecondary,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 14),
+        ],
 
         // Price
         Container(
@@ -1074,14 +1266,14 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text(
-                '\$${_pricePerContact.toStringAsFixed(2)} per extra contact',
+                '${_formatPrice(_pricePerContact, _currency)} per extra contact',
                 style: TextStyle(
                   fontSize: 11.5,
                   color: AppColors.textSecondary,
                 ),
               ),
               Text(
-                '\$${total.toStringAsFixed(2)} total',
+                '${_formatPrice(total, _currency)} total',
                 style: TextStyle(
                   fontSize: 16,
                   fontWeight: FontWeight.w800,
@@ -1141,15 +1333,7 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
   // ---------------------------------------------------------------------------
 
   Widget _buildPayScanStep(BuildContext context) {
-    final extraMain = max(
-      0,
-      widget.selectedMain - AppSession.freeMainContactLimit,
-    );
-
-    final extraOther = max(
-      0,
-      widget.selectedOther - AppSession.freeOtherContactLimit,
-    );
+    final (extraMain, extraOther) = _extraCounts;
 
     final extraTotal = extraMain + extraOther;
     final total = extraTotal * _pricePerContact;
@@ -1165,15 +1349,42 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
             color: AppColors.textPrimary,
           ),
         ),
+        const SizedBox(height: 4),
+        Text(
+          // See the note in _buildProScanStep — qrCurrency is what's
+          // actually on the KHQR, not the local currency toggle.
+          _pendingPayment?.qrCurrency ?? _currencyCode(_currency),
+          style: TextStyle(
+            fontSize: 11,
+            fontWeight: FontWeight.w700,
+            color: AppColors.textMuted,
+            letterSpacing: 1,
+          ),
+        ),
         const SizedBox(height: 6),
         Text(
-          '\$${(_pendingPayment?.amount ?? total).toStringAsFixed(2)}',
+          _pendingPayment != null
+              ? _pendingPayment!.qrAmount
+                  .toStringAsFixed(_pendingPayment!.qrCurrency == 'USD' ? 2 : 0)
+              : _formatPrice(total, _currency),
           style: TextStyle(
             fontSize: 26,
             fontWeight: FontWeight.w800,
             color: AppColors.navy,
           ),
         ),
+        if (_pendingPayment != null &&
+            _pendingPayment!.qrCurrency != 'USD') ...[
+          const SizedBox(height: 2),
+          Text(
+            '≈ \$${_pendingPayment!.amount.toStringAsFixed(2)} USD',
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+              color: AppColors.textMuted,
+            ),
+          ),
+        ],
         const SizedBox(height: 6),
         Text(
           '$extraTotal extra contact${extraTotal == 1 ? '' : 's'}',
@@ -1254,15 +1465,7 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
   // ---------------------------------------------------------------------------
 
   Widget _buildPaySuccessStep(BuildContext context) {
-    final extraMain = max(
-      0,
-      widget.selectedMain - AppSession.freeMainContactLimit,
-    );
-
-    final extraOther = max(
-      0,
-      widget.selectedOther - AppSession.freeOtherContactLimit,
-    );
+    final (extraMain, extraOther) = _extraCounts;
 
     final extraTotal = extraMain + extraOther;
     final total = extraTotal * _pricePerContact;
@@ -1329,7 +1532,7 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
                     ),
                   ),
                   Text(
-                    '\$${total.toStringAsFixed(2)}',
+                    _formatPrice(total, _currency),
                     style: TextStyle(
                       fontSize: 12.5,
                       fontWeight: FontWeight.w700,
@@ -1477,6 +1680,81 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
           ),
         ),
       ],
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // QUANTITY STEPPER (browse-mode Pay Per Contact — pick counts directly)
+  // ---------------------------------------------------------------------------
+
+  Widget _quantityStepper({
+    required String label,
+    required int value,
+    required ValueChanged<int> onChanged,
+  }) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Text(
+          label,
+          style: TextStyle(
+            fontSize: 12.5,
+            fontWeight: FontWeight.w600,
+            color: AppColors.textPrimary,
+          ),
+        ),
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _stepperButton(
+              icon: Icons.remove,
+              onTap: value > 0 ? () => onChanged(value - 1) : null,
+            ),
+            SizedBox(
+              width: 30,
+              child: Text(
+                '$value',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w800,
+                  color: AppColors.textPrimary,
+                ),
+              ),
+            ),
+            _stepperButton(
+              icon: Icons.add,
+              // 20 is a generous ceiling just to avoid an unbounded
+              // counter — there's no real-world reason to buy more slots
+              // than that in one purchase.
+              onTap: value < 20 ? () => onChanged(value + 1) : null,
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _stepperButton(
+      {required IconData icon, required VoidCallback? onTap}) {
+    final enabled = onTap != null;
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: 28,
+        height: 28,
+        decoration: BoxDecoration(
+          color: enabled
+              ? AppColors.navy.withValues(alpha: 0.08)
+              : AppColors.border.withValues(alpha: 0.4),
+          shape: BoxShape.circle,
+        ),
+        child: Icon(
+          icon,
+          size: 15,
+          color: enabled ? AppColors.navy : AppColors.textMuted,
+        ),
+      ),
     );
   }
 }
@@ -1818,7 +2096,7 @@ class _InlinePromoSlideView extends StatelessWidget {
           ),
 
           // The glowing "medallion" standing in for the 3D badge/shield
-          // renders in the reference — an icon on a soft glow disc, ringed
+          // renders in the reference mockups — an icon on a soft glow disc, ringed
           // by a thin orbit line and a small sparkle accent.
           Positioned(
             right: 14,
