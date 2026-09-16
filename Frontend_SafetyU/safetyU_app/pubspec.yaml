@@ -18,9 +18,14 @@ dependencies:
   http: ^1.2.0
   image_picker: ^1.0.7
   qr_flutter: ^4.1.0
+
   flutter_local_notifications: ^18.0.1
   firebase_core: ^3.8.0
   firebase_messaging: ^15.1.5
+
+  flutter_secure_storage: ^10.3.4
+  latlong2: ^0.9.1
+
 
 dev_dependencies:
   flutter_test:
@@ -40,20 +45,10 @@ flutter:
     - assets/images/marker_red.png
     - assets/images/marker_orange.png
     - assets/images/marker_violet.png
-    - assets/images/marker_blue.png
-    - assets/images/marker_red.png
-    - assets/images/marker_orange.png
-    - assets/images/marker_violet.png
 
 flutter_native_splash:
   color: "#0B1220"
   image: assets/images/safetyu_logo.png
   android_12:
-    # Android 12+ forces every splash icon through its own circular mask
-    # that only keeps roughly the inner 2/3 of the image — the outer blue
-    # ring was getting clipped by that, not by anything in our config.
-    # This version has the same logo scaled down with transparent padding
-    # around it, so the ring lands inside the safe zone and survives.
     image: assets/images/safetyu_logo_android12.png
     color: "#0B1220"
-    google_maps_flutter: ^2.9.0

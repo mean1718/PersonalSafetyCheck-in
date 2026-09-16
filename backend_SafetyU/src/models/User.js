@@ -34,7 +34,7 @@ const userSchema = new mongoose.Schema(
 
     role: {
       type: String,
-      enum: ["user", "emergency"],
+      enum: ["user", "responder"],
       default: "user",
     },
 
@@ -46,6 +46,27 @@ const userSchema = new mongoose.Schema(
     // POST /api/users/device-token after login and on app start; pruned
     // automatically by pushService when Firebase reports a token is dead.
     fcmTokens: { type: [String], default: [] },
+
+    // ---- Responder accounts ----
+    officerId: {
+      type: String,
+      trim: true,
+      uppercase: true,
+      sparse: true,
+      unique: true,
+    },
+
+    responderStatus: {
+      type: String,
+      enum: ["pending", "approved", "rejected"],
+      default: "pending",
+    },
+
+    // ---- Emergency Assistant PIN (user accounts only) ----
+    emergencyPin: {
+      type: String,
+      default: null,
+    },
 
     // ---- Plan / paywall (credited by paymentController on confirmed Bakong payments) ----
     isPro: { type: Boolean, default: false },

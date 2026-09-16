@@ -23,7 +23,7 @@ const protect = async (req, res, next) => {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
     const user = await User.findById(decoded.id).select(
-      "_id name email phone role createdAt isPro proExpiresAt purchasedExtraMainSlots purchasedExtraOtherSlots",
+      "_id name email phone role officerId responderStatus createdAt isPro proExpiresAt purchasedExtraMainSlots purchasedExtraOtherSlots",
     );
     if (!user) {
       return res.status(401).json({ message: "Invalid or expired token." });
@@ -32,6 +32,8 @@ const protect = async (req, res, next) => {
     req.user = {
       id: user._id.toString(),
       role: user.role,
+      officerId: user.officerId || null,
+      responderStatus: user.responderStatus || null,
     };
     req.authenticatedUser = user;
 

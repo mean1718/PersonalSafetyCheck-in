@@ -12,27 +12,50 @@ const {
 
 const protect = require("../middleware/authMiddleware");
 
-// Start emergency
-router.post("/", protect, startEmergency);
+// =========================================================
+// START EMERGENCY
+// =========================================================
 
-// Get my emergencies
-router.get("/", protect, getMyEmergencies);
+router.post(
+  "/",
+  protect,
+  startEmergency
+);
 
-// Primary → Secondary
+// =========================================================
+// GET MY EMERGENCIES
+// =========================================================
+
+router.get(
+  "/",
+  protect,
+  getMyEmergencies
+);
+
+// =========================================================
+// PRIMARY → SECONDARY
+// =========================================================
+
 router.post(
   "/:emergencyId/secondary",
   protect,
   escalateToSecondary
 );
 
-// Secondary → Emergency / Police
+// =========================================================
+// SECONDARY → EMERGENCY RESPONDER
+// =========================================================
+
 router.post(
   "/:emergencyId/emergency",
   protect,
   escalateToEmergency
 );
 
-// Resolve emergency
+// =========================================================
+// RESOLVE EMERGENCY
+// =========================================================
+
 router.put(
   "/:emergencyId/resolve",
   protect,

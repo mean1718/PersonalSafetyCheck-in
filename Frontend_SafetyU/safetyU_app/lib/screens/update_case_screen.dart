@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
 import '../models/incident.dart';
 import '../services/app_session.dart';
+import '../services/emergency_responder_service.dart';
 
 class UpdateCaseScreen extends StatelessWidget {
   const UpdateCaseScreen({super.key});
@@ -50,13 +51,44 @@ class UpdateCaseScreen extends StatelessWidget {
                 width: double.infinity,
                 height: 52,
                 child: ElevatedButton(
-                  onPressed: () {
-                    if (incidentId != null) {
-                      AppSession.instance.setIncidentStatus(
-                          incidentId, IncidentStatus.resolved);
-                    }
-                    Navigator.pushReplacementNamed(context, '/case-resolved');
-                  },
+                  onPressed: () async {
+  if (incidentId == null) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Emergency case ID is missing.'),
+      ),
+    );
+    return;
+  }
+
+  try {
+    await EmergencyResponderService.resolveCase(
+      incidentId,
+    );
+
+    if (!context.mounted) return;
+
+    AppSession.instance.setIncidentStatus(
+      incidentId,
+      IncidentStatus.resolved,
+    );
+
+    Navigator.pushReplacementNamed(
+      context,
+      '/case-resolved',
+    );
+  } catch (e) {
+    if (!context.mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          'Failed to resolve emergency: $e',
+        ),
+      ),
+    );
+  }
+},
                   style: ElevatedButton.styleFrom(
                       backgroundColor: AppColors.primaryButton,
                       shape: RoundedRectangleBorder(

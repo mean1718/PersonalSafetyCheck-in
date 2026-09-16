@@ -21,6 +21,7 @@ const emergencySchema = new mongoose.Schema(
         "primary_alerted",
         "secondary_alerted",
         "emergency",
+        "in_progress",
         "resolved",
       ],
       default: "waiting",
@@ -40,6 +41,26 @@ const emergencySchema = new mongoose.Schema(
     location: {
       latitude: Number,
       longitude: Number,
+    },
+
+    // Police station assigned to handle this emergency.
+    assignedStation: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "PoliceStation",
+      default: null,
+    },
+
+    // Responder officer assigned to this emergency.
+    assignedResponder: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "ResponderOfficer",
+      default: null,
+    },
+
+    // Time when the emergency was assigned to a station.
+    assignedAt: {
+      type: Date,
+      default: null,
     },
   },
   {

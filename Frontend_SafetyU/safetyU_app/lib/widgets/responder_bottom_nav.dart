@@ -13,8 +13,9 @@ class _NavItem {
 class ResponderBottomNav extends StatelessWidget {
   final int currentIndex;
   final ValueChanged<int>? onTap;
+  final int caseCount;
 
-  const ResponderBottomNav({super.key, required this.currentIndex, this.onTap});
+  const ResponderBottomNav({super.key, required this.currentIndex, this.onTap, this.caseCount = 0,});
 
   static const List<_NavItem> _items = [
     _NavItem(Icons.home, 'Home'),
@@ -45,9 +46,45 @@ class ResponderBottomNav extends StatelessWidget {
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Icon(item.icon,
-                          size: 24,
-                          color: active ? AppColors.navy : AppColors.textMuted),
+                      Stack(
+                        clipBehavior: Clip.none,
+    children: [
+      Icon(
+        item.icon,
+        size: 24,
+        color: active ? AppColors.navy : AppColors.textMuted,
+      ),
+
+      if (i == 1 && caseCount > 0)
+        Positioned(
+          right: -10,
+          top: -8,
+          child: Container(
+            constraints: const BoxConstraints(
+              minWidth: 17,
+              minHeight: 17,
+            ),
+            padding: const EdgeInsets.symmetric(
+              horizontal: 4,
+              vertical: 1,
+            ),
+            decoration: BoxDecoration(
+              color: const Color(0xFFFF6554),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            alignment: Alignment.center,
+            child: Text(
+              caseCount > 99 ? '99+' : '$caseCount',
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 9,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        ),
+    ],
+                      ),
                       const SizedBox(height: 4),
                       Text(
                         item.label,

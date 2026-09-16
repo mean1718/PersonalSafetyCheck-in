@@ -31,7 +31,7 @@ import 'screens/case_resolved_screen.dart';
 import 'screens/report_screen.dart';
 import 'services/local_notification_service.dart';
 import 'services/push_notification_service.dart';
-
+import 'screens/emergency_pin_setup_screen.dart';
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
   // Fire-and-forget: sets up the notification channels/permissions so the
@@ -90,6 +90,7 @@ class SafetyUApp extends StatelessWidget {
             '/update-case': (context) => const UpdateCaseScreen(),
             '/case-resolved': (context) => const CaseResolvedScreen(),
             '/reports': (context) => const ReportsScreen(),
+            '/create-emergency-pin': (context) => const EmergencyPinSetupScreen(),
           },
           onGenerateRoute: (settings) {
             if (settings.name == '/edit-contact') {
