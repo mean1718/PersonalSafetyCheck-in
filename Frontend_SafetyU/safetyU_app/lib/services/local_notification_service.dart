@@ -45,6 +45,16 @@ class LocalNotificationService {
     priority: Priority.high,
   );
 
+  static const AndroidNotificationDetails _safetyResolvedAndroidDetails =
+      AndroidNotificationDetails(
+    'safety_resolved',
+    'Safe confirmations',
+    channelDescription:
+        'Lets you know when a trusted friend confirms they\'re safe',
+    importance: Importance.high,
+    priority: Priority.high,
+  );
+
   static Future<void> init() async {
     if (_initialized) return;
     const androidInit = AndroidInitializationSettings('@mipmap/ic_launcher');
@@ -58,10 +68,32 @@ class LocalNotificationService {
     );
     // Android 13+ requires this explicit runtime request; older versions
     // and iOS (handled via DarwinInitializationSettings above) ignore it.
-    await _plugin
-        .resolvePlatformSpecificImplementation<
-            AndroidFlutterLocalNotificationsPlugin>()
-        ?.requestNotificationsPermission();
+    final androidPlugin = _plugin.resolvePlatformSpecificImplementation<
+        AndroidFlutterLocalNotificationsPlugin>();
+    await androidPlugin?.requestNotificationsPermission();
+    // Create the high-importance channels up front, at app start, instead
+    // of letting them get created lazily the first time _plugin.show() runs.
+    // Without this, a push that arrives while the app is fully closed (so
+    // this code never runs) is the FIRST thing to reach Android for that
+    // channel, and Android silently falls back to its own default/low
+    // channel — which is why alerts were only ever showing while the app
+    // was already open. The backend push payload references these same
+    // channel ids (see pushService.js), so this needs to run before any
+    // push can arrive, i.e. every app start, not just after first use.
+    for (final channel in [
+      _trustRequestAndroidDetails,
+      _safetyAlertAndroidDetails,
+      _safetyResolvedAndroidDetails,
+    ]) {
+      await androidPlugin?.createNotificationChannel(
+        AndroidNotificationChannel(
+          channel.channelId!,
+          channel.channelName!,
+          description: channel.channelDescription,
+          importance: channel.importance,
+        ),
+      );
+    }
     await _plugin
         .resolvePlatformSpecificImplementation<
             IOSFlutterLocalNotificationsPlugin>()
@@ -106,6 +138,30 @@ class LocalNotificationService {
       );
     } catch (e) {
       debugPrint('LocalNotificationService: safety alert show failed -> $e');
+    }
+  }
+
+  /// A trusted friend just confirmed they're safe (session completed, or
+  /// "I'm Safe" sent from chat). Separate from [showSafetyAlert] so this
+  /// doesn't say "needs you to check in" about someone who no longer does.
+  static Future<void> showSafetyResolved({
+    required int id,
+    required String title,
+    required String body,
+  }) async {
+    if (!_initialized) await init();
+    try {
+      await _plugin.show(
+        id,
+        title,
+        body,
+        const NotificationDetails(
+          android: _safetyResolvedAndroidDetails,
+          iOS: DarwinNotificationDetails(),
+        ),
+      );
+    } catch (e) {
+      debugPrint('LocalNotificationService: safety resolved show failed -> $e');
     }
   }
 }

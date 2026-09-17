@@ -142,10 +142,51 @@ const completeCheckIn = async (req, res) => {
       });
     }
 
+    const wasAlreadyCompleted = checkIn.status === "completed";
+
     checkIn.status = "completed";
     checkIn.completedAt = new Date();
 
     await checkIn.save();
+
+    // Tell whoever was alerted (or just selected for this session) that
+    // the person is safe now — without this, a contact who got a "needs
+    // help" push has no way to find out it's over except reopening the
+    // app. Mirrors needHelpNow()'s push below, and only fires once per
+    // session (skipped if it was already completed, e.g. a retry).
+    if (!wasAlreadyCompleted) {
+      const notifyIds = [
+        ...new Set(
+          (checkIn.trustedContactUsers?.length
+            ? checkIn.trustedContactUsers
+            : checkIn.trustedContactUser
+              ? [checkIn.trustedContactUser]
+              : []
+          ).map((id) => id.toString()),
+        ),
+      ];
+      if (notifyIds.length) {
+        const senderName = req.authenticatedUser?.name || "A trusted contact";
+        await Notification.insertMany(
+          notifyIds.map((receiver) => ({
+            receiver,
+            sender: req.user.id,
+            checkIn: checkIn._id,
+            type: "checkin_completed",
+            title: "SafetyU",
+            message: `${senderName} confirmed they're safe.`,
+          })),
+        );
+        sendPushToUsers(notifyIds, {
+          title: "SafetyU",
+          body: `${senderName} confirmed they're safe.`,
+          data: {
+            type: "checkin_completed",
+            checkInId: checkIn._id.toString(),
+          },
+        });
+      }
+    }
 
     res.status(200).json({
       message: "Safety check-in completed",
@@ -225,6 +266,11 @@ const getAlertStatus = async (req, res) => {
     return res.json({
       checkInId: checkIn._id,
       ownerUserId: checkIn.user,
+      // Lets the Safety User's own screen notice when a trusted contact
+      // has resolved the whole session on their behalf (marked_safe) —
+      // without this, only a per-contact response was visible, never
+      // whether the session itself is actually over now.
+      checkInStatus: checkIn.status,
       notifiedContacts: [...byContact.values()].map((n) => ({
         notificationId: n._id,
         userId: n.receiver._id,

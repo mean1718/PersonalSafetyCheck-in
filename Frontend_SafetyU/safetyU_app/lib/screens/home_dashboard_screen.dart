@@ -992,17 +992,30 @@ class _TrustRequestsPanel extends StatelessWidget {
       width: double.infinity,
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: AppColors.card,
+        // A tinted (not plain white) card + a colored left rail is what
+        // makes this read as "new and needs you" at a glance instead of
+        // blending in with the rest of the dashboard.
+        color: AppColors.primaryButton.withValues(alpha: 0.10),
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: AppColors.navy.withValues(alpha: 0.35)),
+        border:
+            Border.all(color: AppColors.primaryButton.withValues(alpha: 0.45)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              Icon(Icons.person_add_alt_1, size: 18, color: AppColors.navy),
-              const SizedBox(width: 8),
+              Container(
+                width: 30,
+                height: 30,
+                decoration: BoxDecoration(
+                  color: AppColors.navy,
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.person_add_alt_1,
+                    size: 16, color: Colors.white),
+              ),
+              const SizedBox(width: 10),
               Expanded(
                 child: Text(
                   requests.length == 1
@@ -1016,9 +1029,15 @@ class _TrustRequestsPanel extends StatelessWidget {
               ),
             ],
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 14),
           for (int i = 0; i < requests.length; i++) ...[
-            if (i > 0) Divider(height: 20, color: AppColors.border),
+            if (i > 0) ...[
+              const SizedBox(height: 12),
+              Divider(
+                  height: 1,
+                  color: AppColors.primaryButton.withValues(alpha: 0.25)),
+              const SizedBox(height: 12),
+            ],
             _TrustRequestRow(
               request: requests[i],
               onRespond: onRespond,
@@ -1056,58 +1075,97 @@ class _TrustRequestRow extends StatelessWidget {
         .map((p) => p[0].toUpperCase())
         .join();
 
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.center,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        CircleAvatar(
-          radius: 18,
-          backgroundColor: avatarBg,
-          child: Text(initials.isEmpty ? '?' : initials,
-              style: TextStyle(
-                  color: avatarFg,
-                  fontWeight: FontWeight.w700,
-                  fontSize: 12.5)),
-        ),
-        const SizedBox(width: 10),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(name,
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            CircleAvatar(
+              radius: 18,
+              backgroundColor: avatarBg,
+              child: Text(initials.isEmpty ? '?' : initials,
                   style: TextStyle(
-                      fontSize: 13.5,
+                      color: avatarFg,
                       fontWeight: FontWeight.w700,
-                      color: AppColors.textPrimary)),
-              Text('Wants to add you as a trusted contact',
-                  style:
-                      TextStyle(fontSize: 11, color: AppColors.textSecondary)),
-            ],
-          ),
-        ),
-        const SizedBox(width: 8),
-        GestureDetector(
-          onTap: id.isEmpty ? null : () => onRespond(id, true),
-          child: Container(
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-              color: AppColors.navy,
-              shape: BoxShape.circle,
+                      fontSize: 12.5)),
             ),
-            child: const Icon(Icons.check, size: 16, color: Colors.white),
-          ),
-        ),
-        const SizedBox(width: 8),
-        GestureDetector(
-          onTap: id.isEmpty ? null : () => onRespond(id, false),
-          child: Container(
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-              color: AppColors.background,
-              shape: BoxShape.circle,
-              border: Border.all(color: AppColors.border),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(name,
+                      style: TextStyle(
+                          fontSize: 13.5,
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.textPrimary)),
+                  Text('Wants to add you as a trusted contact',
+                      style: TextStyle(
+                          fontSize: 11, color: AppColors.textSecondary)),
+                ],
+              ),
             ),
-            child: Icon(Icons.close, size: 16, color: AppColors.textSecondary),
-          ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        // Full-width, color-coded, labeled buttons — the old paired icon
+        // circles (both a dark neutral color) didn't clearly read as
+        // "accept" vs "decline" at a glance.
+        Row(
+          children: [
+            Expanded(
+              child: GestureDetector(
+                onTap: id.isEmpty ? null : () => onRespond(id, false),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(vertical: 9),
+                  decoration: BoxDecoration(
+                    color: AppColors.card,
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(
+                        color: AppColors.danger.withValues(alpha: 0.55)),
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.close, size: 15, color: AppColors.danger),
+                      const SizedBox(width: 5),
+                      Text('Decline',
+                          style: TextStyle(
+                              fontSize: 12.5,
+                              fontWeight: FontWeight.w700,
+                              color: AppColors.danger)),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: GestureDetector(
+                onTap: id.isEmpty ? null : () => onRespond(id, true),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(vertical: 9),
+                  decoration: BoxDecoration(
+                    color: AppColors.success,
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: const Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.check, size: 15, color: Colors.white),
+                      SizedBox(width: 5),
+                      Text('Accept',
+                          style: TextStyle(
+                              fontSize: 12.5,
+                              fontWeight: FontWeight.w700,
+                              color: Colors.white)),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ],
         ),
       ],
     );

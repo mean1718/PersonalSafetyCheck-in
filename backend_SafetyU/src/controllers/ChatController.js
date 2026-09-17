@@ -47,7 +47,7 @@ const sendMessage = async (req, res) => {
       // Confirming Safe resolves whatever "Need Help" this same person had
       // outstanding toward this same contact — mirrors what completing a
       // CheckIn session does for session-based alerts.
-      await Notification.updateMany(
+      const resolvedResult = await Notification.updateMany(
         {
           receiver: receiverId,
           sender: req.user.id,
@@ -57,6 +57,16 @@ const sendMessage = async (req, res) => {
         },
         { $set: { resolved: true } },
       );
+      // Only push if there was actually an outstanding alert to resolve —
+      // otherwise "I'm safe" sent with no prior "Need Help" would ping the
+      // contact for no reason.
+      if (resolvedResult.modifiedCount > 0) {
+        sendPushToUser(receiverId, {
+          title: "SafetyU",
+          body: `${req.authenticatedUser?.name || "A trusted contact"} confirmed they're safe.`,
+          data: { type: "checkin_completed" },
+        });
+      }
     }
     return res.status(201).json({ message });
   } catch (_) {

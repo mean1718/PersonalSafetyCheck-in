@@ -23,6 +23,12 @@ try {
 /// Firebase are pruned from the user's record so they stop being retried
 /// forever. Never throws — a push failure should never take down the
 /// safety-alert / trust-request flow that triggered it.
+const ANDROID_CHANNEL_BY_TYPE = {
+  trust_request: "trust_requests",
+  safety_alert: "safety_alerts",
+  checkin_completed: "safety_resolved",
+};
+
 async function sendPushToUser(userId, { title, body, data = {} }) {
   if (!messaging || !userId) return;
   try {
@@ -30,13 +36,22 @@ async function sendPushToUser(userId, { title, body, data = {} }) {
     const tokens = (user?.fcmTokens || []).filter(Boolean);
     if (!tokens.length) return;
 
+    const channelId = ANDROID_CHANNEL_BY_TYPE[data.type] || "safety_alerts";
+
     const response = await messaging.sendEachForMulticast({
       tokens,
       notification: { title, body },
       data: Object.fromEntries(
         Object.entries(data).map(([k, v]) => [k, String(v)]),
       ),
-      android: { priority: "high" },
+      android: {
+        priority: "high",
+        notification: {
+          channelId,
+          priority: "max",
+          sound: "default",
+        },
+      },
       apns: { payload: { aps: { sound: "default" } } },
     });
 

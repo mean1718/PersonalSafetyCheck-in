@@ -21,7 +21,6 @@ import '../services/check_in_service.dart';
 import '../services/emergency_service.dart';
 import '../services/chat_service.dart';
 import '../theme/app_theme.dart';
-import 'session_safe_screen.dart';
 
 /// Which contact tier we're currently trying to reach. Escalates
 /// main -> secondary -> emergency responders if nobody can be confirmed
@@ -313,8 +312,20 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
         Timer.periodic(const Duration(seconds: 6), (_) async {
       if (!mounted) return;
       try {
-        final contacts = await CheckInService.alertStatus(checkInId);
+        final full = await CheckInService.alertStatusFull(checkInId);
         if (!mounted) return;
+        // A trusted contact confirmed this person safe on their behalf
+        // (AlertResponseResultScreen's "Mark Safe") — the backend already
+        // completed the session, so just follow the same path this
+        // screen already uses when the person taps "I'm Safe" themselves,
+        // instead of leaving them stuck here until they notice on their
+        // own and tap it manually.
+        if (full['checkInStatus'] == 'completed') {
+          _confirmSafe();
+          return;
+        }
+        final contacts = (full['notifiedContacts'] as List<dynamic>? ?? [])
+            .cast<Map<String, dynamic>>();
         final wasConfirmed = _someoneConfirmedHelp();
         AppSession.instance.replaceAlertResponsesFromBackend(contacts);
         if (!wasConfirmed && _someoneConfirmedHelp()) {
@@ -468,10 +479,20 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
             : notifiedNames.length == 2
                 ? '${notifiedNames[0]} and ${notifiedNames[1]}'
                 : '${notifiedNames[0]} and ${notifiedNames.length - 1} others';
-    Navigator.pushReplacement(
-      context,
-      MaterialPageRoute(
-          builder: (_) => SessionSafeScreen(notifiedContactName: contactName)),
+    // Straight to Home — same as logging in or signing up lands there —
+    // instead of the extra "You're marked safe / Back Home" screen in
+    // between. Home's own "Your Alert Status" card already shows this
+    // session is resolved, so that in-between screen was just one more
+    // tap standing in the way of getting back to a normal Home dashboard.
+    Navigator.of(context).pushNamedAndRemoveUntil('/home', (route) => false);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          contactName != null
+              ? "You're marked safe. $contactName has been notified."
+              : "You're marked safe.",
+        ),
+      ),
     );
   }
 
@@ -595,8 +616,7 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
                     color: AppColors.success.withValues(alpha: 0.15),
                     shape: BoxShape.circle,
                   ),
-                  child:
-                      Icon(Icons.check, color: AppColors.success, size: 32),
+                  child: Icon(Icons.check, color: AppColors.success, size: 32),
                 ),
                 const SizedBox(height: 18),
                 Text('Trust Confirmed!',
@@ -1094,7 +1114,8 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
                         polylines: _walkingRoute != null
                             ? {
                                 Polyline(
-                                  polylineId: const PolylineId('to-destination'),
+                                  polylineId:
+                                      const PolylineId('to-destination'),
                                   points: _walkingRoute!.points,
                                   width: 4,
                                   color: AppColors.navy,
@@ -1104,15 +1125,17 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
                                 ? {}
                                 : {
                                     Polyline(
-                                      polylineId: const PolylineId('to-destination'),
+                                      polylineId:
+                                          const PolylineId('to-destination'),
                                       points: [
                                         _currentPosition!,
                                         _destinationCoords,
                                       ],
                                       width: 3,
-                                      color: AppColors.navy.withValues(alpha: 0.4),
+                                      color:
+                                          AppColors.navy.withValues(alpha: 0.4),
                                     ),
-                              },
+                                  },
                         markers: {
                           Marker(
                             markerId: const MarkerId('destination'),

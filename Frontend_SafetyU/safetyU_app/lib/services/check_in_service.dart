@@ -42,6 +42,13 @@ class CheckInService {
         .cast<Map<String, dynamic>>();
   }
 
+  // Same call as alertStatus, but returns the session's own status too —
+  // used to notice a trusted contact resolved the whole session
+  // ("marked_safe") on the person's behalf, not just a per-contact reply.
+  static Future<Map<String, dynamic>> alertStatusFull(String checkInId) async {
+    return ApiClient.get('/checkins/$checkInId/alert-status');
+  }
+
   static Future<void> updateLocation(
     String checkInId, {
     required double latitude,

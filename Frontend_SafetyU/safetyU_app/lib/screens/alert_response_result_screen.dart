@@ -8,6 +8,7 @@ import '../models/help_request.dart';
 import '../models/incident.dart';
 import '../models/app_notification.dart';
 import '../services/app_session.dart';
+import '../services/notification_service.dart';
 
 enum AlertResponseOutcome { canHelp, cantHelp, lateResponse }
 
@@ -17,21 +18,48 @@ class AlertResponseResultScreen extends StatelessWidget {
   final Contact contact;
   final HelpRequest request;
   final AlertResponseOutcome outcome;
+  // Set when this screen was reached from a real backend alert (mirrors
+  // AlertDetailScreen.notificationId). When present, "Mark Safe" actually
+  // calls PUT /notifications/:id/response with marked_safe, which resolves
+  // the real session so the requester's own phone leaves the active-session
+  // screen automatically — without it, this was previously a purely local,
+  // cosmetic action that never told the requester anything.
+  final String? notificationId;
 
   const AlertResponseResultScreen({
     super.key,
     required this.contact,
     required this.request,
     required this.outcome,
+    this.notificationId,
   });
 
-  void _markRequesterSafe(BuildContext context) {
+  Future<void> _markRequesterSafe(BuildContext context) async {
+    final id = notificationId;
+    if (id != null) {
+      try {
+        await NotificationService.respondToSafetyAlert(id, 'marked_safe');
+      } catch (e) {
+        if (!context.mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+              content: Text(
+                  'Could not reach the server. Check your connection and try again.')),
+        );
+        return;
+      }
+    }
+    if (!context.mounted) return;
     AppSession.instance.addNotification(
       title: request.requesterName,
       body: 'You marked ${request.requesterName} as safe.',
       kind: NotificationKind.trustedContact,
     );
-    Navigator.of(context).popUntil((route) => route.isFirst);
+    // Explicit route, not popUntil(isFirst) — this can be reached from deep
+    // in another flow (e.g. mid safety-session setup) when a "Need Help"
+    // push comes in, and popping to whatever the stack's bottom route
+    // happens to be isn't reliably the home dashboard.
+    Navigator.of(context).pushNamedAndRemoveUntil('/home', (route) => false);
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text('${request.requesterName} is marked safe.')),
     );
@@ -79,7 +107,7 @@ class AlertResponseResultScreen extends StatelessWidget {
   }
 
   void _backToHome(BuildContext context) {
-    Navigator.of(context).popUntil((route) => route.isFirst);
+    Navigator.of(context).pushNamedAndRemoveUntil('/home', (route) => false);
   }
 
   void _alertEmergencyResponders(BuildContext context) {
@@ -103,7 +131,7 @@ class AlertResponseResultScreen extends StatelessWidget {
           '${contact.fullName} could not help and alerted Emergency Responders for ${request.requesterName}.',
       kind: NotificationKind.escalation,
     );
-    Navigator.of(context).popUntil((route) => route.isFirst);
+    Navigator.of(context).pushNamedAndRemoveUntil('/home', (route) => false);
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
           content: Text(

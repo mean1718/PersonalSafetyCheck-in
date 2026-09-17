@@ -477,6 +477,9 @@ class AppSession extends ChangeNotifier {
         final status = switch (contact['responseStatus']?.toString()) {
           'can_help' => ContactResponseStatus.canHelp,
           'cannot_help' => ContactResponseStatus.cantHelp,
+          // Implies canHelp — you can only mark someone safe after
+          // already confirming you can help them (see notificationController).
+          'marked_safe' => ContactResponseStatus.canHelp,
           _ => ContactResponseStatus.pending,
         };
         final notifiedAt =
