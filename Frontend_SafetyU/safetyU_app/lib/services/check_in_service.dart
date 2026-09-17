@@ -20,12 +20,18 @@ class CheckInService {
     String message = '',
     double? latitude,
     double? longitude,
+    double? destinationLatitude,
+    double? destinationLongitude,
   }) async {
     final data = await ApiClient.post('/checkins', {
       if (contactUserIds.isNotEmpty) 'contactUserIds': contactUserIds,
       'message': message,
       if (latitude != null) 'latitude': latitude,
       if (longitude != null) 'longitude': longitude,
+      if (destinationLatitude != null)
+        'destinationLatitude': destinationLatitude,
+      if (destinationLongitude != null)
+        'destinationLongitude': destinationLongitude,
     });
     final checkIn = data['checkIn'] as Map<String, dynamic>?;
     return checkIn?['_id']?.toString();
@@ -35,11 +41,14 @@ class CheckInService {
     await ApiClient.put('/checkins/$checkInId/complete', {});
   }
 
-  static Future<List<Map<String, dynamic>>> alertStatus(
-      String checkInId) async {
-    final data = await ApiClient.get('/checkins/$checkInId/alert-status');
-    return (data['notifiedContacts'] as List<dynamic>? ?? [])
-        .cast<Map<String, dynamic>>();
+  /// The full payload from GET /checkins/:id/alert-status -- both the
+  /// per-contact can/can't-help responses AND, when set, who confirmed the
+  /// owner safe (confirmedSafeBy). Used to be just the notifiedContacts
+  /// list; broadened so Active Session's existing poll of this same
+  /// endpoint can also drive the "Trust confirm you safe!" popup without
+  /// a second polling loop.
+  static Future<Map<String, dynamic>> alertStatus(String checkInId) async {
+    return ApiClient.get('/checkins/$checkInId/alert-status');
   }
 
   // Same call as alertStatus, but returns the session's own status too —
@@ -48,6 +57,11 @@ class CheckInService {
   static Future<Map<String, dynamic>> alertStatusFull(String checkInId) async {
     return ApiClient.get('/checkins/$checkInId/alert-status');
   }
+  /// Just the per-contact list, for callers that only need that part.
+  static List<Map<String, dynamic>> notifiedContactsFrom(
+          Map<String, dynamic> alertStatusData) =>
+      (alertStatusData['notifiedContacts'] as List<dynamic>? ?? [])
+          .cast<Map<String, dynamic>>();
 
   static Future<void> updateLocation(
     String checkInId, {
@@ -60,10 +74,14 @@ class CheckInService {
     });
   }
 
+  /// The full payload from GET /checkins/:id/location -- both the
+  /// session's LIVE location and, if the owner's session sent one, their
+  /// original destination. Returns null (rather than throwing) on any
+  /// failure -- no backend, session ended, not authorized, etc. -- same
+  /// honest fallback pattern used elsewhere in this app for backend sync.
   static Future<Map<String, dynamic>?> fetchLocation(String checkInId) async {
     try {
-      final data = await ApiClient.get('/checkins/$checkInId/location');
-      return data['location'] as Map<String, dynamic>?;
+      return await ApiClient.get('/checkins/$checkInId/location');
     } catch (_) {
       return null;
     }
@@ -91,5 +109,14 @@ class CheckInService {
     await ApiClient.post('/checkins/$checkInId/need-help', {
       if (contactUserIds.isNotEmpty) 'contactUserIds': contactUserIds,
     });
+  }
+
+  // POST /api/checkins/:id/confirm-safe — a trusted contact taps "Mark
+  // [owner] as Safe" on their side. This is what lets the OWNER's Active
+  // Session screen show a "Trust confirm you safe!" popup -- before this,
+  // that tap only ever updated the contact's own local notification list
+  // and the owner never actually found out.
+  static Future<void> confirmContactSafe(String checkInId) async {
+    await ApiClient.post('/checkins/$checkInId/confirm-safe', {});
   }
 }

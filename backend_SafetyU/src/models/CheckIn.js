@@ -43,6 +43,39 @@ const checkInSchema = new mongoose.Schema(
             }
         },
 
+        // Where this session's owner said they were headed when they
+        // started it (chosen on Session Setup). Separate from `location`
+        // above, which is their LIVE, moving position -- without this,
+        // a trusted contact's Alert Detail screen had no way to show both
+        // "where they are right now" and "where they were headed", the
+        // way the owner's own session screen already does.
+        destination: {
+            latitude: {
+                type: Number
+            },
+            longitude: {
+                type: Number
+            }
+        },
+
+        // Set once a trusted contact taps "Mark [name] as Safe" on their
+        // side. This is how the OWNER's own Active Session screen learns
+        // about it and can show a "Trust confirm you safe!" popup --
+        // before this there was no backend record of that action at all,
+        // it only ever updated the contact's own local notification list.
+        confirmedSafeBy: {
+            userId: {
+                type: mongoose.Schema.Types.ObjectId,
+                ref: "User"
+            },
+            name: {
+                type: String
+            },
+            at: {
+                type: Date
+            }
+        },
+
         startedAt: {
             type: Date,
             default: Date.now

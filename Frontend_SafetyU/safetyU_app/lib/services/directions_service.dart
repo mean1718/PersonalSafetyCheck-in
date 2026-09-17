@@ -1,4 +1,5 @@
 import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:google_polyline_algorithm/google_polyline_algorithm.dart';
 import 'api_client.dart';
 
 class RouteResult {
@@ -51,47 +52,24 @@ class DirectionsService {
       '&mode=${walking ? 'walking' : 'driving'}',
     );
     final encoded = body['encodedPolyline'] as String;
-    final points = _decodePolyline(encoded);
-    // ignore: avoid_print
-    print('[DIRECTIONS] encoded length=${encoded.length}, '
-        'decoded ${points.length} points. '
-        'First 3: ${points.take(3).toList()} '
-        'Last 3: ${points.skip(points.length > 3 ? points.length - 3 : 0).toList()}');
+    // This used to be a hand-written decoder using the same algorithm —
+    // but it used the `~` (bitwise complement) operator to handle negative
+    // deltas, which has a documented Dart-web (Chrome) compatibility bug:
+    // native Android/iOS builds compute it correctly (real 64-bit ints),
+    // but compiling to JavaScript for web can silently produce wrong
+    // values for that exact operator. That's almost certainly why routes
+    // decoded fine in theory (right point *count*) but rendered as a
+    // straight line on web specifically — some points' coordinates were
+    // simply wrong. Using the official, actively maintained package here
+    // instead, whose changelog explicitly lists fixing this same bug.
+    final decoded = decodePolyline(encoded);
+    final points = decoded
+        .map((pair) => LatLng(pair[0].toDouble(), pair[1].toDouble()))
+        .toList();
     return RouteResult(
       points: points,
       distanceMeters: (body['distanceMeters'] as num).toDouble(),
       durationSeconds: (body['durationSeconds'] as num).toDouble(),
     );
-  }
-
-  /// Decodes Google's polyline encoding format into a list of coordinates.
-  /// This is the standard algorithm Google documents at
-  /// https://developers.google.com/maps/documentation/utilities/polylinealgorithm
-  static List<LatLng> _decodePolyline(String encoded) {
-    final points = <LatLng>[];
-    int index = 0, lat = 0, lng = 0;
-    while (index < encoded.length) {
-      int shift = 0, result = 0, b;
-      do {
-        b = encoded.codeUnitAt(index++) - 63;
-        result |= (b & 0x1f) << shift;
-        shift += 5;
-      } while (b >= 0x20);
-      final dlat = (result & 1) != 0 ? ~(result >> 1) : (result >> 1);
-      lat += dlat;
-
-      shift = 0;
-      result = 0;
-      do {
-        b = encoded.codeUnitAt(index++) - 63;
-        result |= (b & 0x1f) << shift;
-        shift += 5;
-      } while (b >= 0x20);
-      final dlng = (result & 1) != 0 ? ~(result >> 1) : (result >> 1);
-      lng += dlng;
-
-      points.add(LatLng(lat / 1e5, lng / 1e5));
-    }
-    return points;
   }
 }

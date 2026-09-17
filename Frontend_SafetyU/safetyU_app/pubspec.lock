@@ -314,10 +314,10 @@ packages:
     dependency: transitive
     description:
       name: flutter_secure_storage_platform_interface
-      sha256: "4bc033841169d07f690d46d89dbc3f5305b6562820822445384c82e0866e2719"
+      sha256: "64951127f001f546891c86f414972bf49ef2c4c8a4c92c65f5790cc0c9100045"
       url: "https://pub.dev"
     source: hosted
-    version: "2.1.0"
+    version: "2.1.1"
   flutter_secure_storage_web:
     dependency: transitive
     description:
@@ -472,6 +472,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "0.6.3+1"
+  google_polyline_algorithm:
+    dependency: "direct main"
+    description:
+      name: google_polyline_algorithm
+      sha256: "357874f00d3f93c3ba1bf4b4d9a154aa9ee87147c068238c1e8392012b686a03"
+      url: "https://pub.dev"
+    source: hosted
+    version: "3.1.0"
   hooks:
     dependency: transitive
     description:

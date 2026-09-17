@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import '../services/marker_icons.dart';
+import '../services/directions_service.dart';
 
 import '../theme/app_theme.dart';
 import '../models/contact.dart';
@@ -48,10 +49,25 @@ class AlertDetailScreen extends StatefulWidget {
 
 class _AlertDetailScreenState extends State<AlertDetailScreen> {
   LatLng? _liveLocation;
+  // Where the session owner said they were headed, fetched from the
+  // backend alongside the live location -- kept separate so the map can
+  // show both "where they are right now" and "where they were headed",
+  // the same distinction the owner's own session screen shows.
+  LatLng? _destinationLocation;
   bool _isLoadingLocation = true;
   bool _sending = false;
-  BitmapDescriptor? _incidentIcon;
+  // Red pin -- the live, moving position. Violet pin -- the destination
+  // they set when the session started. Same palette as everywhere else
+  // markers are shown in this app (see MarkerIcons).
+  BitmapDescriptor? _liveIcon;
+  BitmapDescriptor? _destinationIcon;
   bool _markerIconRequested = false;
+  // The actual road/walking path from where they are to where they were
+  // headed -- without this the map only showed two disconnected pins with
+  // no sense of the route between them, the way active_session_screen's
+  // own map already does for the session owner.
+  RouteResult? _route;
+  bool _routeRequested = false;
 
   @override
   void didChangeDependencies() {
@@ -60,9 +76,15 @@ class _AlertDetailScreenState extends State<AlertDetailScreen> {
     // real pin image instead, same as every other map screen.
     if (!_markerIconRequested) {
       _markerIconRequested = true;
-      MarkerIcons.destination(context).then((icon) {
+      Future.wait([
+        MarkerIcons.destination(context),
+        MarkerIcons.contactSelected(context),
+      ]).then((icons) {
         if (!mounted) return;
-        setState(() => _incidentIcon = icon);
+        setState(() {
+          _liveIcon = icons[0];
+          _destinationIcon = icons[1];
+        });
       });
     }
   }
@@ -71,6 +93,7 @@ class _AlertDetailScreenState extends State<AlertDetailScreen> {
   void initState() {
     super.initState();
     _liveLocation = widget.request.location;
+    _destinationLocation = widget.request.destinationLocation;
     _fetchLiveLocation();
   }
 
@@ -82,14 +105,57 @@ class _AlertDetailScreenState extends State<AlertDetailScreen> {
     }
     final data = await CheckInService.fetchLocation(checkInId);
     if (!mounted) return;
-    final lat = (data?['latitude'] as num?)?.toDouble();
-    final lng = (data?['longitude'] as num?)?.toDouble();
+    final location = data?['location'] as Map<String, dynamic>?;
+    final destination = data?['destination'] as Map<String, dynamic>?;
+    final lat = (location?['latitude'] as num?)?.toDouble();
+    final lng = (location?['longitude'] as num?)?.toDouble();
+    final destLat = (destination?['latitude'] as num?)?.toDouble();
+    final destLng = (destination?['longitude'] as num?)?.toDouble();
     setState(() {
       if (lat != null && lng != null) {
         _liveLocation = LatLng(lat, lng);
       }
+      if (destLat != null && destLng != null) {
+        _destinationLocation = LatLng(destLat, destLng);
+      }
       _isLoadingLocation = false;
     });
+    _fetchRoute();
+  }
+
+  Future<void> _fetchRoute() async {
+    if (_routeRequested) return;
+    final from = _liveLocation;
+    final to = _destinationLocation;
+    if (from == null || to == null) return;
+    _routeRequested = true;
+    try {
+      final route =
+          await DirectionsService.route(from: from, to: to, walking: true);
+      if (!mounted) return;
+      setState(() => _route = route);
+    } catch (e) {
+      debugPrint('Route fetch failed: $e');
+      _routeRequested = false;
+    }
+  }
+
+  /// Smallest LatLngBounds containing every point given -- used to fit
+  /// both the live location and destination pins in frame together,
+  /// whichever side of each other they end up on.
+  LatLngBounds _boundsFor(List<LatLng> points) {
+    var minLat = points.first.latitude, maxLat = points.first.latitude;
+    var minLng = points.first.longitude, maxLng = points.first.longitude;
+    for (final p in points) {
+      if (p.latitude < minLat) minLat = p.latitude;
+      if (p.latitude > maxLat) maxLat = p.latitude;
+      if (p.longitude < minLng) minLng = p.longitude;
+      if (p.longitude > maxLng) maxLng = p.longitude;
+    }
+    return LatLngBounds(
+      southwest: LatLng(minLat, minLng),
+      northeast: LatLng(maxLat, maxLng),
+    );
   }
 
   String _formatClock(DateTime t) {
@@ -144,12 +210,27 @@ class _AlertDetailScreenState extends State<AlertDetailScreen> {
           .notifyOthersHelping(widget.contact.id, widget.contact.fullName);
     }
     if (!mounted) return;
+    // Carry forward whatever live location this screen actually fetched —
+    // widget.request only ever holds the original snapshot (often null),
+    // so without this the result screen's "View Live Location" always
+    // reports "No live location shared yet.", even right after this
+    // screen showed it on the map.
+    final updatedRequest = HelpRequest(
+      requesterName: widget.request.requesterName,
+      requesterPhone: widget.request.requesterPhone,
+      destination: widget.request.destination,
+      location: _liveLocation,
+      distanceKm: widget.request.distanceKm,
+      requestedAt: widget.request.requestedAt,
+      checkInId: widget.request.checkInId,
+      destinationLocation: _destinationLocation,
+    );
     Navigator.pushReplacement(
       context,
       MaterialPageRoute(
         builder: (_) => AlertResponseResultScreen(
           contact: widget.contact,
-          request: widget.request,
+          request: updatedRequest,
           outcome: outcome,
           notificationId: widget.notificationId,
         ),
@@ -161,6 +242,7 @@ class _AlertDetailScreenState extends State<AlertDetailScreen> {
   Widget build(BuildContext context) {
     final request = widget.request;
     final location = _liveLocation;
+    final destinationLocation = _destinationLocation;
     final distanceLabel = request.distanceKm != null
         ? '${request.distanceKm!.toStringAsFixed(1)} km'
         : 'Unavailable';
@@ -208,19 +290,64 @@ class _AlertDetailScreenState extends State<AlertDetailScreen> {
                                 alignment: Alignment.center,
                                 child: const CircularProgressIndicator(),
                               )
-                            : location != null
+                            : (location != null || destinationLocation != null)
                                 ? GoogleMap(
+                                    onMapCreated: (controller) {
+                                      // Fit both pins in frame when we have
+                                      // both -- otherwise just center on
+                                      // whichever one we actually have.
+                                      if (location != null &&
+                                          destinationLocation != null) {
+                                        Future.delayed(
+                                            const Duration(milliseconds: 200),
+                                            () {
+                                          controller.animateCamera(
+                                            CameraUpdate.newLatLngBounds(
+                                              _boundsFor([
+                                                location,
+                                                destinationLocation
+                                              ]),
+                                              40,
+                                            ),
+                                          );
+                                        });
+                                      }
+                                    },
                                     initialCameraPosition: CameraPosition(
-                                      target: location,
+                                      target: location ?? destinationLocation!,
                                       zoom: 14.5,
                                     ),
+                                    polylines: _route == null
+                                        ? {}
+                                        : {
+                                            Polyline(
+                                              polylineId: const PolylineId(
+                                                  'to-destination'),
+                                              points: _route!.points,
+                                              width: 4,
+                                              color: AppColors.navy,
+                                            ),
+                                          },
                                     markers: {
-                                      Marker(
-                                        markerId: const MarkerId('requester'),
-                                        position: location,
-                                        icon: _incidentIcon ??
-                                            BitmapDescriptor.defaultMarker,
-                                      ),
+                                      if (location != null)
+                                        Marker(
+                                          markerId: const MarkerId('live'),
+                                          position: location,
+                                          icon: _liveIcon ??
+                                              BitmapDescriptor.defaultMarker,
+                                          infoWindow: const InfoWindow(
+                                              title: 'Current location'),
+                                        ),
+                                      if (destinationLocation != null)
+                                        Marker(
+                                          markerId:
+                                              const MarkerId('destination'),
+                                          position: destinationLocation,
+                                          icon: _destinationIcon ??
+                                              BitmapDescriptor.defaultMarker,
+                                          infoWindow: const InfoWindow(
+                                              title: 'Destination'),
+                                        ),
                                     },
                                   )
                                 : Container(

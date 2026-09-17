@@ -12,6 +12,7 @@ const {
   updateLocation,
   viewSessionLocation,
   needHelpNow,
+  confirmContactSafe,
 } = require("../controllers/checkInController");
 const protect = require("../middleware/authMiddleware");
 
@@ -36,6 +37,10 @@ router.get("/:id/location", protect, viewSessionLocation);
 
 // Re-alert contacts right now (real Need Help escalation)
 router.post("/:id/need-help", protect, needHelpNow);
+
+// A trusted contact confirms the owner is safe -- see confirmContactSafe.
+router.post("/:id/confirm-safe", protect, confirmContactSafe);
+
 // Get my check-ins
 router.get("/", protect, getMyCheckIns);
 

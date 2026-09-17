@@ -7,6 +7,7 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:geolocator/geolocator.dart';
 import '../services/marker_icons.dart';
 import '../services/directions_service.dart';
+import '../services/debug_location.dart';
 import '../theme/app_theme.dart';
 import '../models/contact.dart';
 import '../services/app_session.dart';
@@ -41,6 +42,13 @@ class _SessionSetupScreenState extends State<SessionSetupScreen> {
   // buildings happened to be between the two points.
   RouteResult? _walkingRoute;
   int _routeRequestId = 0;
+  // Which travel mode the route (and the "Start Safety Session" arguments
+  // passed to the active session screen) should use. Defaults to walking
+  // since that's the more common case for a safety check-in, but driving
+  // gives a materially different (usually more direct, main-roads-only)
+  // route, so the person can pick whichever matches how they're actually
+  // getting there.
+  bool _drivingMode = false;
 
   Future<void> _fetchWalkingRoute() async {
     debugPrint('[SETUP] _fetchWalkingRoute called. '
@@ -58,7 +66,7 @@ class _SessionSetupScreenState extends State<SessionSetupScreen> {
       final route = await DirectionsService.route(
         from: _currentPosition!,
         to: _destinationCoords!,
-        walking: true,
+        walking: !_drivingMode,
       );
       // A newer request may have started (destination changed again) while
       // this one was in flight — drop the stale result instead of
@@ -122,12 +130,6 @@ class _SessionSetupScreenState extends State<SessionSetupScreen> {
   String? _locationStatusMessage;
   double _zoom = 14.0;
 
-  static const List<_QuickCategory> _quickCategories = [
-    _QuickCategory('Restaurants', Icons.restaurant_outlined, 'restaurants'),
-    _QuickCategory('Shopping', Icons.place_outlined, 'shopping mall'),
-    _QuickCategory('Coffee', Icons.local_cafe_outlined, 'coffee shop'),
-  ];
-
   @override
   void initState() {
     super.initState();
@@ -149,6 +151,12 @@ class _SessionSetupScreenState extends State<SessionSetupScreen> {
     super.dispose();
   }
 
+  void _setDrivingMode(bool driving) {
+    if (_drivingMode == driving) return;
+    setState(() => _drivingMode = driving);
+    _fetchWalkingRoute();
+  }
+
   void _moveCamera(LatLng target, double zoom) {
     _mapController?.animateCamera(CameraUpdate.newLatLngZoom(target, zoom));
   }
@@ -164,22 +172,6 @@ class _SessionSetupScreenState extends State<SessionSetupScreen> {
   /// already there — so tapping it visibly does something (a results
   /// dropdown appears) instead of silently focusing a field you can't see
   /// changed.
-  Future<void> _focusDestinationSearch() async {
-    if (_scrollController.hasClients) {
-      await _scrollController.animateTo(
-        0,
-        duration: const Duration(milliseconds: 300),
-        curve: Curves.easeOut,
-      );
-    }
-    if (!mounted) return;
-    _destinationFocusNode.requestFocus();
-    final text = _destinationController.text.trim();
-    if (text.isNotEmpty) {
-      _searchPlaces(text);
-    }
-  }
-
   // =========================================================
   // DURATION (hour / minute inputs)
   // =========================================================
@@ -253,10 +245,8 @@ class _SessionSetupScreenState extends State<SessionSetupScreen> {
         return;
       }
 
-      final Position initial = await Geolocator.getCurrentPosition(
-          desiredAccuracy: LocationAccuracy.high);
+      final initialLatLng = await DebugLocation.getCurrentPosition();
       if (!mounted) return;
-      final initialLatLng = LatLng(initial.latitude, initial.longitude);
       setState(() {
         _currentPosition = initialLatLng;
         _locationStatusMessage = null;
@@ -329,29 +319,25 @@ class _SessionSetupScreenState extends State<SessionSetupScreen> {
       _suppressNextSearch = false;
       return;
     }
-    if (_destinationController.text.trim().isNotEmpty &&
-        _showDestinationError) {
-      setState(() {
-        _showDestinationError = false;
-      });
-
-      _searchDebounce?.cancel();
-      final text = _destinationController.text.trim();
-      if (text.isEmpty) {
-        setState(() {
-          _suggestions = [];
-          _resolvedAddress = null;
-          _destinationCoords = null;
-          _walkingRoute = null;
-          _previewFailed = false;
-          _isSearching = false;
-        });
-        return;
-      }
-      setState(() => _isSearching = true);
-      _searchDebounce =
-          Timer(const Duration(milliseconds: 500), () => _searchPlaces(text));
+    if (_showDestinationError) {
+      setState(() => _showDestinationError = false);
     }
+    _searchDebounce?.cancel();
+    final text = _destinationController.text.trim();
+    if (text.isEmpty) {
+      setState(() {
+        _suggestions = [];
+        _resolvedAddress = null;
+        _destinationCoords = null;
+        _walkingRoute = null;
+        _previewFailed = false;
+        _isSearching = false;
+      });
+      return;
+    }
+    setState(() => _isSearching = true);
+    _searchDebounce =
+        Timer(const Duration(milliseconds: 500), () => _searchPlaces(text));
   }
 
   /// Calls Nominatim's public search endpoint directly (OpenStreetMap's
@@ -453,14 +439,6 @@ class _SessionSetupScreenState extends State<SessionSetupScreen> {
     _destinationFocusNode.unfocus();
     _maybeEstimateDuration();
     _fetchWalkingRoute();
-  }
-
-  void _pickQuickCategory(_QuickCategory category) {
-    final query = '${category.searchTerm}, Phnom Penh';
-    _destinationController.text = query;
-    _destinationController.selection =
-        TextSelection.collapsed(offset: query.length);
-    _destinationFocusNode.requestFocus();
   }
 
   bool get _canStartSession => _contactsConfirmed && !_isLookingUpAddress;
@@ -651,6 +629,7 @@ class _SessionSetupScreenState extends State<SessionSetupScreen> {
         'latitude': latitude,
         'longitude': longitude,
         'notifyContactIds': _notifyContacts.map((c) => c.id).toList(),
+        'drivingMode': _drivingMode,
       },
     );
   }
@@ -875,54 +854,101 @@ class _SessionSetupScreenState extends State<SessionSetupScreen> {
                         ),
                         const SizedBox(height: 10),
                       ],
-                      _buildSectionHeader(
-                        icon: Icons.place,
-                        title: 'Destination',
-                        subtitle: 'Select your destination',
-                      ),
-                      const SizedBox(height: 10),
-                      GestureDetector(
-                        onTap: _focusDestinationSearch,
-                        child: Container(
-                          width: double.infinity,
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 14, vertical: 14),
-                          decoration: BoxDecoration(
-                            color: AppColors.card,
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: AppColors.border),
-                          ),
-                          child: Row(
-                            children: [
-                              Icon(Icons.place,
-                                  color: AppColors.textMuted, size: 18),
-                              const SizedBox(width: 10),
-                              Expanded(
-                                child: Text(
-                                  _destinationController.text.isEmpty
-                                      ? 'Tap to choose location'
-                                      : _destinationController.text,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: TextStyle(
-                                    fontSize: 13.5,
-                                    fontWeight:
-                                        _destinationController.text.isEmpty
-                                            ? FontWeight.w400
-                                            : FontWeight.w700,
-                                    color: _destinationController.text.isEmpty
-                                        ? AppColors.textMuted
-                                        : AppColors.textPrimary,
+                      Row(
+                        children: [
+                          Expanded(
+                            child: GestureDetector(
+                              onTap: () => _setDrivingMode(false),
+                              child: Container(
+                                padding:
+                                    const EdgeInsets.symmetric(vertical: 10),
+                                decoration: BoxDecoration(
+                                  color: !_drivingMode
+                                      ? _accent.withValues(alpha: 0.12)
+                                      : AppColors.card,
+                                  borderRadius: const BorderRadius.horizontal(
+                                      left: Radius.circular(12)),
+                                  border: Border.all(
+                                    color: !_drivingMode
+                                        ? _accent
+                                        : AppColors.border,
                                   ),
                                 ),
+                                child: Row(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(Icons.directions_walk,
+                                        size: 16,
+                                        color: !_drivingMode
+                                            ? _accent
+                                            : AppColors.textSecondary),
+                                    const SizedBox(width: 6),
+                                    Text('Walking',
+                                        style: TextStyle(
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.w700,
+                                            color: !_drivingMode
+                                                ? _accent
+                                                : AppColors.textSecondary)),
+                                  ],
+                                ),
                               ),
-                              Icon(Icons.chevron_right,
-                                  color: AppColors.textMuted, size: 20),
-                            ],
+                            ),
                           ),
-                        ),
+                          Expanded(
+                            child: GestureDetector(
+                              onTap: () => _setDrivingMode(true),
+                              child: Container(
+                                padding:
+                                    const EdgeInsets.symmetric(vertical: 10),
+                                decoration: BoxDecoration(
+                                  color: _drivingMode
+                                      ? _accent.withValues(alpha: 0.12)
+                                      : AppColors.card,
+                                  borderRadius: const BorderRadius.horizontal(
+                                      right: Radius.circular(12)),
+                                  border: Border.all(
+                                    color: _drivingMode
+                                        ? _accent
+                                        : AppColors.border,
+                                  ),
+                                ),
+                                child: Row(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(Icons.directions_car,
+                                        size: 16,
+                                        color: _drivingMode
+                                            ? _accent
+                                            : AppColors.textSecondary),
+                                    const SizedBox(width: 6),
+                                    Text('Driving',
+                                        style: TextStyle(
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.w700,
+                                            color: _drivingMode
+                                                ? _accent
+                                                : AppColors.textSecondary)),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
-                      const SizedBox(height: 20),
+                      if (_walkingRoute != null) ...[
+                        const SizedBox(height: 6),
+                        Text(
+                          '${_walkingRoute!.distanceLabel} • ${_walkingRoute!.durationLabel}',
+                          style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: AppColors.textSecondary),
+                        ),
+                      ],
+                      const SizedBox(height: 14),
                       _buildSectionHeader(
                         icon: Icons.access_time,
                         title: 'Expected Time',
@@ -1139,7 +1165,7 @@ class _SessionSetupScreenState extends State<SessionSetupScreen> {
 
   Widget _buildMapSection() {
     return SizedBox(
-      height: 310,
+      height: 420,
       child: Stack(
         clipBehavior: Clip.none,
         children: [
@@ -1154,6 +1180,10 @@ class _SessionSetupScreenState extends State<SessionSetupScreen> {
             // plugin's in-place diffing for this one property.
             key: ValueKey(
                 'map-${_walkingRoute?.distanceMeters ?? 0}-${_walkingRoute?.durationSeconds ?? 0}'),
+            // The custom blue +/- circles already handle zoom — this turns
+            // off Google's own default zoom control so it doesn't render
+            // a second, redundant set of buttons underneath them.
+            zoomControlsEnabled: false,
             onMapCreated: (c) => _mapController = c,
             initialCameraPosition: CameraPosition(
               target: _currentPosition ?? _destinationCoords ?? _defaultCenter,
@@ -1348,58 +1378,8 @@ class _SessionSetupScreenState extends State<SessionSetupScreen> {
                 ] else ...[
                   const SizedBox(height: 8),
                   Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
                     children: [
-                      Expanded(
-                        child: SingleChildScrollView(
-                          scrollDirection: Axis.horizontal,
-                          child: Row(
-                            children: _quickCategories.map((cat) {
-                              return Padding(
-                                padding: const EdgeInsets.only(right: 6.0),
-                                child: GestureDetector(
-                                  onTap: () => _pickQuickCategory(cat),
-                                  child: Container(
-                                    padding: const EdgeInsets.symmetric(
-                                        horizontal: 10, vertical: 6),
-                                    decoration: BoxDecoration(
-                                      color: AppColors.card,
-                                      borderRadius: BorderRadius.circular(16),
-                                      boxShadow: [
-                                        BoxShadow(
-                                          color: Colors.black
-                                              .withValues(alpha: 0.05),
-                                          blurRadius: 4,
-                                        )
-                                      ],
-                                    ),
-                                    child: Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        Icon(cat.icon,
-                                            size: 14,
-                                            color: AppColors.textPrimary),
-                                        const SizedBox(width: 4),
-                                        Flexible(
-                                          child: Text(
-                                            cat.label,
-                                            overflow: TextOverflow.ellipsis,
-                                            style: TextStyle(
-                                              fontSize: 11,
-                                              fontWeight: FontWeight.w600,
-                                              color: AppColors.textPrimary,
-                                            ),
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ),
-                              );
-                            }).toList(),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 6),
                       PopupMenuButton<String>(
                         tooltip: 'More options',
                         padding: EdgeInsets.zero,
@@ -1576,11 +1556,4 @@ class _PlaceSuggestion {
   final double lon;
   const _PlaceSuggestion(
       {required this.displayName, required this.lat, required this.lon});
-}
-
-class _QuickCategory {
-  final String label;
-  final IconData icon;
-  final String searchTerm;
-  const _QuickCategory(this.label, this.icon, this.searchTerm);
 }

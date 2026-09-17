@@ -449,6 +449,7 @@ class _TrustedContactsScreenState extends State<TrustedContactsScreen> {
       distanceKm: null,
       requestedAt: DateTime.tryParse(alert['notifiedAt']?.toString() ?? '') ??
           DateTime.now(),
+      checkInId: alert['sessionId']?.toString(),
     );
     final thisId = alert['notificationId']?.toString();
     final siblingIds = matches

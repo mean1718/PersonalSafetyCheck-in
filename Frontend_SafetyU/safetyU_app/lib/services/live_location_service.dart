@@ -1,5 +1,7 @@
 import 'dart:async';
+import 'package:flutter/foundation.dart';
 import 'package:geolocator/geolocator.dart';
+import 'debug_location.dart';
 import 'api_client.dart';
 
 /// One live location point for a trusted contact, as returned by
@@ -76,7 +78,10 @@ class LiveLocationService {
   Future<bool> startSharing({
     Duration interval = const Duration(seconds: 8),
   }) async {
-    if (!await _ensurePermission()) return false;
+    if (!await DebugLocation.isAvailable()) {
+      debugPrint('LiveLocationService: location unavailable — not starting.');
+      return false;
+    }
 
     _sharing = true;
     await _pingOnce();
@@ -99,29 +104,15 @@ class LiveLocationService {
 
   Future<void> _pingOnce() async {
     try {
-      final position = await Geolocator.getCurrentPosition(
-        desiredAccuracy: LocationAccuracy.high,
-      );
+      final position = await DebugLocation.getCurrentPosition();
       await ApiClient.post('/location', {
         'latitude': position.latitude,
         'longitude': position.longitude,
-        'accuracy': position.accuracy,
-        'heading': position.heading,
       });
     } catch (_) {
       // Transient GPS/network hiccups shouldn't kill the whole sharing
       // session — just skip this tick and try again on the next timer fire.
     }
-  }
-
-  Future<bool> _ensurePermission() async {
-    if (!await Geolocator.isLocationServiceEnabled()) return false;
-    var permission = await Geolocator.checkPermission();
-    if (permission == LocationPermission.denied) {
-      permission = await Geolocator.requestPermission();
-    }
-    return permission == LocationPermission.always ||
-        permission == LocationPermission.whileInUse;
   }
 
   Future<Position> currentPosition() => Geolocator.getCurrentPosition(

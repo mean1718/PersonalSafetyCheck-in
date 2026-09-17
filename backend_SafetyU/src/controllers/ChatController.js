@@ -1,11 +1,10 @@
 const mongoose = require("mongoose");
 const ChatMessage = require("../models/ChatMessage");
 const Notification = require("../models/Notification");
-const { sendPushToUser } = require("../services/pushService");
 
-// POST /api/chat  { receiverId, text, kind? }
+// POST /api/chat  { receiverId, text, kind?, checkInId? }
 const sendMessage = async (req, res) => {
-  const { receiverId, text, kind } = req.body;
+  const { receiverId, text, kind, checkInId } = req.body;
   if (!receiverId || !mongoose.isValidObjectId(receiverId)) {
     return res.status(400).json({ message: "A valid receiverId is required." });
   }
@@ -15,10 +14,11 @@ const sendMessage = async (req, res) => {
   if (receiverId === req.user.id) {
     return res.status(400).json({ message: "Cannot message yourself." });
   }
+  if (checkInId && !mongoose.isValidObjectId(checkInId)) {
+    return res.status(400).json({ message: "Invalid checkInId." });
+  }
   try {
-    const normalizedKind = ["text", "helpRequest", "safeCheckIn"].includes(kind)
-      ? kind
-      : "text";
+    const normalizedKind = ["text", "helpRequest", "safeCheckIn"].includes(kind) ? kind : "text";
     const message = await ChatMessage.create({
       sender: req.user.id,
       receiver: receiverId,
@@ -28,8 +28,16 @@ const sendMessage = async (req, res) => {
     // A "Need Help" sent from chat is a real alert, not just a message the
     // trusted contact happens to see if they open the conversation — it
     // needs its own Notification so it shows up the same way a safety
-    // session's alert does (Home's "You were notified" card, etc.), even
-    // though there's no CheckIn session behind it.
+    // session's alert does (Home's "You were notified" card, etc.).
+    // When this help request came from an active safety session (the
+    // normal case — Active Session sends this alongside its own
+    // needHelpNow alert), checkInId links it to that same CheckIn. Without
+    // this, this Notification had no CheckIn at all, so a trusted contact
+    // opening THIS one specifically (its text is what actually shows on
+    // Alert Detail) could never get their live location — there was
+    // nothing for the backend to look the location up on, regardless of
+    // anything the app did. A "Need Help" sent from chat with no active
+    // session behind it (checkInId omitted) still works exactly as before.
     if (normalizedKind === "helpRequest") {
       await Notification.create({
         receiver: receiverId,
@@ -37,11 +45,7 @@ const sendMessage = async (req, res) => {
         type: "safety_alert",
         title: "Needs Help",
         message: text.trim(),
-      });
-      sendPushToUser(receiverId, {
-        title: `${req.authenticatedUser?.name || "A trusted contact"} needs help`,
-        body: text.trim(),
-        data: { type: "safety_alert" },
+        ...(checkInId ? { checkIn: checkInId } : {}),
       });
     } else if (normalizedKind === "safeCheckIn") {
       // Confirming Safe resolves whatever "Need Help" this same person had
@@ -92,7 +96,7 @@ const getConversation = async (req, res) => {
     }).sort({ createdAt: 1 });
     await ChatMessage.updateMany(
       { sender: userId, receiver: req.user.id, isRead: false },
-      { $set: { isRead: true } },
+      { $set: { isRead: true } }
     );
     return res.json({ messages });
   } catch (_) {
@@ -106,18 +110,11 @@ const getConversation = async (req, res) => {
 const getUnreadCounts = async (req, res) => {
   try {
     const rows = await ChatMessage.aggregate([
-      {
-        $match: {
-          receiver: new mongoose.Types.ObjectId(req.user.id),
-          isRead: false,
-        },
-      },
+      { $match: { receiver: new mongoose.Types.ObjectId(req.user.id), isRead: false } },
       { $group: { _id: "$sender", count: { $sum: 1 } } },
     ]);
     const counts = {};
-    rows.forEach((row) => {
-      counts[row._id.toString()] = row.count;
-    });
+    rows.forEach((row) => { counts[row._id.toString()] = row.count; });
     return res.json({ counts });
   } catch (_) {
     return res.status(500).json({ message: "Server error" });

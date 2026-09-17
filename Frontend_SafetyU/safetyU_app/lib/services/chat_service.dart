@@ -9,11 +9,17 @@ class ChatService {
     String receiverUserId,
     String text, {
     String kind = 'text',
+    // Links this message's auto-generated safety_alert Notification (for
+    // kind: 'helpRequest') to a real, active CheckIn, so the trusted
+    // contact opening THIS alert can fetch a real live location for it —
+    // without this, that Notification has no session behind it at all.
+    String? checkInId,
   }) async {
     await ApiClient.post('/chat', {
       'receiverId': receiverUserId,
       'text': text,
       'kind': kind,
+      if (checkInId != null) 'checkInId': checkInId,
     });
   }
 
@@ -24,7 +30,7 @@ class ChatService {
     final data = await ApiClient.get('/chat/$otherUserId');
     return (data['messages'] as List<dynamic>? ?? [])
         .cast<Map<String, dynamic>>();
-  }  
+  }
 
   /// { senderUserId: unreadCount } — powers the badge on each friend's
   /// message icon. Opening that conversation (see [conversation]) is what

@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import '../services/marker_icons.dart';
+import '../services/directions_service.dart';
+import '../services/check_in_service.dart';
 
 import '../theme/app_theme.dart';
 import '../models/contact.dart';
@@ -60,6 +62,16 @@ class AlertResponseResultScreen extends StatelessWidget {
     // push comes in, and popping to whatever the stack's bottom route
     // happens to be isn't reliably the home dashboard.
     Navigator.of(context).pushNamedAndRemoveUntil('/home', (route) => false);
+    // Tell the backend, not just this device's own local notification list
+    // -- without this, the requester's own Active Session screen never
+    // actually found out this happened at all.
+    final checkInId = request.checkInId;
+    if (checkInId != null) {
+      CheckInService.confirmContactSafe(checkInId).catchError((e) {
+        debugPrint('Confirm-safe sync skipped: $e');
+      });
+    }
+    Navigator.of(context).popUntil((route) => route.isFirst);
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text('${request.requesterName} is marked safe.')),
     );
@@ -67,42 +79,167 @@ class AlertResponseResultScreen extends StatelessWidget {
 
   void _viewLiveLocation(BuildContext context) {
     final location = request.location;
-    if (location == null) {
+    final destination = request.destinationLocation;
+    if (location == null && destination == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('No live location shared yet.')),
       );
       return;
     }
-    showModalBottomSheet(
+    // Drops down from the TOP of the screen instead of sliding up from the
+    // bottom (a plain showModalBottomSheet) -- easier to see at a glance
+    // without it competing with the buttons at the bottom of this screen.
+    showGeneralDialog(
       context: context,
-      isScrollControlled: true,
-      builder: (_) => SizedBox(
-        height: 320,
-        child: ClipRRect(
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
-          child: FutureBuilder<BitmapDescriptor>(
-            // BitmapDescriptor.defaultMarkerWithHue doesn't render on web —
-            // load a real pin image instead. This is a StatelessWidget
-            // shown as a one-off bottom sheet, so a FutureBuilder is used
-            // here rather than the didChangeDependencies pattern the
-            // stateful map screens use.
-            future: MarkerIcons.destination(context),
-            builder: (context, snapshot) {
-              return GoogleMap(
-                initialCameraPosition:
-                    CameraPosition(target: location, zoom: 15),
-                markers: {
-                  Marker(
-                    markerId: const MarkerId('requester'),
-                    position: location,
-                    icon: snapshot.data ?? BitmapDescriptor.defaultMarker,
+      barrierLabel: 'Live location',
+      barrierDismissible: true,
+      barrierColor: Colors.black54,
+      transitionDuration: const Duration(milliseconds: 220),
+      pageBuilder: (context, _, __) => const SizedBox.shrink(),
+      transitionBuilder: (context, animation, _, __) {
+        return SafeArea(
+          child: Align(
+            alignment: Alignment.topCenter,
+            child: SlideTransition(
+              position: Tween<Offset>(
+                begin: const Offset(0, -1),
+                end: Offset.zero,
+              ).animate(CurvedAnimation(
+                  parent: animation, curve: Curves.easeOutCubic)),
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                child: Material(
+                  borderRadius: BorderRadius.circular(20),
+                  clipBehavior: Clip.antiAlias,
+                  child: SizedBox(
+                    height: 320,
+                    child: Stack(
+                      children: [
+                        FutureBuilder<_MapAssets>(
+                          // BitmapDescriptor.defaultMarkerWithHue doesn't
+                          // render on web — load real pin images instead.
+                          // The route is fetched here too so this whole
+                          // one-shot dialog just re-renders once, same
+                          // FutureBuilder pattern, when everything's ready.
+                          future:
+                              _loadMapAssets(context, location, destination),
+                          builder: (context, snapshot) {
+                            final liveIcon = snapshot.data?.liveIcon;
+                            final destIcon = snapshot.data?.destinationIcon;
+                            final route = snapshot.data?.route;
+                            return GoogleMap(
+                              onMapCreated: (controller) {
+                                if (location != null && destination != null) {
+                                  Future.delayed(
+                                      const Duration(milliseconds: 200), () {
+                                    controller.animateCamera(
+                                      CameraUpdate.newLatLngBounds(
+                                        _boundsFor([location, destination]),
+                                        40,
+                                      ),
+                                    );
+                                  });
+                                }
+                              },
+                              initialCameraPosition: CameraPosition(
+                                target: location ?? destination!,
+                                zoom: 15,
+                              ),
+                              polylines: route == null
+                                  ? {}
+                                  : {
+                                      Polyline(
+                                        polylineId:
+                                            const PolylineId('to-destination'),
+                                        points: route.points,
+                                        width: 4,
+                                        color: AppColors.navy,
+                                      ),
+                                    },
+                              markers: {
+                                if (location != null)
+                                  Marker(
+                                    markerId: const MarkerId('live'),
+                                    position: location,
+                                    icon: liveIcon ??
+                                        BitmapDescriptor.defaultMarker,
+                                    infoWindow: const InfoWindow(
+                                        title: 'Current location'),
+                                  ),
+                                if (destination != null)
+                                  Marker(
+                                    markerId: const MarkerId('destination'),
+                                    position: destination,
+                                    icon: destIcon ??
+                                        BitmapDescriptor.defaultMarker,
+                                    infoWindow:
+                                        const InfoWindow(title: 'Destination'),
+                                  ),
+                              },
+                            );
+                          },
+                        ),
+                        Positioned(
+                          top: 8,
+                          right: 8,
+                          child: Material(
+                            color: Colors.white,
+                            shape: const CircleBorder(),
+                            elevation: 2,
+                            child: IconButton(
+                              icon: const Icon(Icons.close, size: 20),
+                              onPressed: () => Navigator.of(context).pop(),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
-                },
-              );
-            },
+                ),
+              ),
+            ),
           ),
-        ),
-      ),
+        );
+      },
+    );
+  }
+
+  /// Loads both marker icons and, when we have both endpoints, the actual
+  /// road/walking route between them -- bundled into one Future so this
+  /// one-shot dialog only needs a single FutureBuilder.
+  Future<_MapAssets> _loadMapAssets(
+      BuildContext context, LatLng? location, LatLng? destination) async {
+    final icons = await Future.wait([
+      MarkerIcons.destination(context),
+      MarkerIcons.contactSelected(context),
+    ]);
+    RouteResult? route;
+    if (location != null && destination != null) {
+      try {
+        route = await DirectionsService.route(
+            from: location, to: destination, walking: true);
+      } catch (e) {
+        debugPrint('Route fetch failed: $e');
+      }
+    }
+    return _MapAssets(
+        liveIcon: icons[0], destinationIcon: icons[1], route: route);
+  }
+
+  /// Smallest LatLngBounds containing every point given -- fits both the
+  /// live location and destination pins in frame together.
+  LatLngBounds _boundsFor(List<LatLng> points) {
+    var minLat = points.first.latitude, maxLat = points.first.latitude;
+    var minLng = points.first.longitude, maxLng = points.first.longitude;
+    for (final p in points) {
+      if (p.latitude < minLat) minLat = p.latitude;
+      if (p.latitude > maxLat) maxLat = p.latitude;
+      if (p.longitude < minLng) minLng = p.longitude;
+      if (p.longitude > maxLng) maxLng = p.longitude;
+    }
+    return LatLngBounds(
+      southwest: LatLng(minLat, minLng),
+      northeast: LatLng(maxLat, maxLng),
     );
   }
 
@@ -428,4 +565,19 @@ class _ResultScaffold extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Bundle of what the live-location popup's map needs to render in one
+/// go: both marker icons and, when both endpoints are known, the actual
+/// road/walking route between them.
+class _MapAssets {
+  final BitmapDescriptor liveIcon;
+  final BitmapDescriptor destinationIcon;
+  final RouteResult? route;
+
+  const _MapAssets({
+    required this.liveIcon,
+    required this.destinationIcon,
+    required this.route,
+  });
 }

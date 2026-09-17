@@ -7,9 +7,6 @@ import '../services/check_in_service.dart';
 import '../services/notification_service.dart';
 import '../services/trusted_contact_service.dart';
 import '../services/alert_sound.dart';
-import '../services/local_notification_service.dart';
-import '../services/push_notification_service.dart';
-import '../theme/avatar_colors.dart';
 import '../models/contact_response_state.dart';
 import '../models/contact.dart';
 import '../models/help_request.dart';
@@ -43,19 +40,6 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
   List<Map<String, dynamic>> _resolvedAlerts = [];
   final Set<String> _resolvedAlertsWithDismissTimerStarted = {};
 
-  // Incoming "someone added you as a trusted contact" requests — shown as
-  // a banner right here on Home for about a minute so it's impossible to
-  // miss, without permanently cluttering Home once it's been sitting
-  // unanswered a while (it's still reachable from Friends > Requests
-  // after that; only the Home banner times out, not the request itself).
-  List<Map<String, dynamic>> _incomingTrustRequests = [];
-  final Map<String, DateTime> _trustRequestFirstSeenAt = {};
-  final Set<String> _trustRequestDismissedIds = {};
-  // Tracks which requests already triggered a device notification, so the
-  // tray alert fires once per request instead of on every 6s poll.
-  final Set<String> _trustRequestDeviceNotified = {};
-  static const Duration _trustRequestBannerWindow = Duration(minutes: 1);
-
   // Without this, this screen only ever loads incoming alerts once, in
   // initState. So if Dan is just sitting on Home when Theara taps "I'm
   // Safe", nothing here ever re-fetches — his "You were notified" card
@@ -71,11 +55,9 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
     _loadIncomingAlerts();
     _loadResolvedAlerts();
     _loadPendingTrustRequestCount();
-    _loadIncomingTrustRequests();
     _incomingAlertsPollTimer = Timer.periodic(const Duration(seconds: 6), (_) {
       _loadIncomingAlerts();
       _loadResolvedAlerts();
-      _loadIncomingTrustRequests();
     });
   }
 
@@ -144,96 +126,16 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
     }
   }
 
-  /// Pulls the person's incoming trust requests and decides which of them
-  /// still belong on the Home banner:
-  ///  - a request is remembered the first moment it's seen, so its 1-minute
-  ///    countdown starts then (not on every poll);
-  ///  - once accepted/rejected it's dismissed immediately (see
-  ///    _respondToTrustRequest below) and never comes back here;
-  ///  - once a full minute has passed with no response, it quietly drops
-  ///    off the Home banner — it's still sitting under Friends > Requests
-  ///    for whenever they get to it, this just stops nagging Home.
-  Future<void> _loadIncomingTrustRequests() async {
-    try {
-      final requests = await TrustedContactService.receivedTrustRequests();
-      AppSession.instance.setPendingTrustRequestCount(requests.length);
-      final now = DateTime.now();
-      final visible = <Map<String, dynamic>>[];
-      final stillPendingIds = <String>{};
-      for (final request in requests) {
-        final id = request['_id']?.toString();
-        if (id == null || id.isEmpty) continue;
-        stillPendingIds.add(id);
-        if (_trustRequestDismissedIds.contains(id)) continue;
-        final firstSeen = _trustRequestFirstSeenAt.putIfAbsent(id, () => now);
-        if (!_trustRequestDeviceNotified.contains(id)) {
-          _trustRequestDeviceNotified.add(id);
-          final sender = request['sender'] as Map<String, dynamic>?;
-          LocalNotificationService.showTrustRequest(
-            id: id.hashCode,
-            senderName: sender?['name']?.toString() ?? 'Someone',
-          );
-        }
-        if (now.difference(firstSeen) >= _trustRequestBannerWindow) {
-          continue; // Timed out on Home — still answerable from Friends.
-        }
-        visible.add(request);
-      }
-      // Forget bookkeeping for requests that are no longer pending at all
-      // (answered from another screen, or cancelled by the sender) so a
-      // future request that happens to reuse an id starts its own clean
-      // 1-minute window.
-      _trustRequestFirstSeenAt
-          .removeWhere((id, _) => !stillPendingIds.contains(id));
-      _trustRequestDeviceNotified
-          .removeWhere((id) => !stillPendingIds.contains(id));
-      _trustRequestDismissedIds
-          .removeWhere((id) => !stillPendingIds.contains(id));
-      if (mounted) setState(() => _incomingTrustRequests = visible);
-    } catch (_) {
-      // Offline / not reachable — leave whatever was last loaded in place.
-    }
-  }
-
-  Future<void> _respondToTrustRequest(String id, bool accept) async {
-    // Dismiss from the banner right away — no reason to make them watch it
-    // sit there through the next poll, whichever way they answered.
-    _trustRequestDismissedIds.add(id);
-    if (mounted) {
-      setState(() {
-        _incomingTrustRequests = _incomingTrustRequests
-            .where((r) => r['_id']?.toString() != id)
-            .toList();
-      });
-    }
-    try {
-      await TrustedContactService.respondToTrustRequest(id, accept: accept);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-              content: Text(accept
-                  ? "You're now trusted contacts."
-                  : 'Trust request rejected.')),
-        );
-      }
-    } catch (_) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Could not update the Trust request.')),
-        );
-      }
-    }
-    _loadPendingTrustRequestCount();
-  }
-
   Future<void> _loadAlertStatus() async {
     final checkInId = AppSession.instance.activeCheckInId;
     if (checkInId == null || _loadingAlertStatus) return;
     _loadingAlertStatus = true;
     try {
-      final contacts = await CheckInService.alertStatus(checkInId);
-      if (mounted)
-        AppSession.instance.replaceAlertResponsesFromBackend(contacts);
+      final data = await CheckInService.alertStatus(checkInId);
+      if (mounted) {
+        AppSession.instance.replaceAlertResponsesFromBackend(
+            CheckInService.notifiedContactsFrom(data));
+      }
     } catch (_) {
       // The local state remains available while an offline backend reconnects.
     } finally {
@@ -263,24 +165,10 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
       // screen isn't polling continuously, but it does reload after
       // viewing a detail, so without this a resolved-then-reopened alert
       // list would replay the sound for the same alert again.
-      final newOnes = pending
-          .where((a) =>
-              !_seenAlertIds.contains(a['notificationId']?.toString() ?? ''))
-          .toList();
+      final newOnes = pending.where((a) =>
+          !_seenAlertIds.contains(a['notificationId']?.toString() ?? ''));
       if (newOnes.isNotEmpty) {
         AlertSoundService.playAlert(times: 3);
-        // Also put a real tray notification on the phone for each new
-        // alert — the in-app sound only helps if SafetyU is already the
-        // thing on screen.
-        for (final alert in newOnes) {
-          final notifId = alert['notificationId']?.toString() ?? '';
-          LocalNotificationService.showSafetyAlert(
-            id: notifId.isEmpty
-                ? DateTime.now().millisecondsSinceEpoch
-                : notifId.hashCode,
-            ownerName: alert['ownerName']?.toString() ?? 'A trusted friend',
-          );
-        }
       }
       _seenAlertIds
           .addAll(pending.map((a) => a['notificationId']?.toString() ?? ''));
@@ -312,6 +200,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
       distanceKm: null,
       requestedAt: DateTime.tryParse(alert['notifiedAt']?.toString() ?? '') ??
           DateTime.now(),
+      checkInId: alert['sessionId']?.toString(),
     );
     final thisId = alert['notificationId']?.toString();
     // Repeated test/duplicate alerts from the same person pile up fast.
@@ -357,10 +246,6 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
   }
 
   void _logout() {
-    // Best effort, fire-and-forget — stops this device's push token from
-    // being tied to the account they're about to leave, without holding
-    // up the actual sign-out.
-    PushNotificationService.unregister();
     AppSession.instance.signOut();
     Navigator.pushNamedAndRemoveUntil(context, '/login', (route) => false);
   }
@@ -532,13 +417,6 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                 ],
               ),
               const SizedBox(height: 20),
-              if (_incomingTrustRequests.isNotEmpty) ...[
-                _TrustRequestsPanel(
-                  requests: _incomingTrustRequests,
-                  onRespond: _respondToTrustRequest,
-                ),
-                const SizedBox(height: 20),
-              ],
               if (_resolvedAlerts.isNotEmpty) ...[
                 _ResolvedSafeAlertsPanel(alerts: _resolvedAlerts),
                 const SizedBox(height: 20),

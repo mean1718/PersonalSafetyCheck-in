@@ -104,6 +104,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
 
   void _openAlertDetail(Map<String, dynamic> notification) {
     final sender = notification['sender'] as Map<String, dynamic>?;
+    final checkIn = notification['checkIn'] as Map<String, dynamic>?;
     final owner = Contact(
       id: sender?['_id']?.toString() ?? '',
       fullName: sender?['name']?.toString() ?? 'A trusted friend',
@@ -121,6 +122,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
       requestedAt:
           DateTime.tryParse(notification['createdAt']?.toString() ?? '') ??
               DateTime.now(),
+      checkInId: checkIn?['_id']?.toString(),
     );
     Navigator.push(
       context,
@@ -244,35 +246,12 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                     for (final notification in _backendNotifications) ...[
                       InkWell(
                         onTap: () async {
-  final id = notification['_id']?.toString();
-
-  if (id != null) {
-    await NotificationService.markRead(id);
-  }
-
-  if (!mounted) return;
-
-  if (notification['type'] == 'emergency_alert') {
-    final emergencyId =
-        notification['emergency']?.toString();
-
-    if (emergencyId != null &&
-        emergencyId.isNotEmpty) {
-      await Navigator.pushNamed(
-        context,
-        '/case-detail',
-        arguments: emergencyId,
-      );
-
-      if (!mounted) return;
-
-      await _loadBackendNotifications();
-      return;
-    }
-  }
-
-  await _loadBackendNotifications();
-},
+                          final id = notification['_id']?.toString();
+                          if (id != null) {
+                            await NotificationService.markRead(id);
+                          }
+                          await _loadBackendNotifications();
+                        },
                         child: Container(
                           padding: const EdgeInsets.all(14),
                           decoration: BoxDecoration(
@@ -282,53 +261,6 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                           child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                if (notification['type'] == 'emergency_alert')
-  Row(
-    children: [
-      Icon(
-        Icons.local_police,
-        color: AppColors.danger,
-        size: 18,
-      ),
-      const SizedBox(width: 6),
-      Text(
-        'EMERGENCY',
-        style: TextStyle(
-          color: AppColors.danger,
-          fontSize: 10,
-          fontWeight: FontWeight.w800,
-        ),
-      ),
-      const Spacer(),
-      const Icon(
-        Icons.chevron_right,
-        size: 18,
-      ),
-    ],
-  ),
-
-  if (notification['type'] == 'emergency_status')
-  Row(
-    children: [
-      Icon(
-        Icons.verified_user,
-        color: AppColors.success,
-        size: 18,
-      ),
-      const SizedBox(width: 6),
-      Text(
-        'EMERGENCY UPDATE',
-        style: TextStyle(
-          color: AppColors.success,
-          fontSize: 10,
-          fontWeight: FontWeight.w800,
-        ),
-      ),
-    ],
-  ),
-
-if (notification['type'] == 'emergency_alert')
-  const SizedBox(height: 8),
                                 Text(
                                     notification['title']?.toString() ??
                                         'SafetyU Alert',

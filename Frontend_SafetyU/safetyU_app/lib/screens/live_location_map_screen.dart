@@ -37,18 +37,17 @@ class _LiveLocationMapScreenState extends State<LiveLocationMapScreen> {
     // real pin images instead, same as every other map screen.
     if (!_markerIconsRequested) {
       _markerIconsRequested = true;
-      Future.wait([
-        MarkerIcons.me(context),
-        MarkerIcons.contact(context),
-        MarkerIcons.contactSelected(context),
-      ]).then((icons) {
+      () async {
+        final me = await MarkerIcons.me(context);
+        final contact = await MarkerIcons.contact(context);
+        final contactSelected = await MarkerIcons.contactSelected(context);
         if (!mounted) return;
         setState(() {
-          _meIcon = icons[0];
-          _contactIcon = icons[1];
-          _contactSelectedIcon = icons[2];
+          _meIcon = me;
+          _contactIcon = contact;
+          _contactSelectedIcon = contactSelected;
         });
-      });
+      }();
     }
   }
   Timer? _refreshTimer;

@@ -17,6 +17,12 @@ class HelpRequest {
   // Used by AlertDetailScreen to fetch the Safety User's REAL, live
   // location from the backend instead of relying on this snapshot.
   final String? checkInId;
+  // Where the session owner actually said they were headed (from the
+  // CheckIn's stored destination coordinates), separate from [location]
+  // above which is their LIVE, moving position. Null until fetched from
+  // the backend -- AlertDetailScreen fills this in alongside the live
+  // location fetch, the same way it fills in [location].
+  final LatLng? destinationLocation;
 
   const HelpRequest({
     required this.requesterName,
@@ -26,5 +32,6 @@ class HelpRequest {
     required this.distanceKm,
     required this.requestedAt,
     this.checkInId,
+    this.destinationLocation,
   });
 }

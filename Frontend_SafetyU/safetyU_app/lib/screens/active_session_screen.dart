@@ -47,20 +47,72 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
   // map just drew a straight line cutting through whatever was in between.
   RouteResult? _walkingRoute;
   int _routeRequestId = 0;
+  // Pushes the live position to the backend on a fixed interval,
+  // independent of GPS movement. The position STREAM alone
+  // (distanceFilter: 5) only fires again once the device has physically
+  // moved 5+ meters — on a stationary phone, a desk-bound test, or a
+  // browser/emulator with a fixed location, that stream fires once (or
+  // never again) for the whole session. Combined with the check-in id
+  // arriving asynchronously from the backend a moment after the screen
+  // opens, that one stream event can easily land before _checkInId is
+  // set, and no update is EVER sent afterward. The trusted contact then
+  // sees "Location unavailable" for the entire session even though the
+  // app itself has a perfectly good GPS fix, because the backend was
+  // simply never told what it is. This timer guarantees a fresh push
+  // every few seconds regardless of movement, same pattern already used
+  // for the separate "share my location with friends" feature.
+  Timer? _locationPushTimer;
+  // Where/when the route currently on screen was actually drawn from.
+  // Without tracking this, the polyline was fetched once off the very
+  // first GPS fix (which on web/emulators is often a rough, low-accuracy
+  // reading before the real fix comes in) and then never refreshed —
+  // meanwhile the blue "me" marker kept moving with every position-stream
+  // update, so the line visibly stopped matching where you actually were.
+  LatLng? _routeOrigin;
+  DateTime? _routeFetchedAt;
 
   Future<void> _fetchWalkingRoute() async {
     if (_currentPosition == null) return;
     final requestId = ++_routeRequestId;
+    final origin = _currentPosition!;
     try {
       final route = await DirectionsService.route(
-        from: _currentPosition!,
+        from: origin,
         to: _destinationCoords,
         walking: true,
       );
       if (!mounted || requestId != _routeRequestId) return;
-      setState(() => _walkingRoute = route);
+      setState(() {
+        _walkingRoute = route;
+        _routeOrigin = origin;
+        _routeFetchedAt = DateTime.now();
+      });
     } catch (e) {
       debugPrint('Route fetch failed: $e');
+    }
+  }
+
+  /// Called on every live position update. Re-requests the road path only
+  /// once you've moved far enough (25m) or enough time has passed (20s)
+  /// since the last fetch — keeps the drawn line matching your real
+  /// position without hammering the Directions API on every 5m GPS tick.
+  void _maybeRefreshWalkingRoute() {
+    if (_currentPosition == null) return;
+    final lastOrigin = _routeOrigin;
+    final lastFetchedAt = _routeFetchedAt;
+    if (lastOrigin == null || lastFetchedAt == null) {
+      _fetchWalkingRoute();
+      return;
+    }
+    final movedMeters = Geolocator.distanceBetween(
+      lastOrigin.latitude,
+      lastOrigin.longitude,
+      _currentPosition!.latitude,
+      _currentPosition!.longitude,
+    );
+    final staleFor = DateTime.now().difference(lastFetchedAt);
+    if (movedMeters >= 25 || staleFor >= const Duration(seconds: 20)) {
+      _fetchWalkingRoute();
     }
   }
 
@@ -83,6 +135,10 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
   // time a trusted contact actually responds this session — never on a
   // fixed delay or just because the session started.
   bool _trustConfirmedDialogShown = false;
+  // Separate from the flag above -- that one's for "a contact said Can
+  // Help"; this one's for "a contact tapped Mark [me] as Safe", a
+  // distinct action with its own popup (see _maybeShowContactConfirmedSafeDialog).
+  bool _confirmedSafeDialogShown = false;
 
   // ---- Backend sync (see services/check_in_service.dart and
   // emergency_service.dart) ----
@@ -149,6 +205,7 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
     _stageTimer?.cancel();
     _alertStatusPollTimer?.cancel();
     _positionSub?.cancel();
+    _locationPushTimer?.cancel();
     super.dispose();
   }
 
@@ -279,15 +336,21 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
       message: 'Safety session to $_destination',
       latitude: pos?.latitude,
       longitude: pos?.longitude,
+      // So a trusted contact's Alert Detail screen can show where this
+      // session was actually headed, not just the live-moving position.
+      destinationLatitude: _destinationCoords.latitude,
+      destinationLongitude: _destinationCoords.longitude,
     ).then((id) {
       if (mounted) {
         _checkInId = id;
         AppSession.instance.activeCheckInId = id;
         if (id != null) {
+          // Don't wait for the next periodic tick — if a GPS fix is
+          // already sitting in _currentPosition, get it to the backend
+          // the moment we actually have somewhere to send it to.
+          _pushLocationToBackend();
           CheckInService.alertStatus(id)
-              .then(
-                AppSession.instance.replaceAlertResponsesFromBackend,
-              )
+              .then(_applyAlertStatus)
               .catchError((e) => debugPrint('Alert status sync skipped: $e'));
           _startAlertStatusPolling(id);
         }
@@ -297,6 +360,20 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
       debugPrint('CheckIn sync skipped: $e');
       return null;
     });
+  }
+
+  /// Applies one GET /alert-status payload: updates the per-contact
+  /// responses AppSession already tracks, and separately checks for a
+  /// fresh confirmedSafeBy -- shared by every call site below instead of
+  /// duplicating this each time.
+  void _applyAlertStatus(Map<String, dynamic> data) {
+    AppSession.instance.replaceAlertResponsesFromBackend(
+        CheckInService.notifiedContactsFrom(data));
+    final confirmedSafeBy = data['confirmedSafeBy'] as Map<String, dynamic>?;
+    if (confirmedSafeBy != null) {
+      _maybeShowContactConfirmedSafeDialog(
+          confirmedSafeBy['name']?.toString() ?? 'Your trusted contact');
+    }
   }
 
   // Without this, a contact's real "I can help" only ever gets pulled in
@@ -313,6 +390,7 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
       if (!mounted) return;
       try {
         final full = await CheckInService.alertStatusFull(checkInId);
+        final data = await CheckInService.alertStatus(checkInId);
         if (!mounted) return;
         // A trusted contact confirmed this person safe on their behalf
         // (AlertResponseResultScreen's "Mark Safe") — the backend already
@@ -327,7 +405,7 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
         final contacts = (full['notifiedContacts'] as List<dynamic>? ?? [])
             .cast<Map<String, dynamic>>();
         final wasConfirmed = _someoneConfirmedHelp();
-        AppSession.instance.replaceAlertResponsesFromBackend(contacts);
+        _applyAlertStatus(data);
         if (!wasConfirmed && _someoneConfirmedHelp()) {
           // A response just came in — stop whatever escalation is running
           // right now rather than waiting for its own timer to notice.
@@ -361,8 +439,8 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
       // recipients. This is the point where the actual notified account is
       // known, so Home can never substitute the session owner.
       if (_checkInId != null) {
-        final contacts = await CheckInService.alertStatus(_checkInId!);
-        AppSession.instance.replaceAlertResponsesFromBackend(contacts);
+        final data = await CheckInService.alertStatus(_checkInId!);
+        _applyAlertStatus(data);
       }
     } catch (e) {
       debugPrint('Emergency sync skipped: $e');
@@ -641,14 +719,82 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
     );
   }
 
-  // AppSession.sendChatMessage only ever wrote to this device's own local
+  // The dialog shown when a trusted contact taps "Mark [me] as Safe" on
+  // their side (see confirmContactSafe / _applyAlertStatus above) -- a
+  // distinct action from confirming "Can Help", so it gets its own popup
+  // rather than reusing _maybeShowTrustConfirmedDialog's text.
+  void _maybeShowContactConfirmedSafeDialog(String contactName) {
+    if (_confirmedSafeDialogShown || !mounted) return;
+    _confirmedSafeDialogShown = true;
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) {
+        // No "OK" button — this is a quick reassurance, not a decision
+        // the person needs to make, so it clears itself on its own.
+        Future.delayed(const Duration(seconds: 4), () {
+          if (Navigator.of(dialogContext).canPop()) {
+            Navigator.of(dialogContext).pop();
+          }
+        });
+        return Dialog(
+          backgroundColor: Colors.white,
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(28, 32, 28, 28),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 64,
+                  height: 64,
+                  decoration: BoxDecoration(
+                    color: AppColors.success.withValues(alpha: 0.15),
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(Icons.check, color: AppColors.success, size: 32),
+                ),
+                const SizedBox(height: 18),
+                Text('Trust confirm you safe!',
+                    style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.w800,
+                        color: AppColors.textPrimary)),
+                const SizedBox(height: 10),
+                Text(
+                  'Your trusted contact has confirmed you are safe. You are now aware that you are safe.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                      fontSize: 14,
+                      color: AppColors.textSecondary,
+                      height: 1.4),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   // thread — the trusted contact never actually received "Need Help" or
   // "I'm Safe" at all, they were only ever visible on the sender's own
   // phone. This sends the real message too, so it actually reaches them.
   void _sendRealChatMessage(String contactId, String text,
       {required ChatMessageKind kind, required String backendKind}) {
     AppSession.instance.sendChatMessage(contactId, text, kind: kind);
-    ChatService.send(contactId, text, kind: backendKind).catchError((e) {
+    ChatService.send(
+      contactId,
+      text,
+      kind: backendKind,
+      // Links the safety_alert Notification this creates back to this
+      // session's real CheckIn — see chat_service.dart / ChatController.js.
+      // Without this, the alert generated from THIS message (its exact
+      // text is what shows on Alert Detail) could never resolve a live
+      // location, no matter what the contact's screen tried to fetch.
+      checkInId: backendKind == 'helpRequest' ? _checkInId : null,
+    ).catchError((e) {
       debugPrint('Chat delivery skipped: $e');
     });
   }
@@ -859,6 +1005,17 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
     }
   }
 
+  void _pushLocationToBackend() {
+    final checkInId = _checkInId;
+    final position = _currentPosition;
+    if (checkInId == null || position == null) return;
+    CheckInService.updateLocation(
+      checkInId,
+      latitude: position.latitude,
+      longitude: position.longitude,
+    ).catchError((e) => debugPrint('Location sync skipped: $e'));
+  }
+
   Future<void> _initLocationTracking() async {
     try {
       final bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
@@ -918,6 +1075,7 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
           // have a real (if slightly old) location to send instead of
           // nothing at all.
           AppSession.instance.updateLastKnownPosition(latLng);
+          _maybeRefreshWalkingRoute();
           if (_checkInId != null) {
             CheckInService.updateLocation(
               _checkInId!,
@@ -936,6 +1094,11 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
       debugPrint('[ACTIVE] Location initialization error: $e');
       _setLocationStatus('Could not get your current location.');
     }
+    _locationPushTimer?.cancel();
+    _locationPushTimer = Timer.periodic(
+      const Duration(seconds: 8),
+      (_) => _pushLocationToBackend(),
+    );
   }
 
   void _setLocationStatus(String message) {
