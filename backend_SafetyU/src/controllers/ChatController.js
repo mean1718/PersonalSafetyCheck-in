@@ -1,6 +1,7 @@
 const mongoose = require("mongoose");
 const ChatMessage = require("../models/ChatMessage");
 const Notification = require("../models/Notification");
+const { sendPushToUser } = require("../services/pushService");
 
 // POST /api/chat  { receiverId, text, kind? }
 const sendMessage = async (req, res) => {
@@ -15,7 +16,9 @@ const sendMessage = async (req, res) => {
     return res.status(400).json({ message: "Cannot message yourself." });
   }
   try {
-    const normalizedKind = ["text", "helpRequest", "safeCheckIn"].includes(kind) ? kind : "text";
+    const normalizedKind = ["text", "helpRequest", "safeCheckIn"].includes(kind)
+      ? kind
+      : "text";
     const message = await ChatMessage.create({
       sender: req.user.id,
       receiver: receiverId,
@@ -34,6 +37,11 @@ const sendMessage = async (req, res) => {
         type: "safety_alert",
         title: "Needs Help",
         message: text.trim(),
+      });
+      sendPushToUser(receiverId, {
+        title: `${req.authenticatedUser?.name || "A trusted contact"} needs help`,
+        body: text.trim(),
+        data: { type: "safety_alert" },
       });
     } else if (normalizedKind === "safeCheckIn") {
       // Confirming Safe resolves whatever "Need Help" this same person had
@@ -74,7 +82,7 @@ const getConversation = async (req, res) => {
     }).sort({ createdAt: 1 });
     await ChatMessage.updateMany(
       { sender: userId, receiver: req.user.id, isRead: false },
-      { $set: { isRead: true } }
+      { $set: { isRead: true } },
     );
     return res.json({ messages });
   } catch (_) {
@@ -88,11 +96,18 @@ const getConversation = async (req, res) => {
 const getUnreadCounts = async (req, res) => {
   try {
     const rows = await ChatMessage.aggregate([
-      { $match: { receiver: new mongoose.Types.ObjectId(req.user.id), isRead: false } },
+      {
+        $match: {
+          receiver: new mongoose.Types.ObjectId(req.user.id),
+          isRead: false,
+        },
+      },
       { $group: { _id: "$sender", count: { $sum: 1 } } },
     ]);
     const counts = {};
-    rows.forEach((row) => { counts[row._id.toString()] = row.count; });
+    rows.forEach((row) => {
+      counts[row._id.toString()] = row.count;
+    });
     return res.json({ counts });
   } catch (_) {
     return res.status(500).json({ message: "Server error" });

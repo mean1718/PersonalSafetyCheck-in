@@ -29,8 +29,20 @@ import 'screens/case_detail_screen.dart';
 import 'screens/update_case_screen.dart';
 import 'screens/case_resolved_screen.dart';
 import 'screens/report_screen.dart';
+import 'services/local_notification_service.dart';
+import 'services/push_notification_service.dart';
 
 void main() {
+  WidgetsFlutterBinding.ensureInitialized();
+  // Fire-and-forget: sets up the notification channels/permissions so the
+  // app can put alerts in the phone's tray the moment something needs one
+  // (see local_notification_service.dart). Never blocks app startup.
+  LocalNotificationService.init();
+  // Registers this device for real push notifications (trust requests,
+  // safety alerts) that arrive even while SafetyU is fully closed — see
+  // push_notification_service.dart for the one-time Firebase setup this
+  // needs before it actually does anything.
+  PushNotificationService.init();
   runApp(const SafetyUApp());
 }
 

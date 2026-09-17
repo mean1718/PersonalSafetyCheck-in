@@ -3,6 +3,7 @@ const CheckIn = require("../models/CheckIn");
 const TrustedContact = require("../models/TrustedContact");
 const Notification = require("../models/Notification");
 const User = require("../models/User");
+const { sendPushToUsers } = require("../services/pushService");
 
 // Start Emergency
 const startEmergency = async (req, res) => {
@@ -25,13 +26,19 @@ const startEmergency = async (req, res) => {
     // is only a fallback for older sessions without trustedContactUser.
     const selectedIds = checkIn.trustedContactUsers?.length
       ? checkIn.trustedContactUsers
-      : checkIn.trustedContactUser ? [checkIn.trustedContactUser] : [];
+      : checkIn.trustedContactUser
+        ? [checkIn.trustedContactUser]
+        : [];
     const selectedUsers = selectedIds.length
       ? await User.find({ _id: { $in: selectedIds } }).select("name phone")
       : [];
-    const primaryContact = selectedUsers.length ? null : await TrustedContact.findOne({
-      user: req.user.id, priority: "primary", isActive: true,
-    });
+    const primaryContact = selectedUsers.length
+      ? null
+      : await TrustedContact.findOne({
+          user: req.user.id,
+          priority: "primary",
+          isActive: true,
+        });
     if (!selectedUsers.length && !primaryContact) {
       return res.status(404).json({
         message: "Primary trusted contact not found",
@@ -52,17 +59,30 @@ const startEmergency = async (req, res) => {
     });
 
     if (selectedUsers.length) {
-      const existingAlert = await Notification.exists({ checkIn: checkIn._id, type: "safety_alert" });
+      const existingAlert = await Notification.exists({
+        checkIn: checkIn._id,
+        type: "safety_alert",
+      });
       if (!existingAlert) {
         const sender = await User.findById(req.user.id).select("name");
-        await Notification.insertMany(selectedUsers.map((selectedUser) => ({
-          receiver: selectedUser._id,
-          sender: req.user.id,
-          checkIn: checkIn._id,
-          type: "safety_alert",
-          title: "SafetyU Alert",
-          message: `${sender?.name || "A trusted contact"} may need your attention.`,
-        })));
+        await Notification.insertMany(
+          selectedUsers.map((selectedUser) => ({
+            receiver: selectedUser._id,
+            sender: req.user.id,
+            checkIn: checkIn._id,
+            type: "safety_alert",
+            title: "SafetyU Alert",
+            message: `${sender?.name || "A trusted contact"} may need your attention.`,
+          })),
+        );
+        sendPushToUsers(
+          selectedUsers.map((u) => u._id),
+          {
+            title: "SafetyU Alert",
+            body: `${sender?.name || "A trusted contact"} may need your attention.`,
+            data: { type: "safety_alert", checkInId: checkIn._id.toString() },
+          },
+        );
       }
     }
 

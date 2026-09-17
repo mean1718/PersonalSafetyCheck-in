@@ -2,6 +2,7 @@ const CheckIn = require("../models/CheckIn");
 const TrustRequest = require("../models/TrustRequest");
 const Notification = require("../models/Notification");
 const mongoose = require("mongoose");
+const { sendPushToUsers } = require("../services/pushService");
 
 const hasAcceptedTrust = (userId, contactId) =>
   TrustRequest.exists({
@@ -121,7 +122,9 @@ const completeAllMyActiveCheckIns = async (req, res) => {
       modified: result.modifiedCount ?? result.nModified,
     });
   } catch (error) {
-    return res.status(500).json({ message: "Server error", error: error.message });
+    return res
+      .status(500)
+      .json({ message: "Server error", error: error.message });
   }
 };
 
@@ -207,10 +210,15 @@ const getAlertStatus = async (req, res) => {
       }
       // Keep the earliest "notified at" (their first alert) but let a
       // response on ANY of their alerts win over a still-pending one.
-      const existingResponded = (existing.responseStatus || "pending") !== "pending";
+      const existingResponded =
+        (existing.responseStatus || "pending") !== "pending";
       const thisResponded = (n.responseStatus || "pending") !== "pending";
       if (thisResponded && !existingResponded) {
-        byContact.set(key, { ...existing.toObject(), ...n.toObject(), createdAt: existing.createdAt });
+        byContact.set(key, {
+          ...existing.toObject(),
+          ...n.toObject(),
+          createdAt: existing.createdAt,
+        });
       }
     }
 
@@ -325,11 +333,9 @@ const viewSessionLocation = async (req, res) => {
     // session is still active. Once it's completed, we hide the
     // location from contacts (the owner can still see their own).
     if (!isOwner && checkIn.status !== "active") {
-      return res
-        .status(400)
-        .json({
-          message: "This session has ended. Location is no longer shared.",
-        });
+      return res.status(400).json({
+        message: "This session has ended. Location is no longer shared.",
+      });
     }
 
     return res.status(200).json({
@@ -354,40 +360,59 @@ const viewSessionLocation = async (req, res) => {
 // naturally reappears as a fresh, unread, pending alert — instead of
 // silently resetting the original one's history.
 const needHelpNow = async (req, res) => {
-    if (!mongoose.isValidObjectId(req.params.id)) {
-        return res.status(404).json({ message: "Check-in not found" });
+  if (!mongoose.isValidObjectId(req.params.id)) {
+    return res.status(404).json({ message: "Check-in not found" });
+  }
+  try {
+    const checkIn = await CheckIn.findOne({
+      _id: req.params.id,
+      user: req.user.id,
+    });
+    if (!checkIn)
+      return res.status(404).json({ message: "Check-in not found" });
+    if (checkIn.status === "completed") {
+      return res
+        .status(400)
+        .json({ message: "This session has already ended." });
     }
-    try {
-        const checkIn = await CheckIn.findOne({ _id: req.params.id, user: req.user.id });
-        if (!checkIn) return res.status(404).json({ message: "Check-in not found" });
-        if (checkIn.status === "completed") {
-            return res.status(400).json({ message: "This session has already ended." });
-        }
 
-        const { contactUserIds } = req.body;
-        const requestedIds = Array.isArray(contactUserIds)
-            ? [...new Set(contactUserIds.map((id) => id?.toString()).filter(Boolean))]
-            : (checkIn.trustedContactUsers || []).map((id) => id.toString());
-        if (requestedIds.some((id) => !mongoose.isValidObjectId(id))) {
-            return res.status(400).json({ message: "One of the selected contacts is invalid." });
-        }
-        if (requestedIds.length === 0) {
-            return res.status(400).json({ message: "No contacts to notify." });
-        }
-
-        const created = await Notification.insertMany(requestedIds.map((receiver) => ({
-            receiver,
-            sender: req.user.id,
-            checkIn: checkIn._id,
-            type: "safety_alert",
-            title: "SafetyU Alert",
-            message: `${req.authenticatedUser?.name || "A trusted contact"} needs help right now.`,
-        })));
-
-        return res.status(201).json({ message: "Contacts re-alerted.", notifications: created });
-    } catch (error) {
-        return res.status(500).json({ message: "Server error", error: error.message });
+    const { contactUserIds } = req.body;
+    const requestedIds = Array.isArray(contactUserIds)
+      ? [...new Set(contactUserIds.map((id) => id?.toString()).filter(Boolean))]
+      : (checkIn.trustedContactUsers || []).map((id) => id.toString());
+    if (requestedIds.some((id) => !mongoose.isValidObjectId(id))) {
+      return res
+        .status(400)
+        .json({ message: "One of the selected contacts is invalid." });
     }
+    if (requestedIds.length === 0) {
+      return res.status(400).json({ message: "No contacts to notify." });
+    }
+
+    const created = await Notification.insertMany(
+      requestedIds.map((receiver) => ({
+        receiver,
+        sender: req.user.id,
+        checkIn: checkIn._id,
+        type: "safety_alert",
+        title: "SafetyU Alert",
+        message: `${req.authenticatedUser?.name || "A trusted contact"} needs help right now.`,
+      })),
+    );
+    sendPushToUsers(requestedIds, {
+      title: "SafetyU Alert",
+      body: `${req.authenticatedUser?.name || "A trusted contact"} needs help right now.`,
+      data: { type: "safety_alert", checkInId: checkIn._id.toString() },
+    });
+
+    return res
+      .status(201)
+      .json({ message: "Contacts re-alerted.", notifications: created });
+  } catch (error) {
+    return res
+      .status(500)
+      .json({ message: "Server error", error: error.message });
+  }
 };
 
 module.exports = {

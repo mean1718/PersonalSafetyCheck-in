@@ -211,7 +211,46 @@ const loginUser = async (req, res) => {
     });
   }
 };
+// POST /api/users/device-token  { token }
+// Called by Flutter right after login and again whenever Firebase hands
+// the app a fresh token (they rotate). $addToSet so registering the same
+// token twice (app restart, token unchanged) is a no-op instead of piling
+// up duplicates.
+const registerDeviceToken = async (req, res) => {
+  const token = typeof req.body.token === "string" ? req.body.token.trim() : "";
+  if (!token) {
+    return res.status(400).json({ message: "A device token is required." });
+  }
+  try {
+    await User.updateOne(
+      { _id: req.user.id },
+      { $addToSet: { fcmTokens: token } },
+    );
+    return res.json({ message: "Device registered for push notifications." });
+  } catch (_) {
+    return res.status(500).json({ message: "Server error" });
+  }
+};
+
+// POST /api/users/device-token/remove  { token }
+// Called on logout so a shared/borrowed device stops getting this
+// account's pushes once they've signed out of it.
+const removeDeviceToken = async (req, res) => {
+  const token = typeof req.body.token === "string" ? req.body.token.trim() : "";
+  if (!token) {
+    return res.status(400).json({ message: "A device token is required." });
+  }
+  try {
+    await User.updateOne({ _id: req.user.id }, { $pull: { fcmTokens: token } });
+    return res.json({ message: "Device unregistered." });
+  } catch (_) {
+    return res.status(500).json({ message: "Server error" });
+  }
+};
+
 module.exports = {
   registerUser,
   loginUser,
+  registerDeviceToken,
+  removeDeviceToken,
 };

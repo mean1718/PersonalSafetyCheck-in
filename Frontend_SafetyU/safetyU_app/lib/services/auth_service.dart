@@ -1,5 +1,6 @@
 import 'api_client.dart';
 import 'app_session.dart';
+import 'push_notification_service.dart';
 import '../models/user_role.dart';
 
 /// Wires SignUp/Login to the real backend:
@@ -66,5 +67,7 @@ class AuthService {
       purchasedExtraOtherSlots:
           (user['purchasedExtraOtherSlots'] as num?)?.toInt(),
     );
+
+    PushNotificationService.registerAfterLogin();
   }
 }

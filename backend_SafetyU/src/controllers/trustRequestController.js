@@ -2,6 +2,7 @@ const mongoose = require("mongoose");
 const User = require("../models/User");
 const TrustRequest = require("../models/TrustRequest");
 const TrustedContact = require("../models/TrustedContact");
+const { sendPushToUser } = require("../services/pushService");
 
 const normalizePhone = (phone) => phone.trim().replace(/[\s().-]/g, "");
 
@@ -55,12 +56,10 @@ const sendRequest = async (req, res) => {
   try {
     const receiver = await User.findOne({ phone });
     if (!receiver)
-      return res
-        .status(400)
-        .json({
-          message:
-            "This phone number is not registered on SafetyU. The person must create a SafetyU account before you can send a Trust request.",
-        });
+      return res.status(400).json({
+        message:
+          "This phone number is not registered on SafetyU. The person must create a SafetyU account before you can send a Trust request.",
+      });
     if (receiver._id.toString() === req.user.id)
       return res
         .status(400)
@@ -88,6 +87,14 @@ const sendRequest = async (req, res) => {
           receiver: receiver._id,
           relationship,
         });
+    // Best effort — the request itself is already saved either way, so a
+    // push failure (offline receiver, missing Firebase creds, etc.) never
+    // turns into a failed request.
+    sendPushToUser(receiver._id, {
+      title: "New trust request",
+      body: `${req.authenticatedUser?.name || "Someone"} wants to add you as a trusted contact.`,
+      data: { type: "trust_request", requestId: request._id.toString() },
+    });
     return res.status(201).json({ message: "Trust request sent.", request });
   } catch (error) {
     if (error?.code === 11000)

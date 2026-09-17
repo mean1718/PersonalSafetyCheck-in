@@ -54,8 +54,9 @@ String _formatPrice(double usdAmount, _Currency currency) {
 
 String _currencyCode(_Currency c) => c == _Currency.usd ? 'USD' : 'KHR';
 
-/// Small USD / KHR segmented switch shown on the plan picker and both
-/// payment summary screens, before a KHQR code is generated.
+/// Small USD / KHR segmented switch shown on the payment summary screens,
+/// before a KHQR code is generated. It is intentionally not shown on the
+/// main plan picker.
 class _CurrencyToggle extends StatelessWidget {
   final _Currency value;
   final ValueChanged<_Currency> onChanged;
@@ -312,32 +313,45 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
     return PopScope(
       canPop: _step != _LimitStep.proScan && _step != _LimitStep.payScan,
       child: Dialog(
-        backgroundColor: AppColors.card,
+        backgroundColor: Colors.transparent,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(24),
         ),
-        child: ConstrainedBox(
-          constraints: BoxConstraints(
-            maxHeight: MediaQuery.of(context).size.height * 0.86,
+        child: Container(
+          decoration: BoxDecoration(
+            color: AppColors.card,
+            borderRadius: BorderRadius.circular(24),
+            boxShadow: [
+              BoxShadow(
+                color: const Color(0xFF7C5CFC).withValues(alpha: 0.16),
+                blurRadius: 40,
+                offset: const Offset(0, 18),
+              ),
+            ],
           ),
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.all(22),
-            child: switch (_step) {
-              _LimitStep.plans => _buildPlansStep(context),
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              maxHeight: MediaQuery.of(context).size.height * 0.86,
+            ),
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(22),
+              child: switch (_step) {
+                _LimitStep.plans => _buildPlansStep(context),
 
-              // Free
-              _LimitStep.freeSummary => _buildFreeSummaryStep(context),
+                // Free
+                _LimitStep.freeSummary => _buildFreeSummaryStep(context),
 
-              // Pro
-              _LimitStep.proSummary => _buildProSummaryStep(context),
-              _LimitStep.proScan => _buildProScanStep(context),
-              _LimitStep.proSuccess => _buildProSuccessStep(context),
+                // Pro
+                _LimitStep.proSummary => _buildProSummaryStep(context),
+                _LimitStep.proScan => _buildProScanStep(context),
+                _LimitStep.proSuccess => _buildProSuccessStep(context),
 
-              // Pay Per Contact
-              _LimitStep.paySummary => _buildPaySummaryStep(context),
-              _LimitStep.payScan => _buildPayScanStep(context),
-              _LimitStep.paySuccess => _buildPaySuccessStep(context),
-            },
+                // Pay Per Contact
+                _LimitStep.paySummary => _buildPaySummaryStep(context),
+                _LimitStep.payScan => _buildPayScanStep(context),
+                _LimitStep.paySuccess => _buildPaySuccessStep(context),
+              },
+            ),
           ),
         ),
       ),
@@ -354,49 +368,86 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
       children: [
         Align(
           alignment: Alignment.topRight,
-          child: IconButton(
-            onPressed: () => Navigator.pop(context, null),
-            icon: Icon(
-              Icons.close,
-              color: AppColors.textMuted,
-              size: 20,
+          child: GestureDetector(
+            onTap: () => Navigator.pop(context, null),
+            child: Container(
+              padding: const EdgeInsets.all(7),
+              decoration: BoxDecoration(
+                color: AppColors.background,
+                shape: BoxShape.circle,
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.05),
+                    blurRadius: 6,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
+              ),
+              child: Icon(
+                Icons.close,
+                color: AppColors.textSecondary,
+                size: 18,
+              ),
             ),
-            padding: EdgeInsets.zero,
-            constraints: const BoxConstraints(),
           ),
         ),
 
-        // Icon
-        Container(
-          width: 56,
-          height: 56,
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              colors: widget.triggeredByLimit
-                  ? [AppColors.navy, AppColors.navy]
-                  : [const Color(0xFFFFC24B), const Color(0xFFFF9A3C)],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-            ),
-            shape: BoxShape.circle,
-            boxShadow: widget.triggeredByLimit
-                ? null
-                : [
+        // Icon — a soft blurred halo behind a gradient circle, instead of
+        // a flat filled circle, for a bit more visual weight/"premium"
+        // feel right where the eye lands first.
+        SizedBox(
+          width: 84,
+          height: 84,
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              Container(
+                width: 84,
+                height: 84,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: (widget.triggeredByLimit
+                          ? const Color(0xFFFF6B6B)
+                          : const Color(0xFFFF9A3C))
+                      .withValues(alpha: 0.14),
+                ),
+              ),
+              Container(
+                width: 60,
+                height: 60,
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: widget.triggeredByLimit
+                        ? [const Color(0xFFFF8A65), const Color(0xFFFF5252)]
+                        : [const Color(0xFFFFC24B), const Color(0xFFFF9A3C)],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
+                  shape: BoxShape.circle,
+                  boxShadow: [
                     BoxShadow(
-                      color: const Color(0xFFFF9A3C).withValues(alpha: 0.35),
-                      blurRadius: 16,
-                      offset: const Offset(0, 6),
+                      color: (widget.triggeredByLimit
+                              ? const Color(0xFFFF5252)
+                              : const Color(0xFFFF9A3C))
+                          .withValues(alpha: 0.4),
+                      blurRadius: 18,
+                      offset: const Offset(0, 8),
                     ),
                   ],
-          ),
-          child: Icon(
-            widget.triggeredByLimit ? Icons.groups : Icons.workspace_premium,
-            color: Colors.white,
-            size: 28,
+                ),
+                child: Icon(
+                  widget.triggeredByLimit
+                      ? Icons.groups
+                      : Icons.workspace_premium,
+                  color: Colors.white,
+                  size: 28,
+                ),
+              ),
+            ],
           ),
         ),
 
-        const SizedBox(height: 14),
+        const SizedBox(height: 16),
 
         // Title
         Text(
@@ -404,8 +455,9 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
               ? "You've reached the limit"
               : 'Choose Your Plan',
           style: TextStyle(
-            fontSize: 17,
+            fontSize: 19,
             fontWeight: FontWeight.w800,
+            letterSpacing: -0.2,
             color: AppColors.textPrimary,
           ),
         ),
@@ -435,29 +487,61 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
         if (widget.triggeredByLimit) ...[
           Container(
             width: double.infinity,
-            padding: const EdgeInsets.symmetric(vertical: 14),
+            padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 14),
             decoration: BoxDecoration(
-              color: AppColors.background,
-              borderRadius: BorderRadius.circular(14),
+              gradient: LinearGradient(
+                colors: [
+                  const Color(0xFF2F6FED).withValues(alpha: 0.10),
+                  const Color(0xFF7C5CFC).withValues(alpha: 0.10),
+                ],
+                begin: Alignment.centerLeft,
+                end: Alignment.centerRight,
+              ),
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(
+                color: const Color(0xFF7C5CFC).withValues(alpha: 0.15),
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: const Color(0xFF7C5CFC).withValues(alpha: 0.10),
+                  blurRadius: 14,
+                  offset: const Offset(0, 6),
+                ),
+              ],
             ),
             child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              crossAxisAlignment: CrossAxisAlignment.center,
               children: [
-                _countBlock(
-                  '${widget.selectedMain}',
-                  'Main Contacts',
-                ),
-                Text(
-                  '+',
-                  style: TextStyle(
-                    fontSize: 18,
-                    color: AppColors.textMuted,
-                    fontWeight: FontWeight.w700,
+                // Expanded on both sides (instead of letting each block
+                // size itself and hoping spaceEvenly has room) is what
+                // stops "Other Contacts" from pushing past the card's
+                // right edge on narrower phones.
+                Expanded(
+                  child: _countBlock(
+                    '${widget.selectedMain}',
+                    'Main Contacts',
+                    icon: Icons.people_alt_rounded,
+                    accentColor: const Color(0xFF2F6FED),
+                    accentBg: const Color(0xFFE3F0FF),
                   ),
                 ),
-                _countBlock(
-                  '${widget.selectedOther}',
-                  'Other Contacts',
+                Container(
+                  width: 3,
+                  height: 3,
+                  margin: const EdgeInsets.symmetric(horizontal: 4),
+                  decoration: const BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: Color(0xFF7C5CFC),
+                  ),
+                ),
+                Expanded(
+                  child: _countBlock(
+                    '${widget.selectedOther}',
+                    'Other Contacts',
+                    icon: Icons.person_rounded,
+                    accentColor: const Color(0xFF7C5CFC),
+                    accentBg: const Color(0xFFF1ECFF),
+                  ),
                 ),
               ],
             ),
@@ -495,15 +579,6 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
           ),
         ),
 
-        const SizedBox(height: 12),
-
-        _CurrencyToggle(
-          value: _currency,
-          onChanged: (c) => setState(() => _currency = c),
-        ),
-
-        const SizedBox(height: 16),
-
         // -------------------------------------------------------------------
         // FREE PLAN
         // -------------------------------------------------------------------
@@ -515,6 +590,8 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
           subtitle: 'Up to ${AppSession.freeMainContactLimit} main + '
               '${AppSession.freeOtherContactLimit} other contacts',
           highlighted: _selectedPlan == 'free',
+          accentColor: const Color(0xFF2F6FED),
+          accentBg: const Color(0xFFE3F0FF),
           onTap: () {
             setState(() {
               _selectedPlan = 'free';
@@ -534,8 +611,10 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
           title: 'Pro Plan',
           tag: AppSession.instance.isProActive ? 'Current' : 'Most Popular',
           subtitle: 'Unlimited contacts & all premium features — '
-              '${_formatPrice(_proMonthlyPrice, _currency)}/month',
+              '\$${_proMonthlyPrice.toStringAsFixed(2)}/month',
           highlighted: _selectedPlan == 'pro',
+          accentColor: const Color(0xFF7C5CFC),
+          accentBg: const Color(0xFFF1ECFF),
           onTap: () {
             setState(() {
               _selectedPlan = 'pro';
@@ -555,8 +634,10 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
           title: 'Pay Per Contact',
           tag: 'One-Pay-Per-Person',
           subtitle: 'Add extra contacts without upgrading — '
-              '${_formatPrice(_pricePerContact, _currency)}/person',
+              '\$${_pricePerContact.toStringAsFixed(2)}/person',
           highlighted: _selectedPlan == 'pay',
+          accentColor: const Color(0xFF23A26D),
+          accentBg: const Color(0xFFE1F7EA),
           onTap: () {
             setState(() {
               _selectedPlan = 'pay';
@@ -565,42 +646,13 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
           },
         ),
 
-        const SizedBox(height: 16),
-
-        // -------------------------------------------------------------------
-        // VIEW OPTIONS
-        // -------------------------------------------------------------------
-
-        SizedBox(
-          width: double.infinity,
-          child: ElevatedButton(
-            onPressed: () {
-              setState(() {
-                if (_selectedPlan == 'free') {
-                  _step = _LimitStep.freeSummary;
-                } else if (_selectedPlan == 'pro') {
-                  _step = _LimitStep.proSummary;
-                } else {
-                  _step = _LimitStep.paySummary;
-                }
-              });
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.navy,
-              minimumSize: const Size(0, 46),
-            ),
-            child: const Text('View Options'),
-          ),
-        ),
-
         TextButton(
           onPressed: () => Navigator.pop(context, null),
           child: Text(
-            widget.triggeredByLimit
-                ? 'Choose Different Contacts Instead'
-                : 'Maybe Later',
+            widget.triggeredByLimit ? 'Cancel' : 'Maybe Later',
             style: TextStyle(
               color: AppColors.textSecondary,
+              fontWeight: FontWeight.w600,
             ),
           ),
         ),
@@ -627,7 +679,7 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
           width: 56,
           height: 56,
           decoration: BoxDecoration(
-            color: AppColors.navy,
+            color: const Color(0xFF2F6FED),
             shape: BoxShape.circle,
           ),
           child: const Icon(
@@ -699,7 +751,7 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
               Navigator.pop(context, null);
             },
             style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.navy,
+              backgroundColor: const Color(0xFF2F6FED),
               minimumSize: const Size(0, 46),
             ),
             child: const Text('Continue with Free Plan'),
@@ -742,7 +794,7 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
           width: 56,
           height: 56,
           decoration: BoxDecoration(
-            color: AppColors.navy,
+            color: const Color(0xFF7C5CFC),
             shape: BoxShape.circle,
           ),
           child: const Icon(
@@ -790,7 +842,7 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
             vertical: 12,
           ),
           decoration: BoxDecoration(
-            color: AppColors.navy.withValues(alpha: 0.06),
+            color: const Color(0xFF7C5CFC).withValues(alpha: 0.08),
             borderRadius: BorderRadius.circular(14),
           ),
           child: Row(
@@ -805,10 +857,10 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
               ),
               Text(
                 '${_formatPrice(_proMonthlyPrice, _currency)}/month',
-                style: TextStyle(
+                style: const TextStyle(
                   fontSize: 16,
                   fontWeight: FontWeight.w800,
-                  color: AppColors.navy,
+                  color: Color(0xFF7C5CFC),
                 ),
               ),
             ],
@@ -833,7 +885,7 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
           child: ElevatedButton(
             onPressed: _beginProPayment,
             style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.navy,
+              backgroundColor: const Color(0xFF7C5CFC),
               minimumSize: const Size(0, 46),
             ),
             child: const Text('Continue to Payment'),
@@ -1582,24 +1634,52 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
 
   Widget _countBlock(
     String count,
-    String label,
-  ) {
-    return Column(
+    String label, {
+    IconData icon = Icons.people_alt_rounded,
+    Color accentColor = const Color(0xFF2F6FED),
+    Color accentBg = const Color(0xFFE3F0FF),
+  }) {
+    return Row(
+      // No longer mainAxisSize.min — the parent now hands this a bounded
+      // width via Expanded, and this needs to actually respect it (with
+      // the label allowed to shrink/ellipsize) instead of insisting on
+      // its own intrinsic width and overflowing past the card edge.
       children: [
-        Text(
-          count,
-          style: const TextStyle(
-            fontSize: 22,
-            fontWeight: FontWeight.w800,
-            color: Color(0xFFFF6554),
+        Container(
+          width: 32,
+          height: 32,
+          decoration: BoxDecoration(
+            color: accentBg,
+            shape: BoxShape.circle,
           ),
+          child: Icon(icon, size: 16, color: accentColor),
         ),
-        const SizedBox(height: 2),
-        Text(
-          label,
-          style: TextStyle(
-            fontSize: 10.5,
-            color: AppColors.textSecondary,
+        const SizedBox(width: 8),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                count,
+                style: TextStyle(
+                  fontSize: 19,
+                  fontWeight: FontWeight.w800,
+                  color: accentColor,
+                  height: 1.1,
+                ),
+              ),
+              Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 10.5,
+                  color: AppColors.textSecondary,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
           ),
         ),
       ],
@@ -1723,6 +1803,12 @@ class _PlanOption extends StatelessWidget {
   final String subtitle;
   final bool highlighted;
   final VoidCallback? onTap;
+  // Per-plan accent color — Free is blue, Pro is purple, Pay Per Contact
+  // is green — so each plan reads as its own distinct option (icon
+  // badge, selected border/background, and tag chip all pick this up)
+  // instead of every plan sharing the same navy highlight.
+  final Color accentColor;
+  final Color accentBg;
 
   const _PlanOption({
     required this.icon,
@@ -1731,57 +1817,93 @@ class _PlanOption extends StatelessWidget {
     required this.subtitle,
     required this.highlighted,
     required this.onTap,
+    this.accentColor = const Color(0xFF2F6FED),
+    this.accentBg = const Color(0xFFE3F0FF),
   });
 
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
       onTap: onTap,
-      child: Container(
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
         width: double.infinity,
-        padding: const EdgeInsets.all(12),
+        padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
           color: highlighted
-              ? AppColors.navy.withValues(alpha: 0.06)
-              : AppColors.background,
-          borderRadius: BorderRadius.circular(14),
+              ? accentColor.withValues(alpha: 0.08)
+              : AppColors.card,
+          borderRadius: BorderRadius.circular(16),
           border: Border.all(
-            color: highlighted ? AppColors.navy : AppColors.border,
-            width: highlighted ? 1.4 : 1,
+            color: highlighted ? accentColor : AppColors.border,
+            width: highlighted ? 1.6 : 1,
           ),
+          boxShadow: highlighted
+              ? [
+                  BoxShadow(
+                    color: accentColor.withValues(alpha: 0.22),
+                    blurRadius: 20,
+                    offset: const Offset(0, 8),
+                  ),
+                ]
+              : [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.05),
+                    blurRadius: 8,
+                    offset: const Offset(0, 3),
+                  ),
+                ],
         ),
         child: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            Icon(
-              icon,
-              size: 20,
-              color: highlighted ? AppColors.navy : AppColors.textSecondary,
+            // Square icon badge, with a soft gradient tint of this plan's
+            // accent color — this is the "colored square" look from the
+            // reference design instead of a flat monochrome icon.
+            Container(
+              width: 38,
+              height: 38,
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [accentBg, accentColor.withValues(alpha: 0.28)],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+                borderRadius: BorderRadius.circular(11),
+              ),
+              child: Icon(icon, size: 19, color: accentColor),
             ),
-            const SizedBox(width: 10),
+            const SizedBox(width: 12),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Row(
+                  // Wrap (not Row) is what stops a long title next to a
+                  // long tag (e.g. "Pay Per Contact" + "One-Pay-Per-
+                  // Person") from overflowing OR getting cut off mid-word
+                  // — if there isn't room beside the title, the tag chip
+                  // simply drops to its own line underneath, fully intact.
+                  Wrap(
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    spacing: 6,
+                    runSpacing: 4,
                     children: [
                       Text(
                         title,
                         style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w700,
+                          fontSize: 13.5,
+                          fontWeight: FontWeight.w800,
                           color: AppColors.textPrimary,
                         ),
                       ),
-                      if (tag != null) ...[
-                        const SizedBox(width: 6),
+                      if (tag != null)
                         Container(
                           padding: const EdgeInsets.symmetric(
-                            horizontal: 6,
-                            vertical: 1,
+                            horizontal: 7,
+                            vertical: 2,
                           ),
                           decoration: BoxDecoration(
-                            color:
-                                highlighted ? AppColors.navy : AppColors.border,
+                            color: highlighted ? accentColor : accentBg,
                             borderRadius: BorderRadius.circular(8),
                           ),
                           child: Text(
@@ -1789,16 +1911,13 @@ class _PlanOption extends StatelessWidget {
                             style: TextStyle(
                               fontSize: 9,
                               fontWeight: FontWeight.w700,
-                              color: highlighted
-                                  ? Colors.white
-                                  : AppColors.textSecondary,
+                              color: highlighted ? Colors.white : accentColor,
                             ),
                           ),
                         ),
-                      ],
                     ],
                   ),
-                  const SizedBox(height: 2),
+                  const SizedBox(height: 4),
                   Text(
                     subtitle,
                     style: TextStyle(
@@ -1808,6 +1927,12 @@ class _PlanOption extends StatelessWidget {
                   ),
                 ],
               ),
+            ),
+            const SizedBox(width: 6),
+            Icon(
+              Icons.chevron_right_rounded,
+              size: 20,
+              color: highlighted ? accentColor : AppColors.textMuted,
             ),
           ],
         ),

@@ -38,6 +38,15 @@ const userSchema = new mongoose.Schema(
       default: "user",
     },
 
+    // ---- Push notifications ----
+    // Firebase Cloud Messaging tokens for every device this account is
+    // currently signed into. An array (not a single field) because the
+    // same person can be logged in on more than one device at once —
+    // every registered token gets the push. Registered by Flutter via
+    // POST /api/users/device-token after login and on app start; pruned
+    // automatically by pushService when Firebase reports a token is dead.
+    fcmTokens: { type: [String], default: [] },
+
     // ---- Plan / paywall (credited by paymentController on confirmed Bakong payments) ----
     isPro: { type: Boolean, default: false },
     proExpiresAt: { type: Date },

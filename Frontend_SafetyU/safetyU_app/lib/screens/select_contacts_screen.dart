@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
+import '../theme/avatar_colors.dart';
 import '../models/contact.dart';
 import '../services/app_session.dart';
 import '../services/trusted_contact_service.dart';
@@ -334,7 +335,7 @@ class _SelectContactsScreenState extends State<SelectContactsScreen> {
                         ],
                         _sectionHeader('Main Contacts', _selectedMainCount,
                             AppSession.instance.maxMainContacts, isPro,
-                            over: _overMainLimit),
+                            over: _overMainLimit, color: mainTierColor),
                         const SizedBox(height: 10),
                         if (main.isEmpty)
                           _emptyTierNote('No main contacts yet.')
@@ -357,7 +358,7 @@ class _SelectContactsScreenState extends State<SelectContactsScreen> {
                         const SizedBox(height: 18),
                         _sectionHeader('Other Contacts', _selectedOtherCount,
                             AppSession.instance.maxOtherContacts, isPro,
-                            over: _overOtherLimit),
+                            over: _overOtherLimit, color: otherTierColor),
                         const SizedBox(height: 10),
                         if (other.isEmpty)
                           _emptyTierNote('No other contacts yet.')
@@ -483,10 +484,16 @@ class _SelectContactsScreenState extends State<SelectContactsScreen> {
   }
 
   Widget _sectionHeader(String label, int selected, int max, bool isPro,
-      {required bool over}) {
+      {required bool over, required Color color}) {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        Container(
+          width: 8,
+          height: 8,
+          margin: const EdgeInsets.only(top: 5, right: 8),
+          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+        ),
         Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -538,12 +545,26 @@ class _ContactTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Same colored-avatar treatment as the Friends list, keyed off the
+    // contact's id, so a person's avatar looks identical wherever it
+    // shows up instead of this screen using a flat navy tint.
+    final avatarKey = contact.id.isNotEmpty ? contact.id : contact.fullName;
+    final avatarBg = avatarBackgroundFor(avatarKey);
+    final avatarFg = avatarForegroundFor(avatarKey);
+    // The selection tick borrows the tier's color once one is set, so the
+    // whole tile reads as "this is a Main pick" or "this is an Other
+    // pick" at a glance — unassigned contacts keep the neutral navy tick.
+    final tierColor = !contact.tierAssigned
+        ? AppColors.navy
+        : contact.isMainContact
+            ? mainTierColor
+            : otherTierColor;
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: AppColors.card,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: selected ? AppColors.navy : AppColors.border),
+        border: Border.all(color: selected ? tierColor : AppColors.border),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -557,10 +578,10 @@ class _ContactTile extends StatelessWidget {
               children: [
                 CircleAvatar(
                   radius: 18,
-                  backgroundColor: AppColors.navy.withValues(alpha: 0.1),
+                  backgroundColor: avatarBg,
                   child: Text(contact.initials,
                       style: TextStyle(
-                          color: AppColors.navy,
+                          color: avatarFg,
                           fontWeight: FontWeight.w700,
                           fontSize: 12.5)),
                 ),
@@ -585,7 +606,7 @@ class _ContactTile extends StatelessWidget {
                 const SizedBox(width: 8),
                 Icon(
                   selected ? Icons.check_circle : Icons.radio_button_unchecked,
-                  color: selected ? AppColors.navy : AppColors.textMuted,
+                  color: selected ? tierColor : AppColors.textMuted,
                 ),
               ],
             ),
@@ -594,12 +615,15 @@ class _ContactTile extends StatelessWidget {
           // Tier toggle sits right under the select row — tapping a chip
           // reassigns the contact's saved tier and moves the tile into the
           // matching section immediately. This is its own gesture area, so
-          // it doesn't also toggle the session-selection above.
+          // it doesn't also toggle the session-selection above. Main uses
+          // blue, Other uses orange, so the two tiers are distinguishable
+          // by color, not just label.
           Row(
             mainAxisSize: MainAxisSize.min,
             children: [
               _TierChip(
                 label: 'Main',
+                color: mainTierColor,
                 // Neither chip shows as selected until the contact has
                 // actually been tagged, so an unassigned tile doesn't
                 // look like it's already "Other" by default.
@@ -609,6 +633,7 @@ class _ContactTile extends StatelessWidget {
               const SizedBox(width: 6),
               _TierChip(
                 label: 'Other',
+                color: otherTierColor,
                 selected: contact.tierAssigned && !contact.isMainContact,
                 onTap: () => onSetTier(false),
               ),
@@ -622,11 +647,13 @@ class _ContactTile extends StatelessWidget {
 
 class _TierChip extends StatelessWidget {
   final String label;
+  final Color color;
   final bool selected;
   final VoidCallback onTap;
 
   const _TierChip({
     required this.label,
+    required this.color,
     required this.selected,
     required this.onTap,
   });
@@ -639,10 +666,9 @@ class _TierChip extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
         decoration: BoxDecoration(
-          color: selected ? AppColors.navy : AppColors.background,
+          color: selected ? color : AppColors.background,
           borderRadius: BorderRadius.circular(20),
-          border:
-              Border.all(color: selected ? AppColors.navy : AppColors.border),
+          border: Border.all(color: selected ? color : AppColors.border),
         ),
         child: Text(
           label,
