@@ -39,6 +39,7 @@ class AppSession extends ChangeNotifier {
   // Backend identifier for the session currently being displayed on Home.
   // It lets the owner reload actual notification recipients and responses.
   String? activeCheckInId;
+  bool hasEmergencyPin = false;
   // When the active session's countdown reaches 0, and what its owner
   // said their destination was. Set/cleared by ActiveSessionScreen
   // alongside activeCheckInId above -- exists so Home can show a live
@@ -299,6 +300,7 @@ class AppSession extends ChangeNotifier {
     role = UserRole.user;
     authToken = null;
     backendUserId = null;
+    hasEmergencyPin = false;
     activeCheckInId = null;
     contacts.clear();
     profilePhotoPath = null;

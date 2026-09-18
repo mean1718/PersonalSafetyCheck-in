@@ -65,6 +65,11 @@ const publicUser = (user) => ({
   officerId: user.officerId || null,
   responderStatus: user.responderStatus || null,
   createdAt: user.createdAt,
+
+  // Do NOT return the actual PIN.
+  // Only tell Flutter whether a PIN exists.
+  hasEmergencyPin: Boolean(user.emergencyPin),
+
   isPro: user.isPro,
   proExpiresAt: user.proExpiresAt,
   purchasedExtraMainSlots: user.purchasedExtraMainSlots,
@@ -517,6 +522,113 @@ const changeEmergencyPin = async (req, res) => {
     return res.status(500).json({ message: "Server error" });
   }
 };
+// =========================================================
+// CREATE EMERGENCY PIN FOR EXISTING USERS
+// =========================================================
+//
+// This is ONLY for existing/old user accounts that were created
+// before Emergency PIN was added.
+//
+// The user does NOT need to enter a current PIN because they
+// currently do not have one.
+//
+// Flutter sends:
+//
+// {
+//   "newPin": "1234",
+//   "confirmPin": "1234"
+// }
+//
+// The PIN is stored as a bcrypt hash.
+// =========================================================
+
+const createEmergencyPin = async (req, res) => {
+  try {
+    const userId = req.user.id;
+
+    const newPin =
+      typeof req.body.newPin === "string"
+        ? req.body.newPin.trim()
+        : "";
+
+    const confirmPin =
+      typeof req.body.confirmPin === "string"
+        ? req.body.confirmPin.trim()
+        : "";
+
+    // ---------------------------------------------------------
+    // Validate PIN
+    // ---------------------------------------------------------
+
+    if (!/^\d{4}$/.test(newPin)) {
+      return res.status(400).json({
+        message: "Emergency PIN must be exactly 4 digits.",
+      });
+    }
+
+    if (!/^\d{4}$/.test(confirmPin)) {
+      return res.status(400).json({
+        message: "Confirm Emergency PIN must be exactly 4 digits.",
+      });
+    }
+
+    if (newPin !== confirmPin) {
+      return res.status(400).json({
+        message: "Emergency PINs do not match.",
+      });
+    }
+
+    // ---------------------------------------------------------
+    // Find signed-in user
+    // ---------------------------------------------------------
+
+    const user = await User.findById(userId);
+
+    if (!user) {
+      return res.status(404).json({
+        message: "User account not found.",
+      });
+    }
+
+    if (user.role !== "user") {
+      return res.status(403).json({
+        message: "Emergency PIN is only available for user accounts.",
+      });
+    }
+
+    // ---------------------------------------------------------
+    // IMPORTANT:
+    // This endpoint is only for users who DON'T have a PIN.
+    // ---------------------------------------------------------
+
+    if (user.emergencyPin) {
+      return res.status(400).json({
+        message: "Emergency PIN already exists. Use Settings to change it.",
+      });
+    }
+
+    // ---------------------------------------------------------
+    // Hash and save PIN
+    // ---------------------------------------------------------
+
+    const hashedPin = await bcrypt.hash(newPin, 10);
+
+    user.emergencyPin = hashedPin;
+
+    await user.save();
+
+    return res.status(200).json({
+      message: "Emergency PIN created successfully.",
+      hasEmergencyPin: true,
+    });
+  } catch (error) {
+    console.error("Create Emergency PIN error:", error);
+
+    return res.status(500).json({
+      message: "Server error",
+    });
+  }
+};
 
 // =========================================================
 // EXPORTS
@@ -529,4 +641,5 @@ module.exports = {
   removeDeviceToken,
   verifyEmergencyPin,
   changeEmergencyPin,
+  createEmergencyPin,
 };

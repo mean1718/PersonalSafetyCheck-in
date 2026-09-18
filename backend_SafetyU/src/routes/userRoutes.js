@@ -9,6 +9,7 @@ const {
     removeDeviceToken,
     verifyEmergencyPin,
     changeEmergencyPin,
+    createEmergencyPin,
 } = require("../controllers/userController");
 
 const protect = require("../middleware/authMiddleware");
@@ -68,6 +69,22 @@ router.put(
     "/change-emergency-pin",
     protect,
     changeEmergencyPin
+);
+
+// =========================================================
+// CREATE EMERGENCY PIN
+// =========================================================
+//
+// Used only by existing users who do not have a PIN yet.
+//
+// Protected because the signed-in user is creating
+// a PIN for their own account.
+// =========================================================
+
+router.post(
+    "/create-emergency-pin",
+    protect,
+    createEmergencyPin
 );
 
 // =========================================================

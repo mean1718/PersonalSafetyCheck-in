@@ -44,69 +44,103 @@ class _EmergencyPinSetupScreenState
     super.dispose();
   }
 
+  bool get _isExistingUser {
+  final args = ModalRoute.of(context)?.settings.arguments;
+
+  return args is Map &&
+      args['isExistingUser'] == true;
+}
   Future<void> _createAccount() async {
-    final pin = _pinController.text.trim();
-    final confirmPin = _confirmPinController.text.trim();
+  final pin = _pinController.text.trim();
+  final confirmPin = _confirmPinController.text.trim();
 
-    setState(() => _error = null);
+  setState(() => _error = null);
 
-    // ----------------------------------------
-    // Validate PIN
-    // ----------------------------------------
+  // ----------------------------------------
+  // Validate PIN
+  // ----------------------------------------
 
-    if (!RegExp(r'^\d{4}$').hasMatch(pin)) {
-      setState(
-        () => _error =
-            'Emergency PIN must be exactly 4 digits.',
+  if (!RegExp(r'^\d{4}$').hasMatch(pin)) {
+    setState(
+      () => _error =
+          'Emergency PIN must be exactly 4 digits.',
+    );
+    return;
+  }
+
+  if (pin != confirmPin) {
+    setState(
+      () => _error =
+          'Emergency PINs do not match.',
+    );
+    return;
+  }
+
+  setState(() => _isSubmitting = true);
+
+  try {
+    // =======================================================
+    // EXISTING USER WITHOUT PIN
+    // =======================================================
+
+    if (_isExistingUser) {
+      await AuthService.createEmergencyPin(
+        newPin: pin,
+        confirmPin: confirmPin,
       );
+
+      if (!mounted) return;
+
+      setState(() => _isSubmitting = false);
+
+      Navigator.pushReplacementNamed(
+        context,
+        UserRole.user.homeRoute,
+      );
+
       return;
     }
 
-    if (pin != confirmPin) {
-      setState(
-        () => _error =
-            'Emergency PINs do not match.',
-      );
-      return;
-    }
+    // =======================================================
+    // NEW USER
+    // =======================================================
 
     final draft = _draft;
 
-    setState(() => _isSubmitting = true);
-
-    try {
-      await AuthService.register(
-        fullName: draft['fullName'] ?? '',
-        email: draft['email'] ?? '',
-        password: draft['password'] ?? '',
-        phone: draft['phone'] ?? '',
-        role: UserRole.user,
-        emergencyPin: pin,
-      );
-    } on ApiException catch (e) {
-      if (!mounted) return;
-
-      setState(() => _isSubmitting = false);
-
-      setState(() => _error = e.message);
-
-      return;
-    } on ApiConnectionException catch (e) {
-      if (!mounted) return;
-
-      setState(() => _isSubmitting = false);
-
-      setState(() => _error = e.message);
-
-      return;
-    }
-
+    await AuthService.register(
+      fullName: draft['fullName'] ?? '',
+      email: draft['email'] ?? '',
+      password: draft['password'] ?? '',
+      phone: draft['phone'] ?? '',
+      role: UserRole.user,
+      emergencyPin: pin,
+    );
+  } on ApiException catch (e) {
     if (!mounted) return;
 
-    setState(() => _isSubmitting = false);
+    setState(() {
+      _isSubmitting = false;
+      _error = e.message;
+    });
 
-    await _proceedAfterAuth(UserRole.user.homeRoute);
+    return;
+  } on ApiConnectionException catch (e) {
+    if (!mounted) return;
+
+    setState(() {
+      _isSubmitting = false;
+      _error = e.message;
+    });
+
+    return;
   }
+
+  if (!mounted) return;
+
+  setState(() => _isSubmitting = false);
+
+  await _proceedAfterAuth(UserRole.user.homeRoute);
+}
 
   Future<void> _proceedAfterAuth(String targetRoute) async {
     if (!mounted) return;

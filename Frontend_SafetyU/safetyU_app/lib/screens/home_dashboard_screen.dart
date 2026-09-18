@@ -14,6 +14,7 @@ import '../widgets/paywall_dialogs.dart';
 import 'alert_detail_screen.dart';
 import 'dart:io';
 import 'dart:math' as math;
+import '../models/user_role.dart';
 
 class HomeDashboardScreen extends StatefulWidget {
   const HomeDashboardScreen({super.key});
@@ -25,6 +26,7 @@ class HomeDashboardScreen extends StatefulWidget {
 class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
   int _navIndex = 0;
   bool _loadingAlertStatus = false;
+  bool _showEmergencyPinPopup = false;
 
   // Alerts where *this* signed-in person is the one who got notified —
   // i.e. they're someone else's trusted contact. Separate from
@@ -53,10 +55,108 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
   // etc.), all of which still lives entirely on ActiveSessionScreen and
   // keeps running there even while this screen is what's on top.
   Timer? _activeSessionTickTimer;
+  Future<void> _checkEmergencyPin() async {
+  final session = AppSession.instance;
+
+  // Only normal SafetyU users need an Emergency PIN.
+  if (session.role != UserRole.user) {
+    return;
+  }
+
+  // User already has a PIN.
+  if (session.hasEmergencyPin) {
+    return;
+  }
+
+  if (!mounted) return;
+
+  setState(() {
+    _showEmergencyPinPopup = true;
+  });
+
+  await _showCreateEmergencyPinDialog();
+}
+Future<void> _showCreateEmergencyPinDialog() async {
+  if (!mounted) return;
+
+  await showDialog(
+    context: context,
+    barrierDismissible: false,
+    builder: (dialogContext) {
+      return AlertDialog(
+        backgroundColor: AppColors.card,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(20),
+        ),
+        title: Row(
+          children: [
+            Container(
+              width: 42,
+              height: 42,
+              decoration: BoxDecoration(
+                color: AppColors.navy,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Icon(
+                Icons.lock_outline,
+                color: AppColors.danger,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                'Create Emergency PIN',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w800,
+                  color: AppColors.textPrimary,
+                ),
+              ),
+            ),
+          ],
+        ),
+        content: Text(
+          'Your account does not have an Emergency PIN yet. Please create one before using Emergency Assistant.',
+          style: TextStyle(
+            fontSize: 13,
+            height: 1.45,
+            color: AppColors.textSecondary,
+          ),
+        ),
+        actions: [
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(dialogContext);
+
+              Navigator.pushReplacementNamed(
+                context,
+                '/create-emergency-pin',
+                arguments: {
+                  'isExistingUser': true,
+                },
+              );
+            },
+            child: const Text('Create PIN'),
+          ),
+        ],
+      );
+    },
+  );
+
+  if (mounted) {
+    setState(() {
+      _showEmergencyPinPopup = false;
+    });
+  }
+}
 
   @override
   void initState() {
     super.initState();
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+  _checkEmergencyPin();
+  });
     _loadAlertStatus();
     _loadIncomingAlerts();
     _loadResolvedAlerts();

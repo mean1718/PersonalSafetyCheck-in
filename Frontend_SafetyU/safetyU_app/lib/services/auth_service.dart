@@ -88,6 +88,8 @@ class AuthService {
     // Save backend user ID.
     AppSession.instance.backendUserId =
         user['id']?.toString();
+    AppSession.instance.hasEmergencyPin =
+    user['hasEmergencyPin'] == true;
 
     // ---------------------------------------------------------
     // Determine actual role from backend
@@ -179,6 +181,86 @@ class AuthService {
 
     return data['verified'] == true;
   }
+// =========================================================
+// CREATE EMERGENCY PIN
+// =========================================================
+//
+// Used ONLY when an existing account does not have
+// an Emergency PIN yet.
+//
+// This is different from changeEmergencyPin():
+//
+// CREATE:
+//     New PIN
+//     Confirm PIN
+//
+// CHANGE:
+//     Current PIN
+//     New PIN
+//     Confirm PIN
+// =========================================================
+
+static Future<void> createEmergencyPin({
+  required String newPin,
+  required String confirmPin,
+}) async {
+  final pin = newPin.trim();
+  final confirmation = confirmPin.trim();
+
+  // ---------------------------------------------------------
+  // Validate PIN
+  // ---------------------------------------------------------
+
+  if (!RegExp(r'^\d{4}$').hasMatch(pin)) {
+    throw ApiException(
+      400,
+      'Emergency PIN must be exactly 4 digits.',
+    );
+  }
+
+  if (!RegExp(r'^\d{4}$').hasMatch(confirmation)) {
+    throw ApiException(
+      400,
+      'Confirm Emergency PIN must be exactly 4 digits.',
+    );
+  }
+
+  if (pin != confirmation) {
+    throw ApiException(
+      400,
+      'Emergency PINs do not match.',
+    );
+  }
+
+  // ---------------------------------------------------------
+  // Create PIN in backend
+  // ---------------------------------------------------------
+
+  final data = await ApiClient.post(
+    '/users/create-emergency-pin',
+    {
+      'newPin': pin,
+      'confirmPin': confirmation,
+    },
+    auth: true,
+  );
+
+  // ---------------------------------------------------------
+  // Update local session
+  // ---------------------------------------------------------
+
+  AppSession.instance.hasEmergencyPin =
+      data['hasEmergencyPin'] == true;
+
+  // In case backend does not return the field for some reason,
+  // a successful request itself means the PIN now exists.
+  if (data['hasEmergencyPin'] == null) {
+    AppSession.instance.hasEmergencyPin = true;
+  }
+
+  AppSession.instance.notifyListeners();
+}
+
 
   // =========================================================
 // CHANGE EMERGENCY PIN
