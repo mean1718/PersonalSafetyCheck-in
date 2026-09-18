@@ -21,6 +21,7 @@ import '../services/check_in_service.dart';
 import '../services/emergency_service.dart';
 import '../services/chat_service.dart';
 import '../theme/app_theme.dart';
+import 'session_safe_screen.dart';
 
 /// Which contact tier we're currently trying to reach. Escalates
 /// main -> secondary -> emergency responders if nobody can be confirmed
@@ -265,6 +266,12 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
       }
       _expectedTimeStr = rawArguments['expectedTimeStr']?.toString() ??
           _formatTime(_secondsRemaining);
+      // So Home can show a live countdown for this same session even
+      // while this screen isn't the one on top (see the back arrow in
+      // the AppBar below).
+      AppSession.instance.activeSessionEndTime =
+          DateTime.now().add(Duration(seconds: _secondsRemaining));
+      AppSession.instance.activeSessionDestination = _destination;
       final double latitude =
           (rawArguments['latitude'] as num?)?.toDouble() ?? 11.5696;
       final double longitude =
@@ -389,21 +396,8 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
         Timer.periodic(const Duration(seconds: 6), (_) async {
       if (!mounted) return;
       try {
-        final full = await CheckInService.alertStatusFull(checkInId);
         final data = await CheckInService.alertStatus(checkInId);
         if (!mounted) return;
-        // A trusted contact confirmed this person safe on their behalf
-        // (AlertResponseResultScreen's "Mark Safe") — the backend already
-        // completed the session, so just follow the same path this
-        // screen already uses when the person taps "I'm Safe" themselves,
-        // instead of leaving them stuck here until they notice on their
-        // own and tap it manually.
-        if (full['checkInStatus'] == 'completed') {
-          _confirmSafe();
-          return;
-        }
-        final contacts = (full['notifiedContacts'] as List<dynamic>? ?? [])
-            .cast<Map<String, dynamic>>();
         final wasConfirmed = _someoneConfirmedHelp();
         _applyAlertStatus(data);
         if (!wasConfirmed && _someoneConfirmedHelp()) {
@@ -513,7 +507,27 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
     });
   }
 
+  // Guards _endSessionAsSafe against running twice — e.g. the owner taps
+  // "I'm Safe" at roughly the same moment a trusted contact's confirm-safe
+  // poll comes back, or the confirm-safe dialog's own 30s timer fires
+  // after the owner already ended it manually.
+  bool _sessionEndedAsSafe = false;
+
   void _confirmSafe() {
+    _endSessionAsSafe(navigateToSafeScreen: true);
+  }
+
+  // The actual "this session is over, mark it safe" logic — shared by the
+  // owner tapping "I'm Safe" themselves AND a trusted contact confirming
+  // them safe from their own side (see _maybeShowContactConfirmedSafeDialog
+  // below). Before this, a contact's confirmation only ever showed a
+  // reassurance popup on the owner's screen — the session itself, and
+  // Home's "SESSION ACTIVE" card, stayed active until the owner also
+  // separately tapped "I'm Safe" themselves.
+  void _endSessionAsSafe({required bool navigateToSafeScreen}) {
+    if (_sessionEndedAsSafe) return;
+    _sessionEndedAsSafe = true;
+
     _timer?.cancel();
     _stageTimer?.cancel();
     _alertStatusPollTimer?.cancel();
@@ -525,6 +539,8 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
     // of silently disappearing. It's cleared for real the next time a
     // new session starts (see clearCurrentAlertResponses in initState).
     AppSession.instance.activeCheckInId = null;
+    AppSession.instance.activeSessionEndTime = null;
+    AppSession.instance.activeSessionDestination = null;
     if (AppSession.instance.currentAlertResponses.isNotEmpty) {
       AppSession.instance.markCurrentSessionSafe();
     } else {
@@ -546,6 +562,8 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
       );
     }
 
+    if (!navigateToSafeScreen || !mounted) return;
+
     final notifiedNames = AppSession.instance.friends
         .where((c) => _notifiedContactIds.contains(c.id))
         .map((c) => c.fullName)
@@ -557,20 +575,10 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
             : notifiedNames.length == 2
                 ? '${notifiedNames[0]} and ${notifiedNames[1]}'
                 : '${notifiedNames[0]} and ${notifiedNames.length - 1} others';
-    // Straight to Home — same as logging in or signing up lands there —
-    // instead of the extra "You're marked safe / Back Home" screen in
-    // between. Home's own "Your Alert Status" card already shows this
-    // session is resolved, so that in-between screen was just one more
-    // tap standing in the way of getting back to a normal Home dashboard.
-    Navigator.of(context).pushNamedAndRemoveUntil('/home', (route) => false);
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          contactName != null
-              ? "You're marked safe. $contactName has been notified."
-              : "You're marked safe.",
-        ),
-      ),
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(
+          builder: (_) => SessionSafeScreen(notifiedContactName: contactName)),
     );
   }
 
@@ -726,15 +734,27 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
   void _maybeShowContactConfirmedSafeDialog(String contactName) {
     if (_confirmedSafeDialogShown || !mounted) return;
     _confirmedSafeDialogShown = true;
+    // A trusted contact confirming the owner safe now actually ends this
+    // session too — not just a reassurance popup. Without this, the
+    // session (and Home's "SESSION ACTIVE" card) stayed active until the
+    // owner ALSO separately tapped "I'm Safe" themselves.
+    // navigateToSafeScreen: false — the dialog below handles its own
+    // "show then go to Home" flow instead of the usual SessionSafeScreen
+    // handoff that a manual "I'm Safe" tap gets.
+    _endSessionAsSafe(navigateToSafeScreen: false);
     showDialog(
       context: context,
       barrierDismissible: false,
       builder: (dialogContext) {
-        // No "OK" button — this is a quick reassurance, not a decision
-        // the person needs to make, so it clears itself on its own.
-        Future.delayed(const Duration(seconds: 4), () {
+        // Shown for 10s, then closes itself AND takes the person to Home —
+        // same "peek" push used by the back arrow, so the session itself
+        // just keeps running underneath rather than being ended by this.
+        Future.delayed(const Duration(seconds: 10), () {
           if (Navigator.of(dialogContext).canPop()) {
             Navigator.of(dialogContext).pop();
+          }
+          if (mounted) {
+            Navigator.of(context).pushNamed('/home');
           }
         });
         return Dialog(
@@ -1238,6 +1258,19 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
           backgroundColor: AppColors.background,
           elevation: 0,
           automaticallyImplyLeading: false,
+          leading: IconButton(
+            icon: Icon(Icons.arrow_back, color: AppColors.textPrimary),
+            tooltip: 'Back to Home',
+            // This does NOT end or pause the session -- it pushes a fresh
+            // Home screen ON TOP of this one, so this screen (and every
+            // timer/poll it's running) stays alive, untouched, right where
+            // it is underneath. Tapping the live countdown card on that
+            // Home screen pops back to reveal this exact screen again.
+            // A real pop here would dispose this State and silently kill
+            // the session (see the PopScope comment below) -- that's why
+            // this pushes instead of popping.
+            onPressed: () => Navigator.of(context).pushNamed('/home'),
+          ),
           title: Text(appBarTitle,
               style: TextStyle(
                   color: AppColors.textPrimary,
@@ -1428,10 +1461,17 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
                                   _hadDelay = true;
                                   _expectedTimeStr =
                                       _formatClockFromNow(_secondsRemaining);
+                                  // Keep Home's live countdown in sync with
+                                  // the extended time.
+                                  AppSession.instance.activeSessionEndTime =
+                                      DateTime.now().add(
+                                          Duration(seconds: _secondsRemaining));
                                 }
                                 if (newDestination != null &&
                                     newDestination.isNotEmpty) {
                                   _destination = newDestination;
+                                  AppSession.instance.activeSessionDestination =
+                                      newDestination;
                                 }
                                 if (newLat != null && newLng != null) {
                                   _destinationCoords = LatLng(newLat, newLng);

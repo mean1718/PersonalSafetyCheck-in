@@ -47,6 +47,12 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
   // told this screen to go check again. Poll while Home is visible so
   // it picks up her Safe confirmation (and any new alert) on its own.
   Timer? _incomingAlertsPollTimer;
+  // Ticks once a second only while a session is active, purely to refresh
+  // the live "time remaining" card below -- see _ActiveSessionCard. Not
+  // running any of the session's own logic (escalation, location pushes,
+  // etc.), all of which still lives entirely on ActiveSessionScreen and
+  // keeps running there even while this screen is what's on top.
+  Timer? _activeSessionTickTimer;
 
   @override
   void initState() {
@@ -59,12 +65,39 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
       _loadIncomingAlerts();
       _loadResolvedAlerts();
     });
+    _activeSessionTickTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (AppSession.instance.activeCheckInId != null && mounted) {
+        setState(() {});
+      }
+    });
   }
 
   @override
   void dispose() {
     _incomingAlertsPollTimer?.cancel();
+    _activeSessionTickTimer?.cancel();
     super.dispose();
+  }
+
+  void _openActiveSession() {
+    // AppSession.activeCheckInId is only ever set by ActiveSessionScreen
+    // itself and cleared when a session actually ends (see
+    // active_session_screen.dart) -- so whenever it's set, there is by
+    // construction a still-alive ActiveSessionScreen sitting right below
+    // this one in the navigation stack (this Home screen only exists here
+    // at all because its own back arrow pushed a peek view on top of it).
+    // Popping reveals it exactly as it was, timers and all, rather than
+    // starting a second, duplicate session.
+    if (Navigator.of(context).canPop()) {
+      Navigator.of(context).pop();
+    } else {
+      // Defensive fallback for the unexpected case where this IS the
+      // root Home with no live session screen underneath to reveal.
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+            content: Text('Reopen your active session from the app.')),
+      );
+    }
   }
 
   Future<void> _openPlans() async {
@@ -390,16 +423,23 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
               Row(
                 children: [
                   Expanded(
-                    child: _QuickActionCard(
-                      icon: Icons.play_arrow,
-                      label: 'Start Safety\nSession',
-                      background: AppColors.navy,
-                      badgeIconColor: AppColors.navy,
-                      textColor: Colors.white,
-                      onTap: () {
-                        Navigator.pushNamed(context, '/session-setup');
-                      },
-                    ),
+                    child: AppSession.instance.activeCheckInId != null
+                        ? _ActiveSessionCard(
+                            remaining: AppSession.instance.activeSessionEndTime
+                                    ?.difference(DateTime.now()) ??
+                                Duration.zero,
+                            onTap: _openActiveSession,
+                          )
+                        : _QuickActionCard(
+                            icon: Icons.play_arrow,
+                            label: 'Start Safety\nSession',
+                            background: AppColors.navy,
+                            badgeIconColor: AppColors.navy,
+                            textColor: Colors.white,
+                            onTap: () {
+                              Navigator.pushNamed(context, '/session-setup');
+                            },
+                          ),
                   ),
                   const SizedBox(width: 14),
                   Expanded(
@@ -847,209 +887,175 @@ class _QuickActionCardState extends State<_QuickActionCard> {
   }
 }
 
-/// Shown on Home when *this* person is a trusted contact who's been
+/// Replaces the small "Start Safety Session" quick-action card on Home
+/// whenever a session is currently active -- shows a live countdown and
+/// lets the person tap back into the real, still-running
+/// ActiveSessionScreen instead of a generic "open" action. Styled in the
+/// same family as _QuickActionCard (rounded, gradient, pressable) rather
+/// than a pixel-exact recreation of any one mockup.
+class _ActiveSessionCard extends StatefulWidget {
+  final Duration remaining;
+  final VoidCallback onTap;
+
+  const _ActiveSessionCard({required this.remaining, required this.onTap});
+
+  @override
+  State<_ActiveSessionCard> createState() => _ActiveSessionCardState();
+}
+
+class _ActiveSessionCardState extends State<_ActiveSessionCard> {
+  bool _pressed = false;
+
+  String _formatDuration(Duration d) {
+    final clamped = d.isNegative ? Duration.zero : d;
+    final h = clamped.inHours.toString().padLeft(2, '0');
+    final m = (clamped.inMinutes % 60).toString().padLeft(2, '0');
+    final s = (clamped.inSeconds % 60).toString().padLeft(2, '0');
+    return '$h:$m:$s';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isOverdue = widget.remaining <= Duration.zero;
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTapDown: (_) => setState(() => _pressed = true),
+      onTapUp: (_) {
+        setState(() => _pressed = false);
+        widget.onTap();
+      },
+      onTapCancel: () => setState(() => _pressed = false),
+      child: AnimatedScale(
+        scale: _pressed ? 0.97 : 1.0,
+        duration: const Duration(milliseconds: 120),
+        curve: Curves.easeOut,
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(14, 14, 14, 12),
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              // Overdue = the countdown actually hit zero, meaning the
+              // real ActiveSessionScreen underneath has moved into
+              // escalation. This card can't show the escalation banner
+              // itself, but it shouldn't sit there looking calm either —
+              // so it swaps to the same danger palette the app already
+              // uses for its Emergency Assistant card.
+              colors: isOverdue
+                  ? [AppColors.danger, AppColors.danger.withValues(alpha: 0.85)]
+                  : [AppColors.navy, AppColors.navyDark],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+            borderRadius: BorderRadius.circular(19),
+            border: Border.all(
+              color: isOverdue
+                  ? AppColors.danger.withValues(alpha: 0.13)
+                  : Colors.white.withValues(alpha: 0.06),
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: (isOverdue ? AppColors.danger : AppColors.navy)
+                    .withValues(alpha: _pressed ? 0.16 : 0.08),
+                blurRadius: _pressed ? 18 : 12,
+                offset: const Offset(0, 7),
+              ),
+            ],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: (isOverdue ? Colors.white : AppColors.success)
+                      .withValues(alpha: isOverdue ? 0.22 : 0.18),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(isOverdue ? Icons.warning_amber : Icons.access_time,
+                        size: 11,
+                        color: isOverdue ? Colors.white : AppColors.success),
+                    const SizedBox(width: 4),
+                    Text(
+                      isOverdue ? 'SESSION OVERDUE' : 'SESSION ACTIVE',
+                      style: TextStyle(
+                          fontSize: 9,
+                          fontWeight: FontWeight.w800,
+                          color: isOverdue ? Colors.white : AppColors.success),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 10),
+              Text(
+                'Safety Session',
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w800,
+                  height: 1.16,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                isOverdue ? 'Time is up:' : 'Ends in:',
+                style: TextStyle(
+                    color: Colors.white.withValues(alpha: 0.65),
+                    fontSize: 10.5),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                isOverdue ? 'Escalating' : _formatDuration(widget.remaining),
+                style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 18,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 0.5),
+              ),
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  Text(
+                    'Tap to open',
+                    style: TextStyle(
+                      color: Colors.white.withValues(alpha: 0.58),
+                      fontSize: 10.5,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const Spacer(),
+                  Container(
+                    width: 32,
+                    height: 32,
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.16),
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(
+                      Icons.arrow_forward_rounded,
+                      color: Colors.white,
+                      size: 17,
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 /// notified by someone else's safety session — the counterpart to
 /// [_ContactResponsesPanel] below, which is the owner's own view of who
 /// they alerted. This is where the trust/contact side actually confirms
 /// ("Confirm" = Can Help) instead of passively seeing a "Waiting…" chip
 /// meant for the person who started the session.
-/// The Home banner for "someone added you as a trusted contact" requests.
-/// Visible for about a minute after it first appears (see
-/// _loadIncomingTrustRequests in the state above) — Confirm moves them
-/// straight into Friends, Reject clears it, and doing nothing just lets it
-/// fade off Home on its own without losing the request.
-class _TrustRequestsPanel extends StatelessWidget {
-  final List<Map<String, dynamic>> requests;
-  final void Function(String id, bool accept) onRespond;
-
-  const _TrustRequestsPanel({required this.requests, required this.onRespond});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        // A tinted (not plain white) card + a colored left rail is what
-        // makes this read as "new and needs you" at a glance instead of
-        // blending in with the rest of the dashboard.
-        color: AppColors.primaryButton.withValues(alpha: 0.10),
-        borderRadius: BorderRadius.circular(18),
-        border:
-            Border.all(color: AppColors.primaryButton.withValues(alpha: 0.45)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                width: 30,
-                height: 30,
-                decoration: BoxDecoration(
-                  color: AppColors.navy,
-                  shape: BoxShape.circle,
-                ),
-                child: const Icon(Icons.person_add_alt_1,
-                    size: 16, color: Colors.white),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  requests.length == 1
-                      ? 'New trust request'
-                      : 'New trust requests (${requests.length})',
-                  style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w800,
-                      color: AppColors.navy),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 14),
-          for (int i = 0; i < requests.length; i++) ...[
-            if (i > 0) ...[
-              const SizedBox(height: 12),
-              Divider(
-                  height: 1,
-                  color: AppColors.primaryButton.withValues(alpha: 0.25)),
-              const SizedBox(height: 12),
-            ],
-            _TrustRequestRow(
-              request: requests[i],
-              onRespond: onRespond,
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
-class _TrustRequestRow extends StatelessWidget {
-  final Map<String, dynamic> request;
-  final void Function(String id, bool accept) onRespond;
-
-  const _TrustRequestRow({required this.request, required this.onRespond});
-
-  @override
-  Widget build(BuildContext context) {
-    final id = request['_id']?.toString() ?? '';
-    final sender = request['sender'] as Map<String, dynamic>? ?? {};
-    final name = sender['name']?.toString() ?? 'SafetyU user';
-    final phone = sender['phone']?.toString() ?? '';
-    // Same colored-avatar treatment used for confirmed Friends, keyed off
-    // the sender's id (falling back to phone) so this person's avatar
-    // matches the one they'll see once this becomes a real friend card.
-    final avatarKey = sender['_id']?.toString() ?? phone;
-    final avatarBg = avatarBackgroundFor(avatarKey.isEmpty ? name : avatarKey);
-    final avatarFg = avatarForegroundFor(avatarKey.isEmpty ? name : avatarKey);
-    final initials = name
-        .trim()
-        .split(RegExp(r'\s+'))
-        .where((p) => p.isNotEmpty)
-        .take(2)
-        .map((p) => p[0].toUpperCase())
-        .join();
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            CircleAvatar(
-              radius: 18,
-              backgroundColor: avatarBg,
-              child: Text(initials.isEmpty ? '?' : initials,
-                  style: TextStyle(
-                      color: avatarFg,
-                      fontWeight: FontWeight.w700,
-                      fontSize: 12.5)),
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(name,
-                      style: TextStyle(
-                          fontSize: 13.5,
-                          fontWeight: FontWeight.w700,
-                          color: AppColors.textPrimary)),
-                  Text('Wants to add you as a trusted contact',
-                      style: TextStyle(
-                          fontSize: 11, color: AppColors.textSecondary)),
-                ],
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 10),
-        // Full-width, color-coded, labeled buttons — the old paired icon
-        // circles (both a dark neutral color) didn't clearly read as
-        // "accept" vs "decline" at a glance.
-        Row(
-          children: [
-            Expanded(
-              child: GestureDetector(
-                onTap: id.isEmpty ? null : () => onRespond(id, false),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(vertical: 9),
-                  decoration: BoxDecoration(
-                    color: AppColors.card,
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(
-                        color: AppColors.danger.withValues(alpha: 0.55)),
-                  ),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(Icons.close, size: 15, color: AppColors.danger),
-                      const SizedBox(width: 5),
-                      Text('Decline',
-                          style: TextStyle(
-                              fontSize: 12.5,
-                              fontWeight: FontWeight.w700,
-                              color: AppColors.danger)),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: GestureDetector(
-                onTap: id.isEmpty ? null : () => onRespond(id, true),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(vertical: 9),
-                  decoration: BoxDecoration(
-                    color: AppColors.success,
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: const Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(Icons.check, size: 15, color: Colors.white),
-                      SizedBox(width: 5),
-                      Text('Accept',
-                          style: TextStyle(
-                              fontSize: 12.5,
-                              fontWeight: FontWeight.w700,
-                              color: Colors.white)),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ],
-        ),
-      ],
-    );
-  }
-}
-
 class _ResolvedSafeAlertsPanel extends StatelessWidget {
   final List<Map<String, dynamic>> alerts;
   const _ResolvedSafeAlertsPanel({required this.alerts});

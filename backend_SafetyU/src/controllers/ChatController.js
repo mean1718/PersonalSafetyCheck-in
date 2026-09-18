@@ -51,7 +51,7 @@ const sendMessage = async (req, res) => {
       // Confirming Safe resolves whatever "Need Help" this same person had
       // outstanding toward this same contact — mirrors what completing a
       // CheckIn session does for session-based alerts.
-      const resolvedResult = await Notification.updateMany(
+      await Notification.updateMany(
         {
           receiver: receiverId,
           sender: req.user.id,
@@ -61,16 +61,6 @@ const sendMessage = async (req, res) => {
         },
         { $set: { resolved: true } },
       );
-      // Only push if there was actually an outstanding alert to resolve —
-      // otherwise "I'm safe" sent with no prior "Need Help" would ping the
-      // contact for no reason.
-      if (resolvedResult.modifiedCount > 0) {
-        sendPushToUser(receiverId, {
-          title: "SafetyU",
-          body: `${req.authenticatedUser?.name || "A trusted contact"} confirmed they're safe.`,
-          data: { type: "checkin_completed" },
-        });
-      }
     }
     return res.status(201).json({ message });
   } catch (_) {
@@ -112,7 +102,7 @@ const getUnreadCounts = async (req, res) => {
     const rows = await ChatMessage.aggregate([
       { $match: { receiver: new mongoose.Types.ObjectId(req.user.id), isRead: false } },
       { $group: { _id: "$sender", count: { $sum: 1 } } },
-    ]);
+    ]);2
     const counts = {};
     rows.forEach((row) => { counts[row._id.toString()] = row.count; });
     return res.json({ counts });

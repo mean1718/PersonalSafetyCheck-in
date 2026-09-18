@@ -51,12 +51,6 @@ class CheckInService {
     return ApiClient.get('/checkins/$checkInId/alert-status');
   }
 
-  // Same call as alertStatus, but returns the session's own status too —
-  // used to notice a trusted contact resolved the whole session
-  // ("marked_safe") on the person's behalf, not just a per-contact reply.
-  static Future<Map<String, dynamic>> alertStatusFull(String checkInId) async {
-    return ApiClient.get('/checkins/$checkInId/alert-status');
-  }
   /// Just the per-contact list, for callers that only need that part.
   static List<Map<String, dynamic>> notifiedContactsFrom(
           Map<String, dynamic> alertStatusData) =>

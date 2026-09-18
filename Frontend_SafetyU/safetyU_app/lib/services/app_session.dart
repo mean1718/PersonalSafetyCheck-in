@@ -39,6 +39,14 @@ class AppSession extends ChangeNotifier {
   // Backend identifier for the session currently being displayed on Home.
   // It lets the owner reload actual notification recipients and responses.
   String? activeCheckInId;
+  // When the active session's countdown reaches 0, and what its owner
+  // said their destination was. Set/cleared by ActiveSessionScreen
+  // alongside activeCheckInId above -- exists so Home can show a live
+  // "time remaining" card for the session even while ActiveSessionScreen
+  // itself isn't the screen currently on top (the person tapped the new
+  // back arrow to peek at Home without ending their session).
+  DateTime? activeSessionEndTime;
+  String? activeSessionDestination;
 
   // Local file path to the picture the person chose from their own camera
   // or gallery. SafetyU has no backend/cloud storage in this build, so
@@ -477,9 +485,6 @@ class AppSession extends ChangeNotifier {
         final status = switch (contact['responseStatus']?.toString()) {
           'can_help' => ContactResponseStatus.canHelp,
           'cannot_help' => ContactResponseStatus.cantHelp,
-          // Implies canHelp — you can only mark someone safe after
-          // already confirming you can help them (see notificationController).
-          'marked_safe' => ContactResponseStatus.canHelp,
           _ => ContactResponseStatus.pending,
         };
         final notifiedAt =

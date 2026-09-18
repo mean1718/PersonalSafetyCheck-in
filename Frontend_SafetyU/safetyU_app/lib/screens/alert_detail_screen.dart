@@ -232,7 +232,6 @@ class _AlertDetailScreenState extends State<AlertDetailScreen> {
           contact: widget.contact,
           request: updatedRequest,
           outcome: outcome,
-          notificationId: widget.notificationId,
         ),
       ),
     );
