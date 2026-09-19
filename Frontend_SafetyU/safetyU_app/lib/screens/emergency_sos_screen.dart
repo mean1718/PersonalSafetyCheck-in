@@ -1,10 +1,7 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
-import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
 
-import '../services/marker_icons.dart';
 import '../theme/app_theme.dart';
 import '../models/app_notification.dart';
 import '../models/incident.dart';
@@ -17,20 +14,25 @@ import '../services/api_client.dart';
 
 /// Emergency Assistant
 ///
-/// The Emergency PIN is created during account registration.
-///
 /// Emergency flow:
 ///
 ///   Enter PIN
 ///        ↓
 ///   Automatic verification after 4th digit
 ///        ↓
-///   Send Emergency Alert
+///   Get current GPS location
+///        ↓
+///   Create emergency check-in
+///        ↓
+///   Create emergency request
+///        ↓
+///   Escalate to Emergency Responder
 ///        ↓
 ///   Success
 ///
 /// There is only ONE PIN input.
 /// There is NO Confirm / Send button.
+/// Google Maps is not required on this screen.
 class EmergencySosScreen extends StatefulWidget {
   const EmergencySosScreen({super.key});
 
@@ -52,10 +54,6 @@ class _EmergencySosScreenState
   final TextEditingController _pinController =
       TextEditingController();
 
-  GoogleMapController? _mapController;
-
-  StreamSubscription<Position>? _positionSub;
-
   _EmergencyStep _step =
       _EmergencyStep.loading;
 
@@ -63,44 +61,21 @@ class _EmergencySosScreenState
 
   String? _locationStatusMessage;
 
-  LatLng? _currentPosition;
-
-  BitmapDescriptor? _meIcon;
-
-  bool _markerIconsRequested = false;
+  Position? _currentPosition;
 
   bool _isVerifyingPin = false;
-
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-
-    // Load the team's custom map marker.
-    if (!_markerIconsRequested) {
-      _markerIconsRequested = true;
-
-      MarkerIcons.me(context).then((icon) {
-        if (!mounted) return;
-
-        setState(() {
-          _meIcon = icon;
-        });
-      });
-    }
-  }
 
   @override
   void initState() {
     super.initState();
 
-    // The Emergency PIN was already created
-    // during normal user registration.
+    // The Emergency PIN already exists
+    // for users who can access Emergency Assistant.
     _step = _EmergencyStep.enterPin;
   }
 
   @override
   void dispose() {
-    _positionSub?.cancel();
     _pinController.dispose();
     super.dispose();
   }
@@ -192,10 +167,10 @@ class _EmergencySosScreenState
   }
 
   // =========================================================
-  // GET CURRENT LOCATION
+  // GET CURRENT GPS LOCATION
   // =========================================================
 
-  Future<LatLng?> _getCurrentPosition() async {
+  Future<Position?> _getCurrentPosition() async {
     try {
       final serviceEnabled =
           await Geolocator.isLocationServiceEnabled();
@@ -214,16 +189,13 @@ class _EmergencySosScreenState
       LocationPermission permission =
           await Geolocator.checkPermission();
 
-      if (permission ==
-          LocationPermission.denied) {
+      if (permission == LocationPermission.denied) {
         permission =
             await Geolocator.requestPermission();
       }
 
-      if (permission ==
-              LocationPermission.denied ||
-          permission ==
-              LocationPermission.deniedForever) {
+      if (permission == LocationPermission.denied ||
+          permission == LocationPermission.deniedForever) {
         if (mounted) {
           setState(() {
             _locationStatusMessage =
@@ -236,32 +208,17 @@ class _EmergencySosScreenState
 
       final position =
           await Geolocator.getCurrentPosition(
-        desiredAccuracy:
-            LocationAccuracy.high,
+        desiredAccuracy: LocationAccuracy.high,
       );
 
-      final location = LatLng(
-        position.latitude,
-        position.longitude,
-      );
-
-      if (!mounted) {
-        return location;
+      if (mounted) {
+        setState(() {
+          _currentPosition = position;
+          _locationStatusMessage = null;
+        });
       }
 
-      setState(() {
-        _currentPosition = location;
-        _locationStatusMessage = null;
-      });
-
-      _mapController?.animateCamera(
-        CameraUpdate.newLatLngZoom(
-          location,
-          16.0,
-        ),
-      );
-
-      return location;
+      return position;
     } catch (e) {
       debugPrint(
         'Could not get emergency location: $e',
@@ -288,6 +245,7 @@ class _EmergencySosScreenState
     setState(() {
       _step = _EmergencyStep.sending;
       _errorMessage = null;
+      _locationStatusMessage = null;
     });
 
     try {
@@ -296,7 +254,10 @@ class _EmergencySosScreenState
         times: 5,
       );
 
-      // Get current location.
+      // -------------------------------------------------------
+      // 1. Get current GPS location
+      // -------------------------------------------------------
+
       final pos =
           await _getCurrentPosition();
 
@@ -305,7 +266,7 @@ class _EmergencySosScreenState
       _currentPosition = pos;
 
       // -------------------------------------------------------
-      // 1. Create emergency check-in
+      // 2. Create emergency check-in
       // -------------------------------------------------------
 
       final checkInId =
@@ -323,7 +284,7 @@ class _EmergencySosScreenState
       }
 
       // -------------------------------------------------------
-      // 2. Create emergency request
+      // 3. Create emergency request
       // -------------------------------------------------------
 
       final emergencyId =
@@ -333,6 +294,7 @@ class _EmergencySosScreenState
             'Emergency Assistant — needs immediate help',
         latitude: pos?.latitude,
         longitude: pos?.longitude,
+        directEmergency: true,
       );
 
       if (emergencyId == null) {
@@ -342,16 +304,15 @@ class _EmergencySosScreenState
       }
 
       // -------------------------------------------------------
-      // 3. Escalate to Emergency Responder
+      // 4. Escalate to Emergency Responder
       // -------------------------------------------------------
 
-      await EmergencyService
-          .escalateToEmergency(
+      await EmergencyService.escalateToEmergency(
         emergencyId,
       );
 
       // -------------------------------------------------------
-      // 4. Add local SafetyU notification
+      // 5. Add local SafetyU notification
       // -------------------------------------------------------
 
       AppSession.instance.addNotification(
@@ -362,7 +323,7 @@ class _EmergencySosScreenState
       );
 
       // -------------------------------------------------------
-      // 5. Add local incident record
+      // 6. Add local incident record
       // -------------------------------------------------------
 
       if (pos != null) {
@@ -379,7 +340,7 @@ class _EmergencySosScreenState
                 AppSession.instance.phone,
             destination:
                 'Emergency Assistant — current location',
-            location: pos,
+            location: LatLng(pos.latitude, pos.longitude),
             startedAt: DateTime.now(),
             notifiedContactIds: const [],
           ),
@@ -762,6 +723,8 @@ class _EmergencySosScreenState
               ),
               child: Text(
                 _locationStatusMessage!,
+                textAlign:
+                    TextAlign.center,
                 style: TextStyle(
                   color:
                       AppColors.danger,
@@ -773,61 +736,8 @@ class _EmergencySosScreenState
             ),
 
           // =================================================
-          // GOOGLE MAP
+          // SECURITY MESSAGE
           // =================================================
-
-          ClipRRect(
-            borderRadius:
-                BorderRadius.circular(16),
-            child: SizedBox(
-              height: 200,
-              child: GoogleMap(
-                onMapCreated:
-                    (controller) {
-                  _mapController =
-                      controller;
-                },
-                initialCameraPosition:
-                    CameraPosition(
-                  target:
-                      _currentPosition ??
-                          const LatLng(
-                            11.5696,
-                            104.9210,
-                          ),
-                  zoom: 15.0,
-                ),
-                markers:
-                    _currentPosition ==
-                            null
-                        ? {}
-                        : {
-                            Marker(
-                              markerId:
-                                  const MarkerId(
-                                'me',
-                              ),
-                              position:
-                                  _currentPosition!,
-                              icon:
-                                  _meIcon ??
-                                      BitmapDescriptor
-                                          .defaultMarker,
-                            ),
-                          },
-                myLocationButtonEnabled:
-                    false,
-                zoomControlsEnabled:
-                    false,
-              ),
-            ),
-          ),
-
-          const SizedBox(height: 20),
-
-          // ---------------------------------------------------
-          // Security message
-          // ---------------------------------------------------
 
           Row(
             mainAxisAlignment:
@@ -1166,6 +1076,8 @@ class _EmergencySosScreenState
                     _errorMessage =
                         null;
                     _locationStatusMessage =
+                        null;
+                    _currentPosition =
                         null;
                     _isVerifyingPin =
                         false;

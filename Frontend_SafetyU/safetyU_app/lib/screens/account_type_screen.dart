@@ -179,17 +179,13 @@ class _AccountTypeScreenState extends State<AccountTypeScreen> {
         _badgeIdController.text.trim().toUpperCase();
 
     // ------------------------------------------------------------
-    // RESPONDER → PHONE VERIFICATION
+    // RESPONDER → HOME
     //
-    // Do NOT call _proceedAfterAuth() here.
-    // Phone verification should control the next step.
+    // Phone verification screen is skipped — go straight to the
+    // responder home route (location permission still checked first).
     // ------------------------------------------------------------
 
-    Navigator.pushNamed(
-      context,
-      '/verify-phone',
-      arguments: UserRole.emergencyResponder.homeRoute,
-    );
+    await _proceedAfterAuth(UserRole.emergencyResponder.homeRoute);
   }
 
   Future<void> _proceedAfterAuth(String targetRoute) async {

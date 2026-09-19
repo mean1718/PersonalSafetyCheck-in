@@ -7,7 +7,6 @@ import 'package:geolocator/geolocator.dart';
 import '../services/marker_icons.dart';
 import '../theme/app_theme.dart';
 import '../models/incident.dart';
-import '../models/verification_status.dart';
 import '../services/app_session.dart';
 import '../services/alert_sound.dart';
 import '../services/notification_service.dart';
@@ -367,19 +366,6 @@ class _EmergencyHomeScreenState extends State<EmergencyHomeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    if (AppSession.instance.responderStatus !=
-        VerificationStatus.verified) {
-      return _PendingVerificationView(
-        onSimulateApproval: () {
-          setState(() {
-            AppSession.instance.responderStatus =
-                VerificationStatus.verified;
-          });
-        },
-        onLogout: _logout,
-      );
-    }
-
     final incidents =
         AppSession.instance.activeIncidents;
 
@@ -895,133 +881,6 @@ class _StatPill extends StatelessWidget {
                 TextAlign.center,
           ),
         ],
-      ),
-    );
-  }
-}
-
-// ===========================================================
-// PENDING VERIFICATION
-// ===========================================================
-
-class _PendingVerificationView
-    extends StatelessWidget {
-  final VoidCallback onSimulateApproval;
-  final VoidCallback onLogout;
-
-  const _PendingVerificationView({
-    required this.onSimulateApproval,
-    required this.onLogout,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor:
-          AppColors.background,
-
-      body: SafeArea(
-        child: Padding(
-          padding:
-              const EdgeInsets.symmetric(
-            horizontal: 28,
-          ),
-          child: Column(
-            mainAxisAlignment:
-                MainAxisAlignment.center,
-            children: [
-              Container(
-                width: 84,
-                height: 84,
-                decoration:
-                    BoxDecoration(
-                  color:
-                      AppColors.navy
-                          .withValues(
-                    alpha: 0.08,
-                  ),
-                  shape:
-                      BoxShape.circle,
-                ),
-                child: Icon(
-                  Icons.hourglass_top,
-                  color:
-                      AppColors.navy,
-                  size: 38,
-                ),
-              ),
-
-              const SizedBox(height: 22),
-
-              Text(
-                'Your account is pending verification',
-                textAlign:
-                    TextAlign.center,
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight:
-                      FontWeight.w800,
-                  color:
-                      AppColors.textPrimary,
-                ),
-              ),
-
-              const SizedBox(height: 10),
-
-              Text(
-                'Badge ID "${AppSession.instance.badgeId.isEmpty ? '—' : AppSession.instance.badgeId}" is under review. '
-                'SafetyU cannot verify an officer\'s identity on its own — this requires a real department directory check on a backend, '
-                'which this build does not have. You\'ll get access to real cases once an administrator approves your account.',
-                textAlign:
-                    TextAlign.center,
-                style: TextStyle(
-                  fontSize: 12.5,
-                  color:
-                      AppColors.textSecondary,
-                  height: 1.5,
-                ),
-              ),
-
-              const SizedBox(height: 28),
-
-              OutlinedButton(
-                onPressed:
-                    onSimulateApproval,
-                style:
-                    OutlinedButton.styleFrom(
-                  minimumSize:
-                      const Size(
-                    double.infinity,
-                    48,
-                  ),
-                ),
-                child:
-                    const Text(
-                  '(Demo only) Simulate Approval',
-                  style:
-                      TextStyle(
-                    fontWeight:
-                        FontWeight.w700,
-                  ),
-                ),
-              ),
-
-              const SizedBox(height: 10),
-
-              TextButton(
-                onPressed: onLogout,
-                child: Text(
-                  'Log Out',
-                  style: TextStyle(
-                    color:
-                        AppColors
-                            .textSecondary,
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
       ),
     );
   }

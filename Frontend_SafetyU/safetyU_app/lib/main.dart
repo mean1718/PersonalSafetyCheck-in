@@ -22,7 +22,6 @@ import 'screens/history_screen.dart';
 import 'screens/personal_info_screen.dart';
 import 'screens/change_password_screen.dart';
 import 'screens/select_contacts_screen.dart';
-import 'screens/verify_phone_screen.dart';
 import 'screens/chat_screen.dart';
 import 'screens/cases_screen.dart';
 import 'screens/case_detail_screen.dart';
@@ -84,7 +83,6 @@ class SafetyUApp extends StatelessWidget {
             '/personal-info': (context) => const PersonalInfoScreen(),
             '/change-password': (context) => const ChangePasswordScreen(),
             '/select-contacts': (context) => const SelectContactsScreen(),
-            '/verify-phone': (context) => const VerifyPhoneScreen(),
             '/cases': (context) => const CasesScreen(),
             '/case-detail': (context) => const CaseDetailScreen(),
             '/update-case': (context) => const UpdateCaseScreen(),
