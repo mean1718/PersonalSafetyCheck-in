@@ -8,6 +8,7 @@ import '../models/incident.dart';
 import '../services/app_session.dart';
 import '../services/emergency_responder_service.dart';
 import '../widgets/case_status_widgets.dart';
+import '../services/notification_service.dart';
 
 class CaseDetailScreen extends StatefulWidget {
   const CaseDetailScreen({super.key});
@@ -110,39 +111,96 @@ class _CaseDetailScreenState extends State<CaseDetailScreen> {
       );
     }
   }
+ Future<void> _markEmergencyNotificationRead(
+  String emergencyId,
+) async {
+  try {
+    final notifications =
+        await NotificationService.fetchAll();
+
+    for (final notification
+        in notifications) {
+      if (notification['type']?.toString() !=
+          'emergency_alert') {
+        continue;
+      }
+
+      final emergencyValue =
+          notification['emergency'];
+
+      final notificationEmergencyId =
+          emergencyValue
+                  is Map<String, dynamic>
+              ? emergencyValue['_id']
+                    ?.toString()
+              : emergencyValue?.toString();
+
+      if (notificationEmergencyId !=
+          emergencyId) {
+        continue;
+      }
+
+      final notificationId =
+          notification['_id']?.toString();
+
+      if (notificationId != null) {
+        try {
+          await NotificationService.markRead(
+            notificationId,
+          );
+        } catch (e) {
+          debugPrint(
+            'Failed to mark notification $notificationId read: $e',
+          );
+        }
+      }
+    }
+  } catch (e) {
+    debugPrint(
+      'Failed to mark emergency notifications as read: $e',
+    );
+  }
+}
 
   // =========================================================
   // TAKE CASE
   // =========================================================
 
   Future<void> _takeCase(Incident incident) async {
-    try {
-      await EmergencyResponderService.acceptCase(incident.id);
+  try {
+    await EmergencyResponderService.acceptCase(
+      incident.id,
+    );
 
-      if (!mounted) return;
+    // Mark the original responder notification as read.
+    // The Home red notification dot can disappear after
+    // the responder actually takes the case.
+    await _markEmergencyNotificationRead(incident.id);
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Emergency case accepted.'),
+    // Update local state immediately.
+    AppSession.instance.setIncidentStatus(
+      incident.id,
+      IncidentStatus.inProgress,
+    );
+
+    if (!mounted) return;
+
+    // Reload the authoritative case from backend.
+    setState(() {
+      _caseFuture = _loadIncident(context);
+    });
+  } catch (e) {
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          'Failed to accept emergency: $e',
         ),
-      );
-
-      // Reload from backend so the screen shows the real status.
-      setState(() {
-        _caseFuture = _loadIncident(context);
-      });
-    } catch (e) {
-      if (!mounted) return;
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'Failed to accept emergency: $e',
-          ),
-        ),
-      );
-    }
+      ),
+    );
   }
+}
 
   // =========================================================
   // CANCEL CASE

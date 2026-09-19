@@ -50,10 +50,10 @@ const emergencySchema = new mongoose.Schema(
       default: null,
     },
 
-    // Responder officer assigned to this emergency.
+    // User account of the responder who accepted this emergency.
     assignedResponder: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: "ResponderOfficer",
+      ref: "User",
       default: null,
     },
 

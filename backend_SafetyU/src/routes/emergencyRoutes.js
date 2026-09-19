@@ -7,10 +7,16 @@ const {
   escalateToSecondary,
   escalateToEmergency,
   getMyEmergencies,
+  getResponderEmergencies,
+  acceptEmergency,
   resolveEmergency,
 } = require("../controllers/emergencyController");
 
-const protect = require("../middleware/authMiddleware");
+const protect =
+  require("../middleware/authMiddleware");
+
+const requireResponder =
+  require("../middleware/responderMiddleware");
 
 // =========================================================
 // START EMERGENCY
@@ -23,7 +29,29 @@ router.post(
 );
 
 // =========================================================
-// GET MY EMERGENCIES
+// RESPONDER CASES
+// =========================================================
+
+router.get(
+  "/responder/cases",
+  protect,
+  requireResponder,
+  getResponderEmergencies
+);
+
+// =========================================================
+// RESPONDER ACCEPTS CASE
+// =========================================================
+
+router.put(
+  "/:emergencyId/accept",
+  protect,
+  requireResponder,
+  acceptEmergency
+);
+
+// =========================================================
+// GET USER'S EMERGENCIES
 // =========================================================
 
 router.get(
@@ -53,12 +81,13 @@ router.post(
 );
 
 // =========================================================
-// RESOLVE EMERGENCY
+// RESPONDER RESOLVES EMERGENCY
 // =========================================================
 
 router.put(
   "/:emergencyId/resolve",
   protect,
+  requireResponder,
   resolveEmergency
 );
 

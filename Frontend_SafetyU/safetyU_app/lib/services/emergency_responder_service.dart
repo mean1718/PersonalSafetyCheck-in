@@ -1,13 +1,14 @@
-//import 'package:latlong2/latlong.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
+
 import 'api_client.dart';
 import '../models/incident.dart';
 import 'app_session.dart';
 
 class EmergencyResponderService {
-  /// Fetch emergency cases assigned to the responder's station.
+  /// Fetch cases available to this responder.
   static Future<List<Incident>> fetchCases() async {
-    final data = await ApiClient.get('/emergency');
+    final data =
+        await ApiClient.get('/emergency/responder/cases');
 
     final emergencies =
         (data['emergencies'] as List<dynamic>? ?? []);
@@ -15,12 +16,15 @@ class EmergencyResponderService {
     final incidents = <Incident>[];
 
     for (final item in emergencies) {
-      final emergency = item as Map<String, dynamic>;
+      if (item is! Map<String, dynamic>) {
+        continue;
+      }
 
-      final status = emergency['status']?.toString();
+      final emergency = item;
 
-      // Only show emergencies that have reached police/emergency
-      // escalation.
+      final status =
+          emergency['status']?.toString();
+
       if (status != 'emergency' &&
           status != 'in_progress' &&
           status != 'resolved') {
@@ -28,21 +32,25 @@ class EmergencyResponderService {
       }
 
       final location =
-          emergency['location'] as Map<String, dynamic>?;
+          emergency['location']
+              as Map<String, dynamic>?;
 
       final latitude =
-          (location?['latitude'] as num?)?.toDouble();
+          (location?['latitude'] as num?)
+              ?.toDouble();
 
       final longitude =
-          (location?['longitude'] as num?)?.toDouble();
+          (location?['longitude'] as num?)
+              ?.toDouble();
 
-      // A responder case needs a valid location.
-      if (latitude == null || longitude == null) {
+      if (latitude == null ||
+          longitude == null) {
         continue;
       }
 
       final user =
-          emergency['user'] as Map<String, dynamic>?;
+          emergency['user']
+              as Map<String, dynamic>?;
 
       final station =
           emergency['assignedStation']
@@ -51,37 +59,71 @@ class EmergencyResponderService {
       final emergencyId =
           emergency['_id']?.toString();
 
-      if (emergencyId == null) {
+      if (emergencyId == null ||
+          emergencyId.isEmpty) {
         continue;
+      }
+
+      final stationAddress =
+          station?['address']?.toString();
+
+      final stationName =
+          station?['name']?.toString();
+
+      String destination;
+
+      if (stationAddress != null &&
+          stationAddress.isNotEmpty) {
+        destination = stationAddress;
+      } else if (stationName != null &&
+          stationName.isNotEmpty) {
+        destination = stationName;
+      } else {
+        destination = 'Emergency location';
       }
 
       incidents.add(
         Incident(
           id: emergencyId,
+
           personName:
-              user?['name']?.toString() ?? 'Unknown User',
+              user?['name']?.toString() ??
+                  'Unknown User',
+
           phone:
-              user?['phone']?.toString() ?? '',
+              user?['phone']?.toString() ??
+                  '',
+
           destination:
-              station?['address']?.toString() ??
-              station?['name']?.toString() ??
-              'Emergency location',
+              destination,
+
           location: LatLng(
             latitude,
             longitude,
           ),
+
           startedAt:
               DateTime.tryParse(
-                    emergency['createdAt']?.toString() ?? '',
+                    emergency['createdAt']
+                            ?.toString() ??
+                        '',
                   ) ??
                   DateTime.now(),
-          status: _mapStatus(status),
+
+          status:
+              _mapStatus(status),
+
           locationIsStale: false,
-          notifiedContactIds: const [],
+
+          notifiedContactIds:
+              const [],
+
           resolvedAt:
               status == 'resolved'
                   ? DateTime.tryParse(
-                      emergency['updatedAt']?.toString() ?? '',
+                      emergency['updatedAt']
+                              ?.toString() ??
+                          '',
                     )
                   : null,
         ),
@@ -91,7 +133,9 @@ class EmergencyResponderService {
     return incidents;
   }
 
-  static IncidentStatus _mapStatus(String? status) {
+  static IncidentStatus _mapStatus(
+    String? status,
+  ) {
     switch (status) {
       case 'in_progress':
         return IncidentStatus.inProgress;
@@ -105,23 +149,26 @@ class EmergencyResponderService {
     }
   }
 
-  /// Accept an emergency case.
-  static Future<void> acceptCase(String emergencyId) async {
+  /// Responder takes the case.
+  static Future<void> acceptCase(
+    String emergencyId,
+  ) async {
     await ApiClient.put(
       '/emergency/$emergencyId/accept',
       {},
     );
   }
 
-  /// Resolve an emergency case.
-  static Future<void> resolveCase(String emergencyId) async {
+  /// Responder resolves the case.
+  static Future<void> resolveCase(
+    String emergencyId,
+  ) async {
     await ApiClient.put(
       '/emergency/$emergencyId/resolve',
       {},
     );
   }
 
-  /// Returns the current responder's backend user ID.
   static String? get currentResponderId =>
       AppSession.instance.backendUserId;
 }

@@ -58,7 +58,12 @@ class PushNotificationService {
       final notification = message.notification;
       if (notification == null) return;
       final type = message.data['type'];
-      if (type == 'trust_request') {
+      if (type == 'emergency_alert') {
+        LocalNotificationService.showEmergencyAlert(
+          id: message.hashCode,
+          userName: notification.body ?? 'A SafetyU user',
+        );
+      } else if (type == 'trust_request') {
         LocalNotificationService.showTrustRequest(
           id: message.hashCode,
           senderName: notification.body ?? 'Someone',

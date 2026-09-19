@@ -148,6 +148,27 @@ class AuthService {
   }
 
   // =========================================================
+// LOGOUT
+// =========================================================
+//
+// Tells the backend that the current responder is offline.
+//
+// The backend is responsible for changing:
+//   isOnline   -> false
+//   lastSeenAt -> current time
+//
+// Local Flutter session cleanup is handled by ProfileScreen.
+// =========================================================
+
+static Future<void> logout() async {
+  await ApiClient.post(
+    '/users/logout',
+    {},
+    auth: true,
+  );
+}
+
+  // =========================================================
   // VERIFY EMERGENCY PIN
   // =========================================================
   //

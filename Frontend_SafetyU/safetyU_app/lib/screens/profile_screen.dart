@@ -24,6 +24,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
   // Index 3 in both nav bars is "Profile".
   final int _navIndex = 3;
 
+  bool _loggingOut = false;
+
   bool get _isResponder =>
       AppSession.instance.role == UserRole.emergencyResponder;
 
@@ -395,10 +397,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
               });
 
               try {
-                // -------------------------------------------------
-                // Update PIN in backend
-                // -------------------------------------------------
-
                 await AuthService.changeEmergencyPin(
                   currentPin: currentPin,
                   newPin: pin,
@@ -863,8 +861,43 @@ class _ProfileScreenState extends State<ProfileScreen> {
   // LOGOUT
   // =========================================================
 
-  void _logout() {
+  Future<void> _logout() async {
+    if (_loggingOut) return;
+
+    setState(() {
+      _loggingOut = true;
+    });
+
+    try {
+      // -------------------------------------------------------
+      // Tell backend that the responder is going offline.
+      //
+      // Normal users are also allowed to use this method;
+      // backend will simply handle their logout normally.
+      // -------------------------------------------------------
+
+      await AuthService.logout();
+    } catch (e) {
+      // -------------------------------------------------------
+      // We still clear the local session even if the backend
+      // cannot be reached.
+      //
+      // This prevents the user from being trapped on the
+      // Profile screen because of a network problem.
+      // -------------------------------------------------------
+
+      debugPrint(
+        'Backend logout failed: $e',
+      );
+    }
+
+    // ---------------------------------------------------------
+    // Clear local Flutter session.
+    // ---------------------------------------------------------
+
     AppSession.instance.signOut();
+
+    if (!mounted) return;
 
     Navigator.pushNamedAndRemoveUntil(
       context,
@@ -1224,23 +1257,36 @@ class _ProfileScreenState extends State<ProfileScreen> {
               width: double.infinity,
               height: 52,
               child: ElevatedButton(
-                onPressed: _logout,
+                onPressed: _loggingOut ? null : _logout,
                 style: ElevatedButton.styleFrom(
                   backgroundColor:
                       const Color(0xFFFF6554),
+                  disabledBackgroundColor:
+                      const Color(0xFFFF6554).withValues(
+                    alpha: 0.6,
+                  ),
                   shape: RoundedRectangleBorder(
                     borderRadius:
                         BorderRadius.circular(26),
                   ),
                 ),
-                child: const Text(
-                  'Log Out',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 15,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
+                child: _loggingOut
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2.2,
+                          color: Colors.white,
+                        ),
+                      )
+                    : const Text(
+                        'Log Out',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 15,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
               ),
             ),
           ],

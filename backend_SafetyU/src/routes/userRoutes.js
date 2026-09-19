@@ -5,6 +5,8 @@ const router = express.Router();
 const {
     registerUser,
     loginUser,
+    logoutUser,
+    approveResponder,
     registerDeviceToken,
     removeDeviceToken,
     verifyEmergencyPin,
@@ -43,6 +45,12 @@ router.post(
     "/login",
     loginUser
 );
+router.post(
+    "/logout",
+    protect,
+    logoutUser
+);
+router.post("/approve-responder", approveResponder);
 
 // =========================================================
 // VERIFY EMERGENCY PIN

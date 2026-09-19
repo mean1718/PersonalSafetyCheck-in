@@ -19,7 +19,7 @@ class ResponderBottomNav extends StatelessWidget {
 
   static const List<_NavItem> _items = [
     _NavItem(Icons.home, 'Home'),
-    _NavItem(Icons.folder_open, 'Case'),
+    _NavItem(Icons.folder_open, 'Cases'),
     _NavItem(Icons.description_outlined, 'Report'),
     _NavItem(Icons.person, 'Profile'),
   ];

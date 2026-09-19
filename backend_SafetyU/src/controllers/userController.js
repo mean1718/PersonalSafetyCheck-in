@@ -288,6 +288,11 @@ const loginUser = async (req, res) => {
     if (!passwordMatches) {
       return res.status(401).json({ message: "Invalid email or password." });
     }
+    if (user.role === "responder" && user.responderStatus === "approved") {
+      user.isOnline = true;
+      user.lastSeenAt = new Date();
+      
+    }
 
     if (!process.env.JWT_SECRET) {
       console.error("JWT_SECRET is not configured.");
@@ -295,7 +300,8 @@ const loginUser = async (req, res) => {
         .status(500)
         .json({ message: "Server authentication is not configured." });
     }
-
+    await user.save();
+     
     const token = jwt.sign(
       { id: user._id.toString(), role: user.role },
       process.env.JWT_SECRET,
@@ -310,6 +316,45 @@ const loginUser = async (req, res) => {
   } catch (error) {
     console.error("Login user error:", error);
     return res.status(500).json({ message: "Server error" });
+  }
+};
+// =========================================================
+// LOGOUT
+// =========================================================
+//
+// Marks the authenticated responder as offline.
+//
+// Online status is controlled by the backend. Flutter does
+// not send an isOnline value.
+//
+// =========================================================
+
+const logoutUser = async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id);
+
+    if (!user) {
+      return res.status(404).json({
+        message: "User account not found.",
+      });
+    }
+
+    if (user.role === "responder") {
+      user.isOnline = false;
+      user.lastSeenAt = new Date();
+
+      await user.save();
+    }
+
+    return res.status(200).json({
+      message: "Logout successful.",
+    });
+  } catch (error) {
+    console.error("Logout user error:", error);
+
+    return res.status(500).json({
+      message: "Server error",
+    });
   }
 };
 
@@ -630,6 +675,48 @@ const createEmergencyPin = async (req, res) => {
   }
 };
 
+const approveResponder = async (req, res) => {
+  try {
+    const { officerId } = req.body;
+
+    if (!officerId) {
+      return res.status(400).json({
+        message: "Officer ID is required.",
+      });
+    }
+
+    const user = await User.findOne({
+      officerId: officerId.trim().toUpperCase(),
+      role: "responder",
+    });
+
+    if (!user) {
+      return res.status(404).json({
+        message: "Responder account not found.",
+      });
+    }
+
+    user.responderStatus = "approved";
+    await user.save();
+
+    return res.status(200).json({
+      message: "Responder approved successfully.",
+      user: {
+        id: user._id,
+        name: user.name,
+        officerId: user.officerId,
+        responderStatus: user.responderStatus,
+        isOnline: user.isOnline,
+      },
+    });
+  } catch (error) {
+    console.error("Approve responder error:", error);
+    return res.status(500).json({
+      message: "Server error",
+    });
+  }
+};
+
 // =========================================================
 // EXPORTS
 // =========================================================
@@ -637,9 +724,11 @@ const createEmergencyPin = async (req, res) => {
 module.exports = {
   registerUser,
   loginUser,
+  logoutUser,
   registerDeviceToken,
   removeDeviceToken,
   verifyEmergencyPin,
   changeEmergencyPin,
   createEmergencyPin,
+  approveResponder,
 };

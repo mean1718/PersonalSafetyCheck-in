@@ -20,35 +20,167 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
   List<Map<String, dynamic>> _backendNotifications = [];
   List<Map<String, dynamic>> _trustRequests = [];
 
-  @override
-  void initState() {
-    super.initState();
-    // Mark everything read once the person actually opens the list, so
-    // the badge count on Home reflects only genuinely unseen alerts.
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      AppSession.instance.markAllNotificationsRead();
-    });
-    _loadBackendNotifications();
-    _loadTrustRequests();
-  }
+ @override
+void initState() {
+  super.initState();
+
+  // Do NOT mark backend emergency notifications as read here.
+  //
+  // A responder must explicitly Take Case before the
+  // emergency notification becomes read.
+
+  WidgetsBinding.instance.addPostFrameCallback((_) {
+    AppSession.instance.markAllNotificationsRead();
+  });
+
+  _loadBackendNotifications();
+  _loadTrustRequests();
+}
 
   Future<void> _loadBackendNotifications() async {
-    try {
-      final notifications = await NotificationService.fetchAll();
-      if (mounted) setState(() => _backendNotifications = notifications);
-      // Viewing this list is what "checking your notifications" means —
-      // mark everything currently shown as read so the Home badge count
-      // resets, and only climbs again for alerts that arrive after this.
-      for (final n in notifications) {
-        if (n['isRead'] != true) {
-          final id = n['_id']?.toString();
-          if (id != null) {
-            NotificationService.markRead(id).catchError((_) {});
-          }
-        }
+  try {
+    final notifications =
+        await NotificationService.fetchAll();
+
+    // ---------------------------------------------------------
+    // DEDUPLICATE EMERGENCY ALERTS
+    //
+    // Other notification types are kept normally.
+    // Emergency alerts are grouped by Emergency._id.
+    // ---------------------------------------------------------
+
+    final List<Map<String, dynamic>>
+        result = [];
+
+    final Map<String, Map<String, dynamic>>
+        emergencyById = {};
+
+    for (final notification
+        in notifications) {
+      if (notification['type']?.toString() !=
+          'emergency_alert') {
+        result.add(notification);
+        continue;
       }
-    } catch (_) {}
+
+      final emergencyValue =
+          notification['emergency'];
+
+      final emergencyId =
+          emergencyValue
+                  is Map<String, dynamic>
+              ? emergencyValue['_id']
+                    ?.toString()
+              : emergencyValue?.toString();
+
+      // If an emergency notification has no emergency ID,
+      // keep it rather than silently deleting it.
+      if (emergencyId == null ||
+          emergencyId.isEmpty) {
+        result.add(notification);
+        continue;
+      }
+
+      final existing =
+          emergencyById[emergencyId];
+
+      if (existing == null) {
+        emergencyById[emergencyId] =
+            notification;
+        continue;
+      }
+
+      // Prefer unread.
+      final existingUnread =
+          existing['isRead'] != true;
+
+      final currentUnread =
+          notification['isRead'] != true;
+
+      if (!existingUnread &&
+          currentUnread) {
+        emergencyById[emergencyId] =
+            notification;
+        continue;
+      }
+
+      // Otherwise prefer newest.
+      final existingTime =
+          DateTime.tryParse(
+                existing['createdAt']
+                        ?.toString() ??
+                    '',
+              ) ??
+              DateTime.fromMillisecondsSinceEpoch(
+                0,
+              );
+
+      final currentTime =
+          DateTime.tryParse(
+                notification['createdAt']
+                        ?.toString() ??
+                    '',
+              ) ??
+              DateTime.fromMillisecondsSinceEpoch(
+                0,
+              );
+
+      if (currentTime
+          .isAfter(existingTime)) {
+        emergencyById[emergencyId] =
+            notification;
+      }
+    }
+
+    result.addAll(
+      emergencyById.values,
+    );
+
+    // Newest first.
+    result.sort((a, b) {
+      final aTime =
+          DateTime.tryParse(
+                a['createdAt']
+                        ?.toString() ??
+                    '',
+              ) ??
+              DateTime.fromMillisecondsSinceEpoch(
+                0,
+              );
+
+      final bTime =
+          DateTime.tryParse(
+                b['createdAt']
+                        ?.toString() ??
+                    '',
+              ) ??
+              DateTime.fromMillisecondsSinceEpoch(
+                0,
+              );
+
+      return bTime.compareTo(aTime);
+    });
+
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {
+      _backendNotifications = result;
+    });
+
+    // IMPORTANT:
+    //
+    // Do NOT mark notifications read here.
+    //
+    // Emergency notifications become read only when
+    // the responder actually takes the case.
+  } catch (e) {
+    debugPrint(
+      'Failed to load backend notifications: $e',
+    );
   }
+}
 
   Future<void> _loadTrustRequests() async {
     try {

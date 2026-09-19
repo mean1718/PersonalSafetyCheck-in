@@ -27,6 +27,7 @@ const ANDROID_CHANNEL_BY_TYPE = {
   trust_request: "trust_requests",
   safety_alert: "safety_alerts",
   checkin_completed: "safety_resolved",
+  emergency_alert: "emergency_alerts",
 };
 
 async function sendPushToUser(userId, { title, body, data = {} }) {

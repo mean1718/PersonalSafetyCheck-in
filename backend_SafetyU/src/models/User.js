@@ -62,6 +62,17 @@ const userSchema = new mongoose.Schema(
       default: "pending",
     },
 
+    // ---- Responder online status ----
+isOnline: {
+  type: Boolean,
+  default: false,
+},
+
+lastSeenAt: {
+  type: Date,
+  default: null,
+},
+
     // ---- Emergency Assistant PIN (user accounts only) ----
     emergencyPin: {
       type: String,

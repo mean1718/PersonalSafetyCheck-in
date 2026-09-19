@@ -45,6 +45,15 @@ class LocalNotificationService {
     priority: Priority.high,
   );
 
+  static const AndroidNotificationDetails _emergencyAlertAndroidDetails =
+      AndroidNotificationDetails(
+    'emergency_alerts',
+    'Emergency alerts',
+    channelDescription: 'Urgent alerts for new emergency responder cases',
+    importance: Importance.max,
+    priority: Priority.max,
+  );
+
   static const AndroidNotificationDetails _safetyResolvedAndroidDetails =
       AndroidNotificationDetails(
     'safety_resolved',
@@ -84,6 +93,7 @@ class LocalNotificationService {
       _trustRequestAndroidDetails,
       _safetyAlertAndroidDetails,
       _safetyResolvedAndroidDetails,
+      _emergencyAlertAndroidDetails,
     ]) {
       await androidPlugin?.createNotificationChannel(
         AndroidNotificationChannel(
@@ -138,6 +148,26 @@ class LocalNotificationService {
       );
     } catch (e) {
       debugPrint('LocalNotificationService: safety alert show failed -> $e');
+    }
+  }
+
+  static Future<void> showEmergencyAlert({
+    required int id,
+    required String userName,
+  }) async {
+    if (!_initialized) await init();
+    try {
+      await _plugin.show(
+        id,
+        'New Emergency',
+        '$userName needs immediate emergency assistance.',
+        const NotificationDetails(
+          android: _emergencyAlertAndroidDetails,
+          iOS: DarwinNotificationDetails(),
+        ),
+      );
+    } catch (e) {
+      debugPrint('LocalNotificationService: emergency alert show failed -> $e');
     }
   }
 

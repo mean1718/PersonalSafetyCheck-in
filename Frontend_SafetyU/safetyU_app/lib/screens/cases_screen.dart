@@ -214,6 +214,7 @@ class _CasesScreenState extends State<CasesScreen> {
       bottomNavigationBar:
           ResponderBottomNav(
         currentIndex: 1,
+        caseCount: all.where((i) => i.status != IncidentStatus.resolved).length,
         onTap: _onNavTap,
       ),
     );

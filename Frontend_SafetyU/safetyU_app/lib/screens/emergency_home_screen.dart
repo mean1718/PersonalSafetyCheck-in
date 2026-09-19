@@ -10,6 +10,7 @@ import '../models/incident.dart';
 import '../services/app_session.dart';
 import '../services/alert_sound.dart';
 import '../services/notification_service.dart';
+import '../services/emergency_responder_service.dart';
 import '../widgets/responder_bottom_nav.dart';
 
 /// Officer Dashboard — landing screen for the Emergency Responder role.
@@ -30,6 +31,23 @@ import '../widgets/responder_bottom_nav.dart';
 /// AppSession.activeIncidents
 ///      ↓
 /// Responder dashboard / Cases
+///
+/// When the responder taps "New Emergency", the app now goes
+/// directly to the Case Details screen.
+///
+/// Home
+///      ↓
+/// New Emergency card
+///      ↓
+/// Case Details
+///      ↓
+/// Take Case
+///      ↓
+/// In Progress
+///      ↓
+/// Update Status
+///      ↓
+/// Resolved
 class EmergencyHomeScreen extends StatefulWidget {
   const EmergencyHomeScreen({super.key});
 
@@ -48,6 +66,7 @@ class _EmergencyHomeScreenState extends State<EmergencyHomeScreen> {
   LatLng? _myPosition;
 
   int _lastKnownIncidentCount = 0;
+  int _unreadEmergencyCount = 0;
 
   BitmapDescriptor? _meIcon;
   BitmapDescriptor? _incidentIcon;
@@ -57,6 +76,14 @@ class _EmergencyHomeScreenState extends State<EmergencyHomeScreen> {
   /// Emergency notification IDs that have already
   /// been converted into Incident objects.
   final Set<String> _loadedEmergencyNotificationIds = {};
+
+  /// Maps the real Emergency ID to its notification.
+  ///
+  /// We keep this information available so the responder
+  /// notification system can identify which emergency
+  /// generated the notification.
+  final Map<String, Map<String, dynamic>>
+      _emergencyNotificationsByEmergencyId = {};
 
   @override
   void didChangeDependencies() {
@@ -92,7 +119,13 @@ class _EmergencyHomeScreenState extends State<EmergencyHomeScreen> {
     // Load emergency notifications immediately.
     _loadEmergencyNotifications();
 
+    // Load authoritative responder cases.
+    _syncResponderCases();
+
     // Keep checking for new emergency notifications.
+    //
+    // This allows the responder Home screen to update
+    // without requiring the responder to manually refresh.
     _notificationTimer = Timer.periodic(
       const Duration(seconds: 3),
       (_) => _loadEmergencyNotifications(),
@@ -112,122 +145,254 @@ class _EmergencyHomeScreenState extends State<EmergencyHomeScreen> {
     super.dispose();
   }
 
-  // =========================================================
-  // LOAD REAL EMERGENCY NOTIFICATIONS
-  // =========================================================
-
   Future<void> _loadEmergencyNotifications() async {
-    try {
-      final notifications = await NotificationService.fetchAll();
+  try {
+    final notifications =
+        await NotificationService.fetchAll();
 
-      final emergencyNotifications = notifications.where(
-        (notification) {
-          return notification['type']?.toString() == 'emergency_alert';
-        },
-      ).toList();
+    final emergencyNotifications =
+        notifications.where((notification) {
+      return notification['type']?.toString() ==
+          'emergency_alert';
+    }).toList();
 
-      bool addedAny = false;
+    // ---------------------------------------------------------
+    // DEDUPLICATE BY REAL EMERGENCY ID
+    //
+    // One emergency = one notification in the UI.
+    //
+    // Prefer:
+    // 1. unread notification
+    // 2. newest notification
+    // ---------------------------------------------------------
 
-      for (final notification in emergencyNotifications) {
-        final notificationId =
-            notification['_id']?.toString();
+    final Map<String, Map<String, dynamic>>
+        uniqueByEmergency = {};
 
-        if (notificationId == null) {
-          continue;
-        }
+    for (final notification
+        in emergencyNotifications) {
+      final emergencyValue =
+          notification['emergency'];
 
-        // Already converted into a case.
-        if (_loadedEmergencyNotificationIds.contains(notificationId)) {
-          continue;
-        }
+      final emergencyId =
+          emergencyValue
+                  is Map<String, dynamic>
+              ? emergencyValue['_id']
+                    ?.toString()
+              : emergencyValue?.toString();
 
-        // ---------------------------------------------------
-        // Sender
-        // ---------------------------------------------------
-
-        final sender =
-            notification['sender'] as Map<String, dynamic>?;
-
-        // ---------------------------------------------------
-        // Emergency location
-        // ---------------------------------------------------
-
-        final location =
-            notification['location'] as Map<String, dynamic>?;
-
-        final latitude =
-            (location?['latitude'] as num?)?.toDouble();
-
-        final longitude =
-            (location?['longitude'] as num?)?.toDouble();
-
-        // Without a valid location we cannot
-        // create a map-based Incident.
-        if (latitude == null || longitude == null) {
-          debugPrint(
-            'Emergency notification $notificationId '
-            'has no valid location.',
-          );
-
-          _loadedEmergencyNotificationIds.add(notificationId);
-
-          continue;
-        }
-
-        // ---------------------------------------------------
-        // Notification creation time
-        // ---------------------------------------------------
-
-        final createdAt =
-            DateTime.tryParse(
-              notification['createdAt']?.toString() ?? '',
-            ) ??
-            DateTime.now();
-
-        // ---------------------------------------------------
-        // Create real Incident
-        // ---------------------------------------------------
-
-        final incident = Incident(
-          id: notificationId,
-          personName:
-              sender?['name']?.toString() ?? 'SafetyU User',
-          phone:
-              sender?['phone']?.toString() ?? '',
-          destination:
-              'Emergency Assistant — current location',
-          location: LatLng(latitude, longitude),
-          startedAt: createdAt,
-          notifiedContactIds: const [],
-        );
-
-        // Add to shared responder case list.
-        AppSession.instance.addIncident(incident);
-
-        _loadedEmergencyNotificationIds.add(notificationId);
-
-        addedAny = true;
-
-        // ---------------------------------------------------
-        // Mark notification as read.
-        // ---------------------------------------------------
-
-        try {
-          await NotificationService.markRead(notificationId);
-        } catch (e) {
-          debugPrint(
-            'Could not mark emergency notification '
-            'as read: $e',
-          );
-        }
+      if (emergencyId == null ||
+          emergencyId.isEmpty) {
+        continue;
       }
 
-      if (addedAny && mounted) {
+      final existing =
+          uniqueByEmergency[emergencyId];
+
+      if (existing == null) {
+        uniqueByEmergency[emergencyId] =
+            notification;
+        continue;
+      }
+
+      final existingUnread =
+          existing['isRead'] != true;
+
+      final currentUnread =
+          notification['isRead'] != true;
+
+      // Prefer unread notification.
+      if (!existingUnread &&
+          currentUnread) {
+        uniqueByEmergency[emergencyId] =
+            notification;
+        continue;
+      }
+
+      // If both have same read state,
+      // keep the newest one.
+      if (existingUnread ==
+          currentUnread) {
+        final existingTime =
+            DateTime.tryParse(
+                  existing['createdAt']
+                          ?.toString() ??
+                      '',
+                ) ??
+                DateTime.fromMillisecondsSinceEpoch(
+                  0,
+                );
+
+        final currentTime =
+            DateTime.tryParse(
+                  notification['createdAt']
+                          ?.toString() ??
+                      '',
+                ) ??
+                DateTime.fromMillisecondsSinceEpoch(
+                  0,
+                );
+
+        if (currentTime
+            .isAfter(existingTime)) {
+          uniqueByEmergency[emergencyId] =
+              notification;
+        }
+      }
+    }
+
+    final uniqueEmergencyNotifications =
+        uniqueByEmergency.values.toList();
+
+    // ---------------------------------------------------------
+    // BADGE COUNT
+    //
+    // Count unique emergencies, NOT notification documents.
+    // ---------------------------------------------------------
+
+    _unreadEmergencyCount =
+        uniqueEmergencyNotifications
+            .where(
+              (notification) =>
+                  notification['isRead'] != true,
+            )
+            .length;
+
+    bool addedAny = false;
+
+    // ---------------------------------------------------------
+    // CREATE INCIDENTS
+    // ---------------------------------------------------------
+
+    for (final notification
+        in uniqueEmergencyNotifications) {
+      final emergencyValue =
+          notification['emergency'];
+
+      final emergencyId =
+          emergencyValue
+                  is Map<String, dynamic>
+              ? emergencyValue['_id']
+                    ?.toString()
+              : emergencyValue?.toString();
+
+      if (emergencyId == null ||
+          emergencyId.isEmpty) {
+        continue;
+      }
+
+      // Keep notification mapped to REAL emergency ID.
+      _emergencyNotificationsByEmergencyId[
+          emergencyId] = notification;
+
+      // Do not create duplicate Incident objects.
+      final alreadyExists =
+          AppSession.instance.activeIncidents
+              .any(
+        (incident) =>
+            incident.id == emergencyId,
+      );
+
+      if (alreadyExists) {
+        continue;
+      }
+
+      final sender =
+          notification['sender']
+              as Map<String, dynamic>?;
+
+      final location =
+          notification['location']
+              as Map<String, dynamic>?;
+
+      final latitude =
+          (location?['latitude'] as num?)
+              ?.toDouble();
+
+      final longitude =
+          (location?['longitude'] as num?)
+              ?.toDouble();
+
+      if (latitude == null ||
+          longitude == null) {
+        continue;
+      }
+
+      final createdAt =
+          DateTime.tryParse(
+                notification['createdAt']
+                        ?.toString() ??
+                    '',
+              ) ??
+              DateTime.now();
+
+      AppSession.instance.addIncident(
+        Incident(
+          id: emergencyId,
+
+          personName:
+              sender?['name']?.toString() ??
+                  'SafetyU User',
+
+          phone:
+              sender?['phone']?.toString() ??
+                  '',
+
+          destination:
+              'Emergency Assistant — current location',
+
+          location: LatLng(
+            latitude,
+            longitude,
+          ),
+
+          startedAt: createdAt,
+
+          notifiedContactIds:
+              const [],
+        ),
+      );
+
+      addedAny = true;
+    }
+
+    // ---------------------------------------------------------
+    // GET AUTHORITATIVE CASE STATUS
+    // ---------------------------------------------------------
+
+    await _syncResponderCases();
+
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {});
+  } catch (e) {
+    debugPrint(
+      'Emergency notification polling failed: $e',
+    );
+  }
+}
+
+  // =========================================================
+  // SYNC RESPONDER CASES
+  // =========================================================
+
+  Future<void> _syncResponderCases() async {
+    try {
+      final cases =
+          await EmergencyResponderService.fetchCases();
+
+      AppSession.instance.activeIncidents
+        ..clear()
+        ..addAll(cases);
+
+      if (mounted) {
         setState(() {});
       }
     } catch (e) {
       debugPrint(
-        'Emergency notification polling failed: $e',
+        'Responder cases sync failed: $e',
       );
     }
   }
@@ -269,20 +434,24 @@ class _EmergencyHomeScreenState extends State<EmergencyHomeScreen> {
     LocationPermission permission =
         await Geolocator.checkPermission();
 
-    if (permission == LocationPermission.denied) {
+    if (permission ==
+        LocationPermission.denied) {
       permission =
           await Geolocator.requestPermission();
     }
 
-    if (permission == LocationPermission.denied ||
-        permission == LocationPermission.deniedForever) {
+    if (permission ==
+            LocationPermission.denied ||
+        permission ==
+            LocationPermission.deniedForever) {
       return;
     }
 
     try {
       final pos =
           await Geolocator.getCurrentPosition(
-        desiredAccuracy: LocationAccuracy.high,
+        desiredAccuracy:
+            LocationAccuracy.high,
       );
 
       if (!mounted) {
@@ -299,8 +468,10 @@ class _EmergencyHomeScreenState extends State<EmergencyHomeScreen> {
 
     _positionSub =
         Geolocator.getPositionStream(
-      locationSettings: const LocationSettings(
-        accuracy: LocationAccuracy.high,
+      locationSettings:
+          const LocationSettings(
+        accuracy:
+            LocationAccuracy.high,
         distanceFilter: 15,
       ),
     ).listen((pos) {
@@ -423,11 +594,13 @@ class _EmergencyHomeScreenState extends State<EmergencyHomeScreen> {
           );
 
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor:
+          AppColors.background,
 
       body: SafeArea(
         child: SingleChildScrollView(
-          padding: const EdgeInsets.fromLTRB(
+          padding:
+              const EdgeInsets.fromLTRB(
             20,
             16,
             20,
@@ -446,10 +619,13 @@ class _EmergencyHomeScreenState extends State<EmergencyHomeScreen> {
                   Container(
                     width: 42,
                     height: 42,
-                    decoration: BoxDecoration(
+                    decoration:
+                        BoxDecoration(
                       color: AppColors.navy,
                       borderRadius:
-                          BorderRadius.circular(12),
+                          BorderRadius.circular(
+                        12,
+                      ),
                     ),
                     child: const Icon(
                       Icons.local_police,
@@ -469,28 +645,34 @@ class _EmergencyHomeScreenState extends State<EmergencyHomeScreen> {
                           'Incoming Officer',
                           style: TextStyle(
                             fontSize: 12.5,
-                            color:
-                                AppColors.textSecondary,
+                            color: AppColors
+                                .textSecondary,
                           ),
                         ),
 
                         Text(
-                          AppSession.instance.fullName.isEmpty
+                          AppSession.instance
+                                  .fullName
+                                  .isEmpty
                               ? 'Officer'
-                              : AppSession.instance.fullName,
+                              : AppSession.instance
+                                  .fullName,
                           style: TextStyle(
                             fontSize: 16,
                             fontWeight:
                                 FontWeight.w800,
-                            color:
-                                AppColors.textPrimary,
+                            color: AppColors
+                                .textPrimary,
                           ),
                         ),
                       ],
                     ),
                   ),
 
-                  // Notification button
+                  // =================================================
+                  // NOTIFICATION BUTTON
+                  // =================================================
+
                   GestureDetector(
                     onTap: () =>
                         Navigator.pushNamed(
@@ -499,42 +681,96 @@ class _EmergencyHomeScreenState extends State<EmergencyHomeScreen> {
                     ),
                     child: Container(
                       padding:
-                          const EdgeInsets.all(10),
-                      decoration: BoxDecoration(
-                        color: AppColors.card,
-                        shape: BoxShape.circle,
-                        border: Border.all(
-                          color: AppColors.border,
+                          const EdgeInsets.all(
+                        10,
+                      ),
+                      decoration:
+                          BoxDecoration(
+                        color:
+                            AppColors.card,
+                        shape:
+                            BoxShape.circle,
+                        border:
+                            Border.all(
+                          color:
+                              AppColors.border,
                         ),
                       ),
-                      child: Icon(
-                        Icons.notifications_none,
-                        color:
-                            AppColors.textPrimary,
-                        size: 20,
+                      child: Stack(
+                        clipBehavior:
+                            Clip.none,
+                        children: [
+                          Icon(
+                            Icons
+                                .notifications_none,
+                            color: AppColors
+                                .textPrimary,
+                            size: 20,
+                          ),
+
+                          // RED NOTIFICATION DOT
+                          if (_unreadEmergencyCount >
+                              0)
+                            Positioned(
+                              right: -4,
+                              top: -4,
+                              child:
+                                  Container(
+                                width: 9,
+                                height: 9,
+                                decoration:
+                                    BoxDecoration(
+                                  color:
+                                      AppColors
+                                          .danger,
+                                  shape:
+                                      BoxShape
+                                          .circle,
+                                  border:
+                                      Border.all(
+                                    color:
+                                        AppColors
+                                            .card,
+                                    width: 1.5,
+                                  ),
+                                ),
+                              ),
+                            ),
+                        ],
                       ),
                     ),
                   ),
 
                   const SizedBox(width: 8),
 
-                  // Logout button
+                  // =================================================
+                  // LOGOUT BUTTON
+                  // =================================================
+
                   GestureDetector(
                     onTap: _logout,
                     child: Container(
                       padding:
-                          const EdgeInsets.all(10),
-                      decoration: BoxDecoration(
-                        color: AppColors.card,
-                        shape: BoxShape.circle,
-                        border: Border.all(
-                          color: AppColors.border,
+                          const EdgeInsets.all(
+                        10,
+                      ),
+                      decoration:
+                          BoxDecoration(
+                        color:
+                            AppColors.card,
+                        shape:
+                            BoxShape.circle,
+                        border:
+                            Border.all(
+                          color:
+                              AppColors.border,
                         ),
                       ),
                       child: Icon(
                         Icons.logout,
                         color:
-                            AppColors.textPrimary,
+                            AppColors
+                                .textPrimary,
                         size: 20,
                       ),
                     ),
@@ -550,57 +786,102 @@ class _EmergencyHomeScreenState extends State<EmergencyHomeScreen> {
 
               if (newestIncident != null)
                 GestureDetector(
-                  onTap: () =>
-                      Navigator.pushNamed(
-                    context,
-                    '/case-detail',
-                    arguments: newestIncident.id,
-                  ),
+                  // IMPORTANT:
+                  //
+                  // DO NOT show an AlertDialog here.
+                  //
+                  // When the responder taps the Home
+                  // emergency card, go directly to the
+                  // Case Details screen.
+                  //
+                  // Case Details contains:
+                  // - User information
+                  // - Phone number
+                  // - Emergency time
+                  // - Location
+                  // - Map
+                  // - Take Case button
+                  onTap: () async {
+                    await Navigator.pushNamed(
+                      context,
+                      '/case-detail',
+                      arguments:
+                          newestIncident.id,
+                    );
+
+                    // When the responder comes back
+                    // from Case Details, reload the
+                    // authoritative cases from backend.
+                    if (mounted) {
+                      await _syncResponderCases();
+                    }
+                  },
+
                   child: Container(
                     width: double.infinity,
                     padding:
-                        const EdgeInsets.all(14),
-                    decoration: BoxDecoration(
+                        const EdgeInsets.all(
+                      14,
+                    ),
+                    decoration:
+                        BoxDecoration(
                       color:
                           AppColors.dangerLight,
                       borderRadius:
-                          BorderRadius.circular(14),
-                      border: Border.all(
+                          BorderRadius.circular(
+                        14,
+                      ),
+                      border:
+                          Border.all(
                         color:
-                            const Color(0xFFFFC9C0),
+                            const Color(
+                          0xFFFFC9C0,
+                        ),
                       ),
                     ),
                     child: Row(
                       children: [
                         Icon(
-                          Icons.warning_amber_rounded,
-                          color: AppColors.danger,
+                          Icons
+                              .warning_amber_rounded,
+                          color:
+                              AppColors.danger,
                         ),
 
-                        const SizedBox(width: 10),
+                        const SizedBox(
+                          width: 10,
+                        ),
 
                         Expanded(
                           child: Column(
                             crossAxisAlignment:
-                                CrossAxisAlignment.start,
+                                CrossAxisAlignment
+                                    .start,
                             children: [
                               Text(
                                 'New Emergency',
-                                style: TextStyle(
-                                  fontSize: 13.5,
+                                style:
+                                    TextStyle(
+                                  fontSize:
+                                      13.5,
                                   fontWeight:
-                                      FontWeight.w800,
+                                      FontWeight
+                                          .w800,
                                   color:
-                                      AppColors.danger,
+                                      AppColors
+                                          .danger,
                                 ),
                               ),
 
                               Text(
                                 '${newestIncident.personName} needs help',
-                                style: TextStyle(
-                                  fontSize: 12,
+                                style:
+                                    TextStyle(
+                                  fontSize:
+                                      12,
                                   color:
-                                      AppColors.danger,
+                                      AppColors
+                                          .danger,
                                 ),
                               ),
                             ],
@@ -609,7 +890,8 @@ class _EmergencyHomeScreenState extends State<EmergencyHomeScreen> {
 
                         Icon(
                           Icons.chevron_right,
-                          color: AppColors.danger,
+                          color:
+                              AppColors.danger,
                         ),
                       ],
                     ),
@@ -624,50 +906,63 @@ class _EmergencyHomeScreenState extends State<EmergencyHomeScreen> {
 
               ClipRRect(
                 borderRadius:
-                    BorderRadius.circular(16),
+                    BorderRadius.circular(
+                  16,
+                ),
                 child: SizedBox(
                   height: 160,
                   child: GoogleMap(
-                    onMapCreated: (controller) {
-                      _mapController = controller;
+                    onMapCreated:
+                        (controller) {
+                      _mapController =
+                          controller;
                     },
+
                     initialCameraPosition:
                         CameraPosition(
                       target:
                           _myPosition ??
-                          const LatLng(
+                              const LatLng(
                             11.5696,
                             104.9210,
                           ),
                       zoom: 13.0,
                     ),
+
                     markers: {
+                      // Responder current location.
                       if (_myPosition != null)
                         Marker(
                           markerId:
-                              const MarkerId('me'),
-                          position: _myPosition!,
-                          icon:
-                              _meIcon ??
+                              const MarkerId(
+                            'me',
+                          ),
+                          position:
+                              _myPosition!,
+                          icon: _meIcon ??
                               BitmapDescriptor
                                   .defaultMarker,
                         ),
 
+                      // Emergency locations.
                       for (final incident
                           in incidents.where(
                         (i) =>
                             i.status !=
-                            IncidentStatus.resolved,
+                            IncidentStatus
+                                .resolved,
                       ))
                         Marker(
                           markerId:
-                              MarkerId(incident.id),
+                              MarkerId(
+                            incident.id,
+                          ),
                           position:
                               incident.location,
                           icon:
                               _incidentIcon ??
-                              BitmapDescriptor
-                                  .defaultMarker,
+                                  BitmapDescriptor
+                                      .defaultMarker,
                         ),
                     },
                   ),
@@ -708,10 +1003,14 @@ class _EmergencyHomeScreenState extends State<EmergencyHomeScreen> {
 
                   Expanded(
                     child: _StatPill(
-                      count: inProgressCount,
-                      label: 'In Progress',
+                      count:
+                          inProgressCount,
+                      label:
+                          'In Progress',
                       color:
-                          const Color(0xFFE59A2E),
+                          const Color(
+                        0xFFE59A2E,
+                      ),
                     ),
                   ),
 
@@ -719,7 +1018,8 @@ class _EmergencyHomeScreenState extends State<EmergencyHomeScreen> {
 
                   Expanded(
                     child: _StatPill(
-                      count: resolvedCount,
+                      count:
+                          resolvedCount,
                       label: 'Resolved',
                       color:
                           AppColors.success,
@@ -752,15 +1052,16 @@ class _EmergencyHomeScreenState extends State<EmergencyHomeScreen> {
                   'No resolved cases yet.',
                   style: TextStyle(
                     fontSize: 12.5,
-                    color:
-                        AppColors.textSecondary,
+                    color: AppColors
+                        .textSecondary,
                   ),
                 )
               else
                 ...recentlyResolved
                     .take(3)
                     .map(
-                  (incident) => Padding(
+                  (incident) =>
+                      Padding(
                     padding:
                         const EdgeInsets.only(
                       bottom: 10,
@@ -772,9 +1073,9 @@ class _EmergencyHomeScreenState extends State<EmergencyHomeScreen> {
                           height: 34,
                           decoration:
                               BoxDecoration(
-                            color:
-                                AppColors.success
-                                    .withValues(
+                            color: AppColors
+                                .success
+                                .withValues(
                               alpha: 0.12,
                             ),
                             shape:
@@ -782,23 +1083,28 @@ class _EmergencyHomeScreenState extends State<EmergencyHomeScreen> {
                           ),
                           child: Icon(
                             Icons.check,
-                            color:
-                                AppColors.success,
+                            color: AppColors
+                                .success,
                             size: 18,
                           ),
                         ),
 
-                        const SizedBox(width: 10),
+                        const SizedBox(
+                          width: 10,
+                        ),
 
                         Expanded(
                           child: Text(
                             'Case #${incident.id.substring(incident.id.length - 3)} marked as resolved',
-                            style: TextStyle(
-                              fontSize: 12.5,
-                              color:
-                                  AppColors.textPrimary,
+                            style:
+                                TextStyle(
+                              fontSize:
+                                  12.5,
+                              color: AppColors
+                                  .textPrimary,
                               fontWeight:
-                                  FontWeight.w600,
+                                  FontWeight
+                                      .w600,
                             ),
                           ),
                         ),
@@ -811,9 +1117,29 @@ class _EmergencyHomeScreenState extends State<EmergencyHomeScreen> {
         ),
       ),
 
+      // =========================================================
+      // RESPONDER BOTTOM NAVIGATION
+      // =========================================================
+
       bottomNavigationBar:
           ResponderBottomNav(
         currentIndex: 0,
+
+        // Count all cases that are not resolved.
+        //
+        // Example:
+        // New = 1
+        // In Progress = 2
+        //
+        // Cases badge = 3
+        caseCount: incidents
+            .where(
+              (i) =>
+                  i.status !=
+                  IncidentStatus.resolved,
+            )
+            .length,
+
         onTap: _onNavTap,
       ),
     );
@@ -847,7 +1173,9 @@ class _StatPill extends StatelessWidget {
           BoxDecoration(
         color: AppColors.card,
         borderRadius:
-            BorderRadius.circular(14),
+            BorderRadius.circular(
+          14,
+        ),
         border:
             Border.all(
           color:
@@ -875,7 +1203,8 @@ class _StatPill extends StatelessWidget {
             style: TextStyle(
               fontSize: 11,
               color:
-                  AppColors.textSecondary,
+                  AppColors
+                      .textSecondary,
             ),
             textAlign:
                 TextAlign.center,
