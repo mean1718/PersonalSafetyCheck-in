@@ -35,6 +35,7 @@ const notificationSchema = new mongoose.Schema(
         "safety_alert",
         "checkin_completed",
         "emergency_alert",
+        "payment_confirmed",
       ],
       required: true,
     },
@@ -61,12 +62,7 @@ const notificationSchema = new mongoose.Schema(
 
     responseStatus: {
       type: String,
-      enum: [
-        "pending",
-        "can_help",
-        "cannot_help",
-        "marked_safe",
-      ],
+      enum: ["pending", "can_help", "cannot_help", "marked_safe"],
       default: "pending",
     },
 
@@ -86,10 +82,7 @@ const notificationSchema = new mongoose.Schema(
   },
   {
     timestamps: true,
-  }
+  },
 );
 
-module.exports = mongoose.model(
-  "Notification",
-  notificationSchema
-);
+module.exports = mongoose.model("Notification", notificationSchema);

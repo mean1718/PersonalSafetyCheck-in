@@ -185,7 +185,7 @@ void initState() {
   Future<void> _loadTrustRequests() async {
     try {
       final requests = await TrustedContactService.receivedTrustRequests();
-      AppSession.instance.setPendingTrustRequestCount(requests.length);
+      AppSession.instance.setPendingTrustRequests(requests);
       if (mounted) setState(() => _trustRequests = requests);
     } catch (_) {}
   }
@@ -330,10 +330,19 @@ void initState() {
               color: AppColors.textPrimary),
         ),
         actions: [
-          if (notifications.isNotEmpty)
+          if (notifications.isNotEmpty ||
+              _backendNotifications
+                  .any((n) => n['type'] != 'payment_confirmed'))
             TextButton(
-              onPressed: () {
-                setState(() => AppSession.instance.clearNotifications());
+              onPressed: () async {
+                // Payment confirmations are a receipt, not a dismissible
+                // alert — they stay even after Clear All, same as the
+                // person's real payment history would.
+                AppSession.instance.clearNotifications();
+                try {
+                  await NotificationService.clearAll();
+                } catch (_) {}
+                await _loadBackendNotifications();
               },
               child: Text('Clear all',
                   style: TextStyle(
@@ -382,23 +391,54 @@ void initState() {
                           if (id != null) {
                             await NotificationService.markRead(id);
                           }
-                          await _loadBackendNotifications();
+                          // Tapping anywhere on a pending safety-alert card
+                          // should behave exactly like tapping its "View
+                          // Location" button — not just mark it read and
+                          // sit there, which felt like the tap did nothing.
+                          if (notification['type'] == 'safety_alert' &&
+                              notification['responseStatus'] == 'pending') {
+                            _openAlertDetail(notification);
+                          } else {
+                            await _loadBackendNotifications();
+                          }
                         },
                         child: Container(
                           padding: const EdgeInsets.all(14),
                           decoration: BoxDecoration(
-                              color: AppColors.card,
+                              color: notification['type'] == 'payment_confirmed'
+                                  ? const Color(0xFFFFF3D6)
+                                  : AppColors.card,
                               borderRadius: BorderRadius.circular(14),
-                              border: Border.all(color: AppColors.border)),
+                              border: Border.all(
+                                  color: notification['type'] ==
+                                          'payment_confirmed'
+                                      ? const Color(0xFFE0A500)
+                                          .withValues(alpha: 0.4)
+                                      : AppColors.border)),
                           child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text(
-                                    notification['title']?.toString() ??
-                                        'SafetyU Alert',
-                                    style: TextStyle(
-                                        fontWeight: FontWeight.w700,
-                                        color: AppColors.textPrimary)),
+                                Row(
+                                  children: [
+                                    if (notification['type'] ==
+                                        'payment_confirmed') ...[
+                                      const Icon(Icons.receipt_long,
+                                          size: 16, color: Color(0xFFB8860B)),
+                                      const SizedBox(width: 6),
+                                    ],
+                                    Expanded(
+                                      child: Text(
+                                          notification['title']?.toString() ??
+                                              'SafetyU Alert',
+                                          style: TextStyle(
+                                              fontWeight: FontWeight.w700,
+                                              color: notification['type'] ==
+                                                      'payment_confirmed'
+                                                  ? const Color(0xFF8A6400)
+                                                  : AppColors.textPrimary)),
+                                    ),
+                                  ],
+                                ),
                                 const SizedBox(height: 6),
                                 Text(notification['message']?.toString() ?? '',
                                     style: TextStyle(
@@ -418,10 +458,12 @@ void initState() {
                                     Icon(Icons.check_circle,
                                         size: 15, color: AppColors.success),
                                     const SizedBox(width: 6),
-                                    Text(
-                                      '${(notification['sender'] as Map<String, dynamic>?)?['name'] ?? 'They'} confirmed they\'re safe now.',
-                                      style: TextStyle(
-                                          color: AppColors.textSecondary),
+                                    Expanded(
+                                      child: Text(
+                                        '${(notification['sender'] as Map<String, dynamic>?)?['name'] ?? 'They'} confirmed they\'re safe now.',
+                                        style: TextStyle(
+                                            color: AppColors.textSecondary),
+                                      ),
                                     ),
                                   ]),
                                 ] else if (notification['type'] ==
@@ -438,6 +480,10 @@ void initState() {
                                           Icons.location_on_outlined,
                                           size: 17),
                                       label: const Text('View Location'),
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: AppColors.success,
+                                        foregroundColor: Colors.white,
+                                      ),
                                     ),
                                   ),
                                 ] else if (notification['type'] ==

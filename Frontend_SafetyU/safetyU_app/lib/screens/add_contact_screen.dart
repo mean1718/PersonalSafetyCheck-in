@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
-import '../services/app_session.dart';
 import '../utils/validators.dart';
 import '../services/trusted_contact_service.dart';
 import '../services/api_client.dart';
@@ -117,14 +116,6 @@ class _AddContactScreenState extends State<AddContactScreen> {
                         _nameController,
                         icon: Icons.person_outline,
                         hint: 'e.g. Sophea Chan',
-                        validator: (v) {
-                          final text = v?.trim() ?? '';
-                          if (text.isEmpty) return null;
-                          if (AppSession.instance.isContactNameTaken(text)) {
-                            return 'This name is already used by another contact';
-                          }
-                          return null;
-                        },
                       ),
                       _buildField(
                         'PHONE NUMBER',
@@ -132,15 +123,8 @@ class _AddContactScreenState extends State<AddContactScreen> {
                         icon: Icons.phone_outlined,
                         hint: '+855 12 345 678',
                         keyboardType: TextInputType.phone,
-                        validator: (v) {
-                          final err = phoneValidator(v) ?? _phoneBackendError;
-                          if (err != null) return err;
-                          if (AppSession.instance
-                              .isContactPhoneTaken(v!.trim())) {
-                            return 'This phone number is already used by another contact';
-                          }
-                          return null;
-                        },
+                        validator: (v) =>
+                            phoneValidator(v) ?? _phoneBackendError,
                         onChanged: (_) {
                           if (_phoneBackendError != null)
                             setState(() => _phoneBackendError = null);
@@ -155,13 +139,7 @@ class _AddContactScreenState extends State<AddContactScreen> {
                         validator: (v) {
                           final text = v?.trim() ?? '';
                           if (text.isEmpty) return null;
-                          final err = emailValidator(v);
-                          if (err != null) return err;
-                          if (AppSession.instance
-                              .isContactEmailTaken(v!.trim())) {
-                            return 'This email is already used by another contact';
-                          }
-                          return null;
+                          return emailValidator(v);
                         },
                       ),
                       _buildCard(

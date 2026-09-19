@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
+import '../theme/avatar_colors.dart';
 import '../models/contact.dart';
 import '../models/chat_message.dart';
 import '../services/app_session.dart';
@@ -156,11 +157,11 @@ class _ChatScreenState extends State<ChatScreen> {
           children: [
             CircleAvatar(
               radius: 18,
-              backgroundColor: AppColors.navy.withValues(alpha: 0.1),
+              backgroundColor: avatarBackgroundFor(contact.id),
               child: Text(
                 contact.initials,
                 style: TextStyle(
-                  color: AppColors.navy,
+                  color: avatarForegroundFor(contact.id),
                   fontWeight: FontWeight.w700,
                   fontSize: 13,
                 ),

@@ -36,13 +36,32 @@ class LocalNotificationService {
     priority: Priority.high,
   );
 
-  static const AndroidNotificationDetails _safetyAlertAndroidDetails =
+  // Not const — RawResourceAndroidNotificationSound isn't a const
+  // constructor, so this whole details object can't be either.
+  static final AndroidNotificationDetails _safetyAlertAndroidDetails =
       AndroidNotificationDetails(
-    'safety_alerts',
+    // Renamed from 'safety_alerts' — Android locks a channel's sound the
+    // first time it's created, so bumping the id is the only way to make
+    // an existing install actually pick up the new alarm-style sound
+    // below instead of silently keeping whatever it had before. See
+    // pushService.js's ANDROID_CHANNEL_BY_TYPE, which was updated to
+    // match this same id.
+    'safety_alerts_v2',
     'Safety alerts',
     channelDescription: 'Alerts you when a trusted friend needs you',
     importance: Importance.max,
-    priority: Priority.high,
+    priority: Priority.max,
+    // Needs android/app/src/main/res/raw/alarm_sound.mp3 (or .ogg/.wav) —
+    // a real audio file this project doesn't have yet. Without it,
+    // Android silently falls back to the default notification sound
+    // rather than failing, so add one for this to actually sound
+    // alarm-like instead of a normal ping.
+    sound: RawResourceAndroidNotificationSound('alarm_sound'),
+    playSound: true,
+    enableVibration: true,
+    vibrationPattern:
+        Int64List.fromList([0, 800, 400, 800, 400, 800, 400, 800]),
+    fullScreenIntent: true,
   );
 
   static const AndroidNotificationDetails _emergencyAlertAndroidDetails =
@@ -97,10 +116,20 @@ class LocalNotificationService {
     ]) {
       await androidPlugin?.createNotificationChannel(
         AndroidNotificationChannel(
-          channel.channelId!,
-          channel.channelName!,
+          channel.channelId,
+          channel.channelName,
           description: channel.channelDescription,
           importance: channel.importance,
+          // These were missing before — importance alone doesn't carry
+          // the sound/vibration/full-screen behavior over to the actual
+          // channel Android creates, only what .show() is told per-call
+          // (which can't override a channel's sound once it exists). The
+          // safety_alerts_v2 channel needs its alarm sound baked in here,
+          // at creation, or it silently plays the platform default.
+          playSound: channel.playSound,
+          sound: channel.sound,
+          enableVibration: channel.enableVibration,
+          vibrationPattern: channel.vibrationPattern,
         ),
       );
     }
@@ -141,9 +170,9 @@ class LocalNotificationService {
         id,
         'Safety alert',
         '$ownerName started a safety session and needs you to check in.',
-        const NotificationDetails(
+        NotificationDetails(
           android: _safetyAlertAndroidDetails,
-          iOS: DarwinNotificationDetails(),
+          iOS: const DarwinNotificationDetails(),
         ),
       );
     } catch (e) {

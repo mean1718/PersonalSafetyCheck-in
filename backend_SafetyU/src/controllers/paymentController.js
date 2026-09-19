@@ -1,8 +1,13 @@
 const crypto = require("crypto");
 const User = require("../models/User");
 const Payment = require("../models/Payment");
+const Notification = require("../models/Notification");
 const { buildIndividualKHQR } = require("../utils/khqr");
 const { checkTransactionByMd5 } = require("../services/bakongClient");
+const { sendPushToUser } = require("../services/pushService");
+const { activeExtraSlots } = require("../utils/extraSlots");
+
+const EXTRA_SLOTS_DURATION_MS = 24 * 60 * 60 * 1000;
 
 const PRO_MONTHLY_PRICE_USD = 2.99;
 const PRICE_PER_CONTACT_USD = 0.2;
@@ -209,16 +214,18 @@ const checkKhqrStatus = async (req, res) => {
 
     if (payment.status === "paid") {
       const user = await User.findById(payment.user).select(
-        "isPro purchasedExtraMainSlots purchasedExtraOtherSlots",
+        "isPro purchasedExtraMainSlots purchasedExtraOtherSlots extraSlotsExpireAt",
       );
+      const active = activeExtraSlots(user);
       return res.json({
         status: "paid",
         purpose: payment.purpose,
         extraMainSlots: payment.extraMainSlots,
         extraOtherSlots: payment.extraOtherSlots,
         isPro: user?.isPro ?? false,
-        purchasedExtraMainSlots: user?.purchasedExtraMainSlots ?? 0,
-        purchasedExtraOtherSlots: user?.purchasedExtraOtherSlots ?? 0,
+        purchasedExtraMainSlots: active.main,
+        purchasedExtraOtherSlots: active.other,
+        extraSlotsExpireAt: active.expiresAt,
       });
     }
 
@@ -246,17 +253,57 @@ const checkKhqrStatus = async (req, res) => {
           { new: true },
         );
       } else {
+        // Pay-per-contact is a 24-hour rental (see extraSlotsExpireAt on
+        // User). If the previous purchase already expired, its slots are
+        // gone — start this new purchase from zero rather than $inc-ing
+        // on top of a balance that shouldn't exist anymore. If it's still
+        // within its own 24h window, this purchase adds on top of it and
+        // the combined total gets a fresh 24h window from right now.
+        const existingUser = await User.findById(payment.user).select(
+          "purchasedExtraMainSlots purchasedExtraOtherSlots extraSlotsExpireAt",
+        );
+        const active = activeExtraSlots(existingUser);
         user = await User.findByIdAndUpdate(
           payment.user,
           {
-            $inc: {
-              purchasedExtraMainSlots: payment.extraMainSlots,
-              purchasedExtraOtherSlots: payment.extraOtherSlots,
+            $set: {
+              purchasedExtraMainSlots: active.main + payment.extraMainSlots,
+              purchasedExtraOtherSlots: active.other + payment.extraOtherSlots,
+              extraSlotsExpireAt: new Date(
+                Date.now() + EXTRA_SLOTS_DURATION_MS,
+              ),
             },
           },
           { new: true },
         );
       }
+
+      // Tell the person their payment went through, and leave a record
+      // they can look back on later — what they paid, how much, and when.
+      // Only fires here, on the actual pending->paid transition, never on
+      // the repeat "already paid" branch above (that one just re-reports
+      // an old confirmation and would otherwise duplicate this every poll).
+      const paymentLabel =
+        payment.purpose === "pro_subscription"
+          ? "Pro subscription"
+          : `${payment.extraContacts} extra contact slot${payment.extraContacts === 1 ? "" : "s"} (24 hours)`;
+      const paymentMessage = `Your payment of $${payment.amount.toFixed(2)} for ${paymentLabel} was confirmed.`;
+
+      await Notification.create({
+        receiver: payment.user,
+        sender: payment.user,
+        type: "payment_confirmed",
+        title: "Payment confirmed",
+        message: paymentMessage,
+      });
+      sendPushToUser(payment.user, {
+        title: "Payment confirmed",
+        body: paymentMessage,
+        data: {
+          type: "payment_confirmed",
+          paymentId: payment._id.toString(),
+        },
+      });
 
       return res.json({
         status: "paid",
@@ -264,8 +311,9 @@ const checkKhqrStatus = async (req, res) => {
         extraMainSlots: payment.extraMainSlots,
         extraOtherSlots: payment.extraOtherSlots,
         isPro: user?.isPro ?? false,
-        purchasedExtraMainSlots: user?.purchasedExtraMainSlots ?? 0,
-        purchasedExtraOtherSlots: user?.purchasedExtraOtherSlots ?? 0,
+        purchasedExtraMainSlots: user ? activeExtraSlots(user).main : 0,
+        purchasedExtraOtherSlots: user ? activeExtraSlots(user).other : 0,
+        extraSlotsExpireAt: user?.extraSlotsExpireAt ?? null,
       });
     }
 
@@ -278,4 +326,25 @@ const checkKhqrStatus = async (req, res) => {
   }
 };
 
-module.exports = { createKhqrPayment, checkKhqrStatus, getPricing };
+// GET /api/payments/history
+// Every payment this account has ever made, newest first — the "when did
+// I pay, and for what" record the person can look back on.
+const getMyPayments = async (req, res) => {
+  try {
+    const payments = await Payment.find({ user: req.user.id })
+      .sort({ createdAt: -1 })
+      .select(
+        "purpose amount currency extraMainSlots extraOtherSlots status paidAt createdAt",
+      );
+    return res.json({ payments });
+  } catch (error) {
+    return res.status(500).json({ message: error.message || "Server error" });
+  }
+};
+
+module.exports = {
+  createKhqrPayment,
+  checkKhqrStatus,
+  getPricing,
+  getMyPayments,
+};

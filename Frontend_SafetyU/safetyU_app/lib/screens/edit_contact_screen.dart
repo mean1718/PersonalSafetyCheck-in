@@ -1,8 +1,6 @@
 import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
 import '../models/contact.dart';
-import '../services/app_session.dart';
-import '../utils/validators.dart';
 
 /// "Edit Contact" — same card-based look as Add Contact. Priority tier
 /// (Main vs Other) is no longer picked here; like Add Contact, that's
@@ -88,81 +86,91 @@ class _EditContactScreenState extends State<EditContactScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      GestureDetector(
-                        onTap: () => Navigator.pop(context),
-                        child: Row(
-                          children: [
-                            Icon(Icons.arrow_back,
+                      Row(
+                        children: [
+                          GestureDetector(
+                            onTap: () => Navigator.pop(context),
+                            child: Icon(Icons.arrow_back,
                                 size: 20, color: AppColors.textPrimary),
-                          ],
-                        ),
+                          ),
+                        ],
                       ),
                       const SizedBox(height: 16),
-                      Text(
-                        'Edit Contact',
-                        style: TextStyle(
-                            fontSize: 26,
-                            fontWeight: FontWeight.w800,
-                            color: AppColors.textPrimary),
+                      Row(
+                        children: [
+                          Container(
+                            width: 44,
+                            height: 44,
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFE3F0FF),
+                              shape: BoxShape.circle,
+                            ),
+                            child: const Icon(Icons.edit_note_rounded,
+                                color: Color(0xFF2F6FED), size: 24),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Edit Contact',
+                                  style: TextStyle(
+                                      fontSize: 24,
+                                      fontWeight: FontWeight.w800,
+                                      color: AppColors.textPrimary),
+                                ),
+                                Text(
+                                  "Update this contact's details below.",
+                                  style: TextStyle(
+                                      fontSize: 12.5,
+                                      color: AppColors.textSecondary),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
                       ),
-                      const SizedBox(height: 6),
-                      Text(
-                        "Update this contact's details below.",
-                        style: TextStyle(
-                            fontSize: 13, color: AppColors.textSecondary),
-                      ),
-                      const SizedBox(height: 20),
+                      const SizedBox(height: 22),
                       _buildField(
-                        'FULL NAME',
+                        'NICKNAME',
                         _nameController,
                         icon: Icons.person_outline,
+                        iconBg: const Color(0xFFE3F0FF),
+                        iconColor: const Color(0xFF2F6FED),
                         hint: 'e.g. Sophea Chan',
-                        validator: (v) {
-                          final text = v?.trim() ?? '';
-                          if (text.isEmpty) return 'Name is required';
-                          if (AppSession.instance.isContactNameTaken(text,
-                              excludingId: widget.contact?.id)) {
-                            return 'This name is already used by another contact';
-                          }
-                          return null;
-                        },
+                        validator: (v) => (v?.trim().isEmpty ?? true)
+                            ? 'Name is required'
+                            : null,
                       ),
-                      _buildField(
+                      // Phone and email belong to this friend's real
+                      // SafetyU account, not to your local copy of them —
+                      // editing them here would just be renaming a
+                      // different person, the same way changing someone's
+                      // number in Messenger doesn't change their real
+                      // number. So only the nickname and how you relate to
+                      // them are yours to change; these two stay read-only,
+                      // shown as-is from their account.
+                      _buildReadOnlyField(
                         'PHONE NUMBER',
-                        _phoneController,
+                        _phoneController.text,
                         icon: Icons.phone_outlined,
-                        hint: '+855 12 345 678',
-                        keyboardType: TextInputType.phone,
-                        validator: (v) {
-                          final err = phoneValidator(v);
-                          if (err != null) return err;
-                          if (AppSession.instance.isContactPhoneTaken(v!.trim(),
-                              excludingId: widget.contact?.id)) {
-                            return 'This phone number is already used by another contact';
-                          }
-                          return null;
-                        },
+                        iconBg: const Color(0xFFE1F7EA),
+                        iconColor: const Color(0xFF0F9B7E),
                       ),
-                      _buildField(
+                      _buildReadOnlyField(
                         'EMAIL ADDRESS',
-                        _emailController,
+                        _emailController.text,
                         icon: Icons.mail_outline,
-                        hint: 'name@example.com',
-                        keyboardType: TextInputType.emailAddress,
-                        validator: (v) {
-                          final err = emailValidator(v);
-                          if (err != null) return err;
-                          if (AppSession.instance.isContactEmailTaken(v!.trim(),
-                              excludingId: widget.contact?.id)) {
-                            return 'This email is already used by another contact';
-                          }
-                          return null;
-                        },
+                        iconBg: const Color(0xFFEEE8FF),
+                        iconColor: const Color(0xFF7C5CFC),
                       ),
                       _buildField(
                         'RELATIONSHIP',
                         _relationshipController,
                         icon: Icons.people_alt_outlined,
+                        iconBg: const Color(0xFFFFF3D6),
+                        iconColor: const Color(0xFFE0A500),
                         hint: 'e.g. Sister, Roommate, Friend',
                         validator: (v) => (v == null || v.trim().isEmpty)
                             ? 'Relationship is required'
@@ -229,7 +237,11 @@ class _EditContactScreenState extends State<EditContactScreen> {
     );
   }
 
-  Widget _buildCard({required IconData icon, required Widget child}) {
+  Widget _buildCard(
+      {required IconData icon,
+      required Widget child,
+      Color? iconBg,
+      Color? iconColor}) {
     return Container(
       width: double.infinity,
       margin: const EdgeInsets.only(bottom: 14),
@@ -246,13 +258,54 @@ class _EditContactScreenState extends State<EditContactScreen> {
             width: 40,
             height: 40,
             decoration: BoxDecoration(
-              color: AppColors.background,
+              color: iconBg ?? AppColors.background,
               shape: BoxShape.circle,
             ),
-            child: Icon(icon, size: 19, color: AppColors.navy),
+            child: Icon(icon, size: 19, color: iconColor ?? AppColors.navy),
           ),
           const SizedBox(width: 12),
           Expanded(child: child),
+        ],
+      ),
+    );
+  }
+
+  /// A field the person can look at but not change — used for phone/email,
+  /// which belong to the friend's own account, not this local nickname.
+  Widget _buildReadOnlyField(
+    String label,
+    String value, {
+    required IconData icon,
+    Color? iconBg,
+    Color? iconColor,
+  }) {
+    return _buildCard(
+      icon: icon,
+      iconBg: iconBg,
+      iconColor: iconColor,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Text(
+                label,
+                style: TextStyle(
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.textSecondary,
+                    letterSpacing: 0.4),
+              ),
+              const SizedBox(width: 6),
+              Icon(Icons.lock_outline,
+                  size: 11, color: AppColors.textSecondary),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            value.isEmpty ? '—' : value,
+            style: TextStyle(fontSize: 15, color: AppColors.textPrimary),
+          ),
         ],
       ),
     );
@@ -262,12 +315,16 @@ class _EditContactScreenState extends State<EditContactScreen> {
     String label,
     TextEditingController controller, {
     required IconData icon,
+    Color? iconBg,
+    Color? iconColor,
     String? hint,
     TextInputType? keyboardType,
     String? Function(String?)? validator,
   }) {
     return _buildCard(
       icon: icon,
+      iconBg: iconBg,
+      iconColor: iconColor,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [

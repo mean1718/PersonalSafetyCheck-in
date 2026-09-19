@@ -77,7 +77,64 @@ class PaymentStatus {
   bool get isPending => status == 'pending';
 }
 
+/// One completed or pending payment from this account's history, as
+/// returned by GET /api/payments/history — used to show "what did I pay
+/// for, and when" rather than just the live QR-in-progress state.
+class PaymentRecord {
+  final String purpose;
+  final double amount;
+  final String currency;
+  final int extraMainSlots;
+  final int extraOtherSlots;
+  final String status;
+  final DateTime? paidAt;
+  final DateTime createdAt;
+
+  PaymentRecord({
+    required this.purpose,
+    required this.amount,
+    required this.currency,
+    required this.extraMainSlots,
+    required this.extraOtherSlots,
+    required this.status,
+    this.paidAt,
+    required this.createdAt,
+  });
+
+  factory PaymentRecord.fromJson(Map<String, dynamic> json) {
+    return PaymentRecord(
+      purpose: json['purpose']?.toString() ?? '',
+      amount: (json['amount'] as num?)?.toDouble() ?? 0,
+      currency: json['currency']?.toString() ?? 'USD',
+      extraMainSlots: (json['extraMainSlots'] as num?)?.toInt() ?? 0,
+      extraOtherSlots: (json['extraOtherSlots'] as num?)?.toInt() ?? 0,
+      status: json['status']?.toString() ?? 'pending',
+      paidAt: DateTime.tryParse(json['paidAt']?.toString() ?? ''),
+      createdAt: DateTime.tryParse(json['createdAt']?.toString() ?? '') ??
+          DateTime.now(),
+    );
+  }
+
+  bool get isPaid => status == 'paid';
+
+  /// Human label for what this payment was for — "Pro subscription" or
+  /// "N extra contact slot(s)".
+  String get label => purpose == 'pro_subscription'
+      ? 'Pro subscription'
+      : '${extraMainSlots + extraOtherSlots} extra contact slot'
+          '${(extraMainSlots + extraOtherSlots) == 1 ? '' : 's'}';
+}
+
 class PaymentService {
+  /// Every payment this account has made, newest first.
+  static Future<List<PaymentRecord>> history() async {
+    // Backend route: GET /api/payments/history
+    final res = await ApiClient.get('/payments/history');
+    return (res['payments'] as List<dynamic>? ?? [])
+        .map((p) => PaymentRecord.fromJson(p as Map<String, dynamic>))
+        .toList();
+  }
+
   /// Creates a real KHQR code for upgrading to Pro. Scan and pay to
   /// activate — poll [checkStatus] with the returned payment's md5.
   ///

@@ -16,6 +16,11 @@ class NotificationService {
   static Future<void> markRead(String id) =>
       ApiClient.put('/notifications/$id/read', {});
 
+  /// Clears every dismissible notification for this account. Payment
+  /// confirmations are excluded on the backend — they're a receipt, not
+  /// a transient alert, so they stay even after Clear All.
+  static Future<void> clearAll() => ApiClient.delete('/notifications');
+
   static Future<void> respondToSafetyAlert(String id, String responseStatus) =>
       ApiClient.put(
           '/notifications/$id/response', {'responseStatus': responseStatus});

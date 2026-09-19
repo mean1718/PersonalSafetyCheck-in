@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
+import '../theme/avatar_colors.dart';
 import '../widgets/app_bottom_nav.dart';
 import '../models/contact.dart';
 import '../models/help_request.dart';
@@ -17,28 +18,6 @@ import 'live_location_map_screen.dart';
 /// A sent request sits under Requests as [ContactStatus.pending] until the
 /// other person confirms; only then do they move to Your Friends and
 /// become eligible to be notified, chatted with, or escalated to.
-
-// Each contact gets a consistent color pulled from this palette (keyed off
-// their id, so the same person always lands on the same color instead of
-// shuffling every rebuild) — this is what puts color back into the avatar
-// circles instead of every one being the same flat navy tint.
-const List<Color> _avatarBg = [
-  Color(0xFFE3F0FF),
-  Color(0xFFEEE8FF),
-  Color(0xFFFFE9DE),
-  Color(0xFFE1F7EA),
-  Color(0xFFFFF3D6),
-  Color(0xFFFFE0EC),
-];
-const List<Color> _avatarFg = [
-  Color(0xFF2F6FED),
-  Color(0xFF7C5CFC),
-  Color(0xFFFF7A45),
-  Color(0xFF23A26D),
-  Color(0xFFE0A500),
-  Color(0xFFF0508C),
-];
-int _avatarColorIndex(String key) => key.hashCode.abs() % _avatarBg.length;
 
 // The peach/orange pair — used for the location icon on each friend card.
 const Color _actionIconBg = Color(0xFFFDF2E0);
@@ -108,7 +87,7 @@ class _TrustedContactsScreenState extends State<TrustedContactsScreen> {
   Future<void> _loadIncomingRequests() async {
     try {
       final requests = await TrustedContactService.receivedTrustRequests();
-      AppSession.instance.setPendingTrustRequestCount(requests.length);
+      AppSession.instance.setPendingTrustRequests(requests);
       if (mounted) {
         setState(() {
           _incomingRequests = requests;
@@ -405,7 +384,17 @@ class _TrustedContactsScreenState extends State<TrustedContactsScreen> {
   }
 
   void _delete(Contact contact) {
-    setState(() => AppSession.instance.removeContact(contact.id));
+    // The Friends list on screen is _confirmedContacts — a separate copy
+    // fetched once from the backend, not AppSession.contacts. Removing
+    // only from AppSession.contacts (as this used to) never touched what
+    // was actually on screen, so the contact stayed visible until the
+    // next full reload (e.g. leaving and returning to this tab) happened
+    // to fetch a list that no longer included them. Remove it from both
+    // right away so the disappearance is immediate.
+    setState(() {
+      _confirmedContacts.removeWhere((c) => c.id == contact.id);
+      AppSession.instance.removeContact(contact.id);
+    });
     // Revoke the underlying Trust relationship on the backend too — see
     // removeTrustByPhone for why this matters (without it, she quietly
     // stays "trusted", so she reappears later and can't be re-added).
@@ -863,11 +852,11 @@ class _FriendCard extends StatelessWidget {
             children: [
               CircleAvatar(
                 radius: 24,
-                backgroundColor: _avatarBg[_avatarColorIndex(contact.id)],
+                backgroundColor: avatarBackgroundFor(contact.id),
                 child: Text(
                   contact.initials,
                   style: TextStyle(
-                      color: _avatarFg[_avatarColorIndex(contact.id)],
+                      color: avatarForegroundFor(contact.id),
                       fontWeight: FontWeight.w700,
                       fontSize: 16),
                 ),

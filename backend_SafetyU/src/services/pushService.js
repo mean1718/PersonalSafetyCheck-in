@@ -25,7 +25,12 @@ try {
 /// safety-alert / trust-request flow that triggered it.
 const ANDROID_CHANNEL_BY_TYPE = {
   trust_request: "trust_requests",
-  safety_alert: "safety_alerts",
+  // Matches local_notification_service.dart's _safetyAlertAndroidDetails —
+  // renamed from "safety_alerts" so a device that already has the old
+  // channel (with whatever default sound it locked in) gets a fresh one
+  // carrying the new alarm-style sound, instead of silently keeping the
+  // old sound forever.
+  safety_alert: "safety_alerts_v2",
   checkin_completed: "safety_resolved",
   emergency_alert: "emergency_alerts",
 };

@@ -323,7 +323,7 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
             borderRadius: BorderRadius.circular(24),
             boxShadow: [
               BoxShadow(
-                color: const Color(0xFF7C5CFC).withValues(alpha: 0.16),
+                color: const Color(0xFFFF7A3C).withValues(alpha: 0.16),
                 blurRadius: 40,
                 offset: const Offset(0, 18),
               ),
@@ -491,19 +491,19 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
             decoration: BoxDecoration(
               gradient: LinearGradient(
                 colors: [
-                  const Color(0xFF2F6FED).withValues(alpha: 0.10),
-                  const Color(0xFF7C5CFC).withValues(alpha: 0.10),
+                  const Color(0xFF0F9B7E).withValues(alpha: 0.10),
+                  const Color(0xFFFF7A3C).withValues(alpha: 0.10),
                 ],
                 begin: Alignment.centerLeft,
                 end: Alignment.centerRight,
               ),
               borderRadius: BorderRadius.circular(18),
               border: Border.all(
-                color: const Color(0xFF7C5CFC).withValues(alpha: 0.15),
+                color: const Color(0xFFFF7A3C).withValues(alpha: 0.15),
               ),
               boxShadow: [
                 BoxShadow(
-                  color: const Color(0xFF7C5CFC).withValues(alpha: 0.10),
+                  color: const Color(0xFFFF7A3C).withValues(alpha: 0.10),
                   blurRadius: 14,
                   offset: const Offset(0, 6),
                 ),
@@ -521,8 +521,8 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
                     '${widget.selectedMain}',
                     'Main Contacts',
                     icon: Icons.people_alt_rounded,
-                    accentColor: const Color(0xFF2F6FED),
-                    accentBg: const Color(0xFFE3F0FF),
+                    accentColor: const Color(0xFF0F9B7E),
+                    accentBg: const Color(0xFFE1F7EA),
                   ),
                 ),
                 Container(
@@ -531,7 +531,7 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
                   margin: const EdgeInsets.symmetric(horizontal: 4),
                   decoration: const BoxDecoration(
                     shape: BoxShape.circle,
-                    color: Color(0xFF7C5CFC),
+                    color: Color(0xFFFF7A3C),
                   ),
                 ),
                 Expanded(
@@ -539,8 +539,8 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
                     '${widget.selectedOther}',
                     'Other Contacts',
                     icon: Icons.person_rounded,
-                    accentColor: const Color(0xFF7C5CFC),
-                    accentBg: const Color(0xFFF1ECFF),
+                    accentColor: const Color(0xFFFF7A3C),
+                    accentBg: const Color(0xFFFFF1E0),
                   ),
                 ),
               ],
@@ -590,8 +590,8 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
           subtitle: 'Up to ${AppSession.freeMainContactLimit} main + '
               '${AppSession.freeOtherContactLimit} other contacts',
           highlighted: _selectedPlan == 'free',
-          accentColor: const Color(0xFF2F6FED),
-          accentBg: const Color(0xFFE3F0FF),
+          accentColor: const Color(0xFF0F9B7E),
+          accentBg: const Color(0xFFE1F7EA),
           onTap: () {
             setState(() {
               _selectedPlan = 'free';
@@ -613,8 +613,8 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
           subtitle: 'Unlimited contacts & all premium features — '
               '\$${_proMonthlyPrice.toStringAsFixed(2)}/month',
           highlighted: _selectedPlan == 'pro',
-          accentColor: const Color(0xFF7C5CFC),
-          accentBg: const Color(0xFFF1ECFF),
+          accentColor: const Color(0xFFFF7A3C),
+          accentBg: const Color(0xFFFFF1E0),
           onTap: () {
             setState(() {
               _selectedPlan = 'pro';
@@ -679,7 +679,7 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
           width: 56,
           height: 56,
           decoration: BoxDecoration(
-            color: const Color(0xFF2F6FED),
+            color: const Color(0xFF0F9B7E),
             shape: BoxShape.circle,
           ),
           child: const Icon(
@@ -751,7 +751,7 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
               Navigator.pop(context, null);
             },
             style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF2F6FED),
+              backgroundColor: const Color(0xFF0F9B7E),
               minimumSize: const Size(0, 46),
             ),
             child: const Text('Continue with Free Plan'),
@@ -794,7 +794,7 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
           width: 56,
           height: 56,
           decoration: BoxDecoration(
-            color: const Color(0xFF7C5CFC),
+            color: const Color(0xFFFF7A3C),
             shape: BoxShape.circle,
           ),
           child: const Icon(
@@ -842,7 +842,7 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
             vertical: 12,
           ),
           decoration: BoxDecoration(
-            color: const Color(0xFF7C5CFC).withValues(alpha: 0.08),
+            color: const Color(0xFFFF7A3C).withValues(alpha: 0.08),
             borderRadius: BorderRadius.circular(14),
           ),
           child: Row(
@@ -860,7 +860,7 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
                 style: const TextStyle(
                   fontSize: 16,
                   fontWeight: FontWeight.w800,
-                  color: Color(0xFF7C5CFC),
+                  color: Color(0xFFFF7A3C),
                 ),
               ),
             ],
@@ -885,7 +885,7 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
           child: ElevatedButton(
             onPressed: _beginProPayment,
             style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF7C5CFC),
+              backgroundColor: const Color(0xFFFF7A3C),
               minimumSize: const Size(0, 46),
             ),
             child: const Text('Continue to Payment'),
@@ -1636,8 +1636,8 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
     String count,
     String label, {
     IconData icon = Icons.people_alt_rounded,
-    Color accentColor = const Color(0xFF2F6FED),
-    Color accentBg = const Color(0xFFE3F0FF),
+    Color accentColor = const Color(0xFF0F9B7E),
+    Color accentBg = const Color(0xFFE1F7EA),
   }) {
     return Row(
       // No longer mainAxisSize.min — the parent now hands this a bounded
@@ -1817,8 +1817,8 @@ class _PlanOption extends StatelessWidget {
     required this.subtitle,
     required this.highlighted,
     required this.onTap,
-    this.accentColor = const Color(0xFF2F6FED),
-    this.accentBg = const Color(0xFFE3F0FF),
+    this.accentColor = const Color(0xFF0F9B7E),
+    this.accentBg = const Color(0xFFE1F7EA),
   });
 
   @override

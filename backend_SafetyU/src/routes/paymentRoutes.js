@@ -15,11 +15,15 @@ const createKhqrPayment =
 const checkKhqrStatus =
   paymentController.checkKhqrStatus ||
   ((req, res) => res.status(500).json({ error: "checkKhqrStatus missing" }));
+const getMyPayments =
+  paymentController.getMyPayments ||
+  ((req, res) => res.status(500).json({ error: "getMyPayments missing" }));
 const protect =
   authMiddleware.protect || authMiddleware || ((req, res, next) => next());
 
 router.get("/pricing", getPricing);
 router.post("/khqr", protect, createKhqrPayment);
 router.get("/khqr/:md5/status", protect, checkKhqrStatus);
+router.get("/history", protect, getMyPayments);
 
 module.exports = router;

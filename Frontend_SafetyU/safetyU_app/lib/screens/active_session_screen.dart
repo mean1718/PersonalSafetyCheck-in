@@ -867,7 +867,8 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
         ? '\nMy live location: $mapsUrl'
         : '\n(Location unavailable right now.)';
 
-    for (final target in targets) {
+    for (var i = 0; i < targets.length; i++) {
+      final target = targets[i];
       AppSession.instance.registerContactNotified(target);
       AppSession.instance.addNotification(
         title: target.fullName,
@@ -875,12 +876,25 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
         kind: NotificationKind.trustedContact,
       );
       _notifiedContactIds.add(target.id);
-      _sendRealChatMessage(
-        target.id,
-        "I need help! I haven't checked in near $_destination.$locationLine\nCan you help?",
-        kind: ChatMessageKind.helpRequest,
-        backendKind: 'helpRequest',
-      );
+      // The actual push/chat delivery to each contact is staggered 5s
+      // apart (fire-and-forget, not awaited) so several contacts don't
+      // all buzz at the exact same instant, which read as one confusing
+      // simultaneous alert rather than distinct notifications. Everything
+      // above this — the local "notified" state, the in-app notification,
+      // and the needHelpNow call right below — stays immediate and
+      // unstaggered on purpose: none of that should ever wait on a
+      // network delay during an actual emergency escalation.
+      final text =
+          "I need help! I haven't checked in near $_destination.$locationLine\nCan you help?";
+      Future.delayed(Duration(seconds: 5 * i), () {
+        if (!mounted) return;
+        _sendRealChatMessage(
+          target.id,
+          text,
+          kind: ChatMessageKind.helpRequest,
+          backendKind: 'helpRequest',
+        );
+      });
     }
     // A real, fresh alert — not just a chat message — so it actually shows
     // up on each contact's Home screen even if they already answered the
@@ -975,7 +989,8 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
     final String locationLine = position != null
         ? '\nMy live location: https://maps.google.com/?q=${position.latitude},${position.longitude}'
         : '\n(Location unavailable right now.)';
-    for (final main in mains) {
+    for (var i = 0; i < mains.length; i++) {
+      final main = mains[i];
       AppSession.instance.registerContactNotified(main);
       AppSession.instance.addNotification(
         title: main.fullName,
@@ -983,12 +998,17 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
         kind: NotificationKind.trustedContact,
       );
       _notifiedContactIds.add(main.id);
-      _sendRealChatMessage(
-        main.id,
-        "I need help right now near $_destination.$locationLine\nCan you help?",
-        kind: ChatMessageKind.helpRequest,
-        backendKind: 'helpRequest',
-      );
+      final text =
+          "I need help right now near $_destination.$locationLine\nCan you help?";
+      Future.delayed(Duration(seconds: 5 * i), () {
+        if (!mounted) return;
+        _sendRealChatMessage(
+          main.id,
+          text,
+          kind: ChatMessageKind.helpRequest,
+          backendKind: 'helpRequest',
+        );
+      });
     }
     if (_checkInId != null && mains.isNotEmpty) {
       CheckInService.needHelpNow(_checkInId!, mains.map((c) => c.id).toList())

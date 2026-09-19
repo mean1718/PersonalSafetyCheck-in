@@ -84,6 +84,11 @@ lastSeenAt: {
     proExpiresAt: { type: Date },
     purchasedExtraMainSlots: { type: Number, default: 0 },
     purchasedExtraOtherSlots: { type: Number, default: 0 },
+    // Pay-per-contact slots are a 24-hour rental, not a permanent add-on —
+    // mirrors proExpiresAt's pattern exactly. Any reader of
+    // purchasedExtra*Slots must check this first; see
+    // paymentController.getActiveExtraSlots.
+    extraSlotsExpireAt: { type: Date },
   },
   { timestamps: true },
 );

@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
+import '../theme/avatar_colors.dart';
 import '../widgets/app_bottom_nav.dart';
 import '../services/app_session.dart';
 import '../services/check_in_service.dart';
@@ -253,9 +254,26 @@ Future<void> _showCreateEmergencyPinDialog() async {
   Future<void> _loadPendingTrustRequestCount() async {
     try {
       final requests = await TrustedContactService.receivedTrustRequests();
-      AppSession.instance.setPendingTrustRequestCount(requests.length);
+      AppSession.instance.setPendingTrustRequests(requests);
     } catch (_) {
-      // Offline / not reachable — leave whatever count is already shown.
+      // Offline / not reachable — leave whatever list is already shown.
+    }
+  }
+
+  Future<void> _respondToTrustRequest(
+      Map<String, dynamic> request, bool accept) async {
+    final id = request['_id']?.toString();
+    if (id == null) return;
+    try {
+      await TrustedContactService.respondToTrustRequest(id, accept: accept);
+      AppSession.instance.removePendingTrustRequest(id);
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+              content: Text('Could not respond to that request — try again.')),
+        );
+      }
     }
   }
 
@@ -557,6 +575,26 @@ Future<void> _showCreateEmergencyPinDialog() async {
                 ],
               ),
               const SizedBox(height: 20),
+              AnimatedBuilder(
+                animation: AppSession.instance,
+                builder: (context, _) {
+                  final requests = AppSession.instance.pendingTrustRequests;
+                  if (requests.isEmpty) return const SizedBox.shrink();
+                  return Column(
+                    children: [
+                      for (final request in requests) ...[
+                        _TrustRequestCard(
+                          request: request,
+                          onAccept: () => _respondToTrustRequest(request, true),
+                          onDecline: () =>
+                              _respondToTrustRequest(request, false),
+                        ),
+                        const SizedBox(height: 12),
+                      ],
+                    ],
+                  );
+                },
+              ),
               if (_resolvedAlerts.isNotEmpty) ...[
                 _ResolvedSafeAlertsPanel(alerts: _resolvedAlerts),
                 const SizedBox(height: 20),
@@ -1457,13 +1495,14 @@ class _ContactResponsesPanel extends StatelessWidget {
                         CircleAvatar(
                           radius: 16,
                           backgroundColor:
-                              AppColors.navy.withValues(alpha: 0.1),
+                              avatarBackgroundFor(responses[i].contactId),
                           child: Text(
                             _initials(responses[i].contactName),
                             style: TextStyle(
                                 fontSize: 11.5,
                                 fontWeight: FontWeight.w800,
-                                color: AppColors.navy),
+                                color: avatarForegroundFor(
+                                    responses[i].contactId)),
                           ),
                         ),
                         const SizedBox(width: 10),
@@ -1551,6 +1590,143 @@ class _StatusChip extends StatelessWidget {
             label,
             style: TextStyle(
                 fontSize: 11, fontWeight: FontWeight.w700, color: color),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// A pending incoming Trust request, shown on Home so it's immediately
+/// visible and actionable instead of only living behind the Friends tab
+/// badge. `request` is the raw shape TrustedContactService.receivedTrustRequests()
+/// returns — `sender` is populated with name/phone/email (see
+/// trustRequestController.receivedRequests on the backend).
+class _TrustRequestCard extends StatelessWidget {
+  final Map<String, dynamic> request;
+  final VoidCallback onAccept;
+  final VoidCallback onDecline;
+
+  const _TrustRequestCard({
+    required this.request,
+    required this.onAccept,
+    required this.onDecline,
+  });
+
+  String _initials(String name) {
+    final parts =
+        name.trim().split(RegExp(r'\s+')).where((p) => p.isNotEmpty).toList();
+    if (parts.length >= 2) return '${parts[0][0]}${parts[1][0]}'.toUpperCase();
+    if (parts.isNotEmpty) return parts[0][0].toUpperCase();
+    return '?';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final sender = request['sender'] as Map<String, dynamic>? ?? {};
+    final name = sender['name']?.toString() ?? 'SafetyU user';
+    final senderId = sender['_id']?.toString() ?? name;
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.navy.withValues(alpha: 0.06),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: AppColors.navy.withValues(alpha: 0.18)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 34,
+                height: 34,
+                decoration: BoxDecoration(
+                  color: AppColors.navy,
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.person_add_alt_1,
+                    color: Colors.white, size: 17),
+              ),
+              const SizedBox(width: 10),
+              Text(
+                'New trust request',
+                style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w800,
+                    color: AppColors.textPrimary),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          Row(
+            children: [
+              CircleAvatar(
+                radius: 18,
+                backgroundColor: avatarBackgroundFor(senderId),
+                child: Text(
+                  _initials(name),
+                  style: TextStyle(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w800,
+                      color: avatarForegroundFor(senderId)),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      name,
+                      style: TextStyle(
+                          fontSize: 14.5,
+                          fontWeight: FontWeight.w800,
+                          color: AppColors.textPrimary),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'Wants to add you as a trusted contact',
+                      style: TextStyle(
+                          fontSize: 11.5, color: AppColors.textSecondary),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: onDecline,
+                  icon: const Icon(Icons.close, size: 16),
+                  label: const Text('Decline'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: AppColors.danger,
+                    side: BorderSide(
+                        color: AppColors.danger.withValues(alpha: 0.4)),
+                    padding: const EdgeInsets.symmetric(vertical: 11),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: ElevatedButton.icon(
+                  onPressed: onAccept,
+                  icon: const Icon(Icons.check, size: 16),
+                  label: const Text('Accept'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.success,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 11),
+                  ),
+                ),
+              ),
+            ],
           ),
         ],
       ),

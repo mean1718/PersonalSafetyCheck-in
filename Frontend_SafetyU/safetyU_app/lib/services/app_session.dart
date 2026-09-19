@@ -317,7 +317,7 @@ class AppSession extends ChangeNotifier {
     _chatThreads.clear();
     activeIncidents.clear();
     _backendPendingAlertCount = 0;
-    pendingTrustRequestCount = 0;
+    pendingTrustRequests.clear();
     notifyListeners();
   }
 
@@ -409,14 +409,22 @@ class AppSession extends ChangeNotifier {
   }
 
   // Pending Trust requests sent *to* this account — feeds the Friends
-  // bottom-nav tab badge and the bell badge. Kept as a simple settable
-  // count (not re-fetched here) since it's cheap to refresh from
-  // whichever screen already calls TrustedContactService.receivedTrustRequests().
-  int pendingTrustRequestCount = 0;
-  void setPendingTrustRequestCount(int count) {
-    if (pendingTrustRequestCount == count) return;
-    pendingTrustRequestCount = count;
+  // bottom-nav tab badge, the bell badge, and Home's "New trust request"
+  // card. Holds the actual requests (not just a count) so Home can render
+  // each one with a name and Accept/Decline, not just a number.
+  List<Map<String, dynamic>> pendingTrustRequests = [];
+  int get pendingTrustRequestCount => pendingTrustRequests.length;
+
+  void setPendingTrustRequests(List<Map<String, dynamic>> requests) {
+    pendingTrustRequests = requests;
     notifyListeners();
+  }
+
+  void removePendingTrustRequest(String id) {
+    final before = pendingTrustRequests.length;
+    pendingTrustRequests =
+        pendingTrustRequests.where((r) => r['_id']?.toString() != id).toList();
+    if (pendingTrustRequests.length != before) notifyListeners();
   }
 
   int get unreadNotificationCount =>

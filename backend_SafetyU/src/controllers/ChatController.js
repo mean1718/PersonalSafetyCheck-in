@@ -1,6 +1,7 @@
 const mongoose = require("mongoose");
 const ChatMessage = require("../models/ChatMessage");
 const Notification = require("../models/Notification");
+const { sendPushToUser } = require("../services/pushService");
 
 // POST /api/chat  { receiverId, text, kind?, checkInId? }
 const sendMessage = async (req, res) => {
@@ -18,13 +19,31 @@ const sendMessage = async (req, res) => {
     return res.status(400).json({ message: "Invalid checkInId." });
   }
   try {
-    const normalizedKind = ["text", "helpRequest", "safeCheckIn"].includes(kind) ? kind : "text";
+    const normalizedKind = ["text", "helpRequest", "safeCheckIn"].includes(kind)
+      ? kind
+      : "text";
     const message = await ChatMessage.create({
       sender: req.user.id,
       receiver: receiverId,
       text: text.trim(),
       kind: normalizedKind,
     });
+    if (normalizedKind === "text") {
+      // Plain chat messages had no push at all — the receiver only found
+      // out by opening this exact conversation. A real chat needs to
+      // behave like Messenger: buzz their phone the moment it arrives,
+      // whether or not the app is open.
+      const senderName = req.authenticatedUser?.name || "Someone";
+      sendPushToUser(receiverId, {
+        title: senderName,
+        body: text.trim(),
+        data: {
+          type: "chat_message",
+          senderId: req.user.id,
+          messageId: message._id.toString(),
+        },
+      });
+    }
     // A "Need Help" sent from chat is a real alert, not just a message the
     // trusted contact happens to see if they open the conversation — it
     // needs its own Notification so it shows up the same way a safety
@@ -47,6 +66,21 @@ const sendMessage = async (req, res) => {
         message: text.trim(),
         ...(checkInId ? { checkIn: checkInId } : {}),
       });
+      // The Notification record above is what makes it show up once the
+      // contact opens the bell — but a real emergency alert can't rely on
+      // someone happening to check the app. This is what actually rings
+      // /vibrates their phone right now, same as a trust request or a
+      // session-completed alert already do.
+      const senderName = req.authenticatedUser?.name || "A trusted friend";
+      sendPushToUser(receiverId, {
+        title: `${senderName} needs help`,
+        body: text.trim(),
+        data: {
+          type: "safety_alert",
+          senderId: req.user.id,
+          ...(checkInId ? { checkInId } : {}),
+        },
+      });
     } else if (normalizedKind === "safeCheckIn") {
       // Confirming Safe resolves whatever "Need Help" this same person had
       // outstanding toward this same contact — mirrors what completing a
@@ -61,6 +95,12 @@ const sendMessage = async (req, res) => {
         },
         { $set: { resolved: true } },
       );
+      const senderName = req.authenticatedUser?.name || "A trusted friend";
+      sendPushToUser(receiverId, {
+        title: `${senderName} is safe`,
+        body: `${senderName} confirmed they're safe now.`,
+        data: { type: "checkin_completed", senderId: req.user.id },
+      });
     }
     return res.status(201).json({ message });
   } catch (_) {
@@ -86,7 +126,7 @@ const getConversation = async (req, res) => {
     }).sort({ createdAt: 1 });
     await ChatMessage.updateMany(
       { sender: userId, receiver: req.user.id, isRead: false },
-      { $set: { isRead: true } }
+      { $set: { isRead: true } },
     );
     return res.json({ messages });
   } catch (_) {
@@ -100,11 +140,18 @@ const getConversation = async (req, res) => {
 const getUnreadCounts = async (req, res) => {
   try {
     const rows = await ChatMessage.aggregate([
-      { $match: { receiver: new mongoose.Types.ObjectId(req.user.id), isRead: false } },
+      {
+        $match: {
+          receiver: new mongoose.Types.ObjectId(req.user.id),
+          isRead: false,
+        },
+      },
       { $group: { _id: "$sender", count: { $sum: 1 } } },
-    ]);2
+    ]);
     const counts = {};
-    rows.forEach((row) => { counts[row._id.toString()] = row.count; });
+    rows.forEach((row) => {
+      counts[row._id.toString()] = row.count;
+    });
     return res.json({ counts });
   } catch (_) {
     return res.status(500).json({ message: "Server error" });

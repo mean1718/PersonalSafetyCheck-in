@@ -78,11 +78,9 @@ const respondToSafetyAlert = async (req, res) => {
     return res.status(404).json({ message: "Notification not found." });
   const { responseStatus } = req.body;
   if (!["can_help", "cannot_help", "marked_safe"].includes(responseStatus)) {
-    return res
-      .status(400)
-      .json({
-        message: "Response must be can_help, cannot_help, or marked_safe.",
-      });
+    return res.status(400).json({
+      message: "Response must be can_help, cannot_help, or marked_safe.",
+    });
   }
   try {
     const notification = await Notification.findOne({
@@ -186,9 +184,28 @@ const respondToSafetyAlert = async (req, res) => {
   }
 };
 
+// DELETE /api/notifications
+// Clears every dismissible notification for this account. Payment
+// confirmations are deliberately excluded — they're the person's receipt
+// of what they paid and when, not a transient alert, so they stay even
+// after Clear All (mirrors GET /api/payments/history, which is the
+// permanent record this is meant to always be findable alongside).
+const clearAllNotifications = async (req, res) => {
+  try {
+    await Notification.deleteMany({
+      receiver: req.user.id,
+      type: { $ne: "payment_confirmed" },
+    });
+    return res.json({ message: "Notifications cleared." });
+  } catch (_) {
+    return res.status(500).json({ message: "Server error" });
+  }
+};
+
 module.exports = {
   getMyNotifications,
   getMyActiveSafetyAlerts,
   markRead,
   respondToSafetyAlert,
+  clearAllNotifications,
 };

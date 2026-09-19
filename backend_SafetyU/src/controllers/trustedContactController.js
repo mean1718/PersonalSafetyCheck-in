@@ -1,9 +1,11 @@
 const mongoose = require("mongoose");
 const TrustedContact = require("../models/TrustedContact");
+const { activeExtraSlots } = require("../utils/extraSlots");
 
 // Free-plan caps — mirrors Frontend_SafetyU's AppSession.freeMainContactLimit
 // / freeOtherContactLimit. Lifted by a confirmed Bakong payment: either
-// isPro (unlimited) or purchasedExtraMainSlots/purchasedExtraOtherSlots (see paymentController).
+// isPro (unlimited) or purchasedExtraMainSlots/purchasedExtraOtherSlots,
+// which only count while still within their 24h window (see extraSlots.js).
 const FREE_MAIN_CONTACT_LIMIT = 2;
 const FREE_OTHER_CONTACT_LIMIT = 1;
 const UNLIMITED = 1 << 30;
@@ -13,9 +15,10 @@ function limitsFor(user) {
     !!user?.isPro &&
     (!user.proExpiresAt || new Date(user.proExpiresAt) > new Date());
   if (isPro) return { main: UNLIMITED, other: UNLIMITED };
+  const active = activeExtraSlots(user);
   return {
-    main: FREE_MAIN_CONTACT_LIMIT + (user?.purchasedExtraMainSlots || 0),
-    other: FREE_OTHER_CONTACT_LIMIT + (user?.purchasedExtraOtherSlots || 0),
+    main: FREE_MAIN_CONTACT_LIMIT + active.main,
+    other: FREE_OTHER_CONTACT_LIMIT + active.other,
   };
 }
 const genericTlds = new Set([
@@ -97,11 +100,9 @@ const addTrustedContact = async (req, res) => {
       const kind = result.value.priority === "primary" ? "main" : "other";
       const limit =
         result.value.priority === "primary" ? limits.main : limits.other;
-      return res
-        .status(400)
-        .json({
-          message: `You can have up to ${limit} ${kind} trusted contacts on your current plan.`,
-        });
+      return res.status(400).json({
+        message: `You can have up to ${limit} ${kind} trusted contacts on your current plan.`,
+      });
     }
     const contact = await TrustedContact.create({
       user: req.user.id,
@@ -112,12 +113,10 @@ const addTrustedContact = async (req, res) => {
       .json({ message: "Trusted contact added successfully.", contact });
   } catch (error) {
     if (error?.code === 11000)
-      return res
-        .status(400)
-        .json({
-          message:
-            "A trusted contact with this phone number or email already exists.",
-        });
+      return res.status(400).json({
+        message:
+          "A trusted contact with this phone number or email already exists.",
+      });
     return res.status(500).json({ message: "Server error" });
   }
 };
@@ -173,11 +172,9 @@ const updateTrustedContact = async (req, res) => {
       const kind = result.value.priority === "primary" ? "main" : "other";
       const limit =
         result.value.priority === "primary" ? limits.main : limits.other;
-      return res
-        .status(400)
-        .json({
-          message: `You can have up to ${limit} ${kind} trusted contacts on your current plan.`,
-        });
+      return res.status(400).json({
+        message: `You can have up to ${limit} ${kind} trusted contacts on your current plan.`,
+      });
     }
     Object.assign(contact, result.value);
     await contact.save();
@@ -187,12 +184,10 @@ const updateTrustedContact = async (req, res) => {
     });
   } catch (error) {
     if (error?.code === 11000)
-      return res
-        .status(400)
-        .json({
-          message:
-            "A trusted contact with this phone number or email already exists.",
-        });
+      return res.status(400).json({
+        message:
+          "A trusted contact with this phone number or email already exists.",
+      });
     return res.status(500).json({ message: "Server error" });
   }
 };
