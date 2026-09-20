@@ -105,8 +105,20 @@ class _TrustedContactsScreenState extends State<TrustedContactsScreen> {
     }
   }
 
+  // THE root cause behind "my trust never sees anything I send" across
+  // every chat/alert test: value['_id'] here is the TrustedContact join
+  // row's own id — a record that only links your account to theirs, not
+  // their actual account. Sending a chat message or alert to that id
+  // succeeds (it's a syntactically valid ObjectId) but never reaches
+  // anyone, because ChatController/checkInController — and every other
+  // real user — only ever look things up by real User ids. Compare with
+  // select_contacts_screen.dart's CheckInService.trustedContacts(), which
+  // already correctly returns userId — that's why session-start alerts
+  // worked while chat and Home's "Need Help"/"Safe" never reached anyone.
+  // contactUser is that same real id, set on this row the moment a Trust
+  // request is accepted (see trustRequestController.js) — use it instead.
   Contact _contactFromApi(Map<String, dynamic> value) => Contact(
-        id: value['_id']?.toString() ?? '',
+        id: value['contactUser']?.toString() ?? value['_id']?.toString() ?? '',
         fullName: value['name']?.toString() ?? 'SafetyU user',
         phone: value['phone']?.toString() ?? '',
         email: value['email']?.toString() ?? '',

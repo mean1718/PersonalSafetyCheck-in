@@ -21,7 +21,7 @@ class ApiConfig {
   /// Linux); it looks like 192.168.x.x. The phone and computer must be on
   /// the same network, and nothing (like a firewall) can be blocking port
   /// 5000.
-  static const String baseUrl = 'http://10.19.164.129:5000/api';
+  static const String baseUrl = 'http://10.84.165.129:5000/api';
 
   /// Backend deployed somewhere reachable over the internet (Render,
   /// Railway, an EC2 box, etc.) — use its public URL. Should be https in
