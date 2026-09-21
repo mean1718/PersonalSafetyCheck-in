@@ -67,14 +67,20 @@ class AuthService {
   }) async {
     final normalizedEmail = email.trim().toLowerCase();
 
-    final data = await ApiClient.post(
-      '/users/login',
-      {
-        'email': normalizedEmail,
-        'password': password,
-      },
-      auth: false,
-    );
+    final requestedRole =
+    role == UserRole.emergencyResponder
+        ? 'responder'
+        : 'user';
+
+final data = await ApiClient.post(
+  '/users/login',
+  {
+    'email': normalizedEmail,
+    'password': password,
+    'requestedRole': requestedRole,
+  },
+  auth: false,
+);
 
     final user = data['user'] as Map<String, dynamic>? ?? {};
 

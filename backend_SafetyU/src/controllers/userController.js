@@ -275,9 +275,9 @@ const registerUser = async (req, res) => {
       password: hashedPassword,
       phone,
       role: requestedRole,
-      officerId: requestedRole === "responder" ? normalizedOfficerId : null,
-      responderStatus: requestedRole === "responder" ? "pending" : null,
-      emergencyPin: requestedRole === "user" ? hashedEmergencyPin : null,
+      officerId: requestedRole === "responder" ? normalizedOfficerId : undefined,
+      responderStatus: requestedRole === "responder" ? "pending" : undefined,
+      emergencyPin: requestedRole === "user" ? hashedEmergencyPin : undefined,
     });
 
     // =====================================================
@@ -353,6 +353,19 @@ const loginUser = async (req, res) => {
         message: "Invalid email or password.",
       });
     }
+    const requestedRole =
+  req.body.requestedRole === "responder"
+    ? "responder"
+    : "user";
+
+if (user.role !== requestedRole) {
+  return res.status(403).json({
+    message:
+      requestedRole === "responder"
+        ? "This account is not registered as an Emergency Responder."
+        : "This account is registered as an Emergency Responder. Please choose Emergency Responder to sign in.",
+  });
+}
 
     if (user.role === "responder" && user.responderStatus === "approved") {
       user.isOnline = true;
