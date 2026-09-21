@@ -28,7 +28,7 @@ import 'session_safe_screen.dart';
 /// safe in time. Since this app has no backend, there is no way to detect
 /// whether a contact actually *saw* a message — each stage only tracks
 /// that its timer ran out, which is the honest limit of a client-only app.
-enum _EscalationStage { main, secondary, emergency }
+enum _EscalationStage { personal, main, secondary, emergency }
 
 class ActiveSessionScreen extends StatefulWidget {
   const ActiveSessionScreen({super.key});
@@ -602,7 +602,14 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen>
     _timer?.cancel();
     setState(() => _secondsRemaining = 0);
     if (!_isAwaitingResponse && !_emergencyTriggered) {
-      _enterEscalation(_EscalationStage.main);
+      // Give the session owner themselves a 2-minute window to confirm
+      // they're safe BEFORE anyone else is told anything — trusted
+      // contacts used to be alerted the instant the countdown hit zero,
+      // with no chance for the owner to just tap "I'm Safe" a moment
+      // late. _EscalationStage.personal notifies nobody; _onStageTick
+      // below moves on to the real first alert (.main) only if this
+      // grace period runs out too.
+      _enterEscalation(_EscalationStage.personal);
     }
   }
 
@@ -735,7 +742,12 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen>
       return;
     }
 
-    _syncEscalationToBackend(stage);
+    // No backend Emergency record yet during the personal grace period —
+    // nobody's been notified, so there's nothing real to escalate. That
+    // starts for real once .main actually fires below.
+    if (stage != _EscalationStage.personal) {
+      _syncEscalationToBackend(stage);
+    }
     _stageTimer?.cancel();
     _stageTimer = Timer.periodic(
       const Duration(seconds: 1),
@@ -768,9 +780,14 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen>
     for (final target in _currentStageTargets) {
       AppSession.instance.markContactTimedOut(target.id);
     }
-    final next = stage == _EscalationStage.main
-        ? _EscalationStage.secondary
-        : _EscalationStage.emergency;
+    final next = switch (stage) {
+      // Grace period ran out with no response — this is the real first
+      // alert to trusted contacts, exactly the old flow from here on.
+      _EscalationStage.personal => _EscalationStage.main,
+      _EscalationStage.main => _EscalationStage.secondary,
+      _EscalationStage.secondary => _EscalationStage.emergency,
+      _EscalationStage.emergency => _EscalationStage.emergency,
+    };
     _enterEscalation(next);
   }
 
@@ -936,6 +953,14 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen>
   }
 
   Future<void> _notifyStage(_EscalationStage stage) async {
+    if (stage == _EscalationStage.personal) {
+      // Nobody is notified during the owner's own 2-minute grace period —
+      // that's the entire point of this stage. _onStageTick moves on to
+      // _EscalationStage.main (the real first alert) once its timer runs
+      // out with still no response.
+      _currentStageTargets = [];
+      return;
+    }
     List<Contact> targets;
     if (stage == _EscalationStage.main) {
       targets = _sessionMainContacts;
@@ -1747,9 +1772,11 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen>
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
                             Text(
-                              _stage == _EscalationStage.main
-                                  ? 'We will alert your other contacts in'
-                                  : 'We will alert Emergency Responders in',
+                              _stage == _EscalationStage.personal
+                                  ? 'We will alert your trusted contacts in'
+                                  : _stage == _EscalationStage.main
+                                      ? 'We will alert your other contacts in'
+                                      : 'We will alert Emergency Responders in',
                               style: TextStyle(
                                   fontSize: 12,
                                   color: AppColors.textSecondary,
@@ -1814,6 +1841,10 @@ class _EscalationBanner extends StatelessWidget {
       title = 'SOS Sent';
       subtitle =
           'Your Emergency Responders have been alerted with your location.';
+    } else if (stage == _EscalationStage.personal) {
+      title = 'Time is up!';
+      subtitle =
+          "Please confirm you're safe within 2 minutes, or we'll alert your trusted contacts.";
     } else if (stage == _EscalationStage.main) {
       title = 'Time is up!';
       subtitle = 'Are you safe? Your main contacts have been notified.';

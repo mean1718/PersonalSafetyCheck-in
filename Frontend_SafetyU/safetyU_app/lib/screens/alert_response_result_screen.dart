@@ -3,6 +3,7 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 import '../services/marker_icons.dart';
 import '../services/directions_service.dart';
 import '../services/check_in_service.dart';
+import '../services/notification_service.dart';
 
 import '../theme/app_theme.dart';
 import '../models/contact.dart';
@@ -41,6 +42,24 @@ class AlertResponseResultScreen extends StatelessWidget {
       CheckInService.confirmContactSafe(checkInId).catchError((e) {
         debugPrint('Confirm-safe sync skipped: $e');
       });
+    }
+    // Also resolve the actual Notification(s) this alert came from, the
+    // same way "Can Help"/"Can't Help" already do (responseStatus:
+    // 'marked_safe', which the backend treats as resolved). Without this,
+    // Home's "You were notified" list has no idea this was ever handled
+    // -- it only hides an alert once its notification stops being
+    // "pending", so this one would sit there forever looking exactly like
+    // an unanswered alert, even though the person is confirmed safe.
+    final notificationId = request.notificationId;
+    if (notificationId != null) {
+      NotificationService.respondToSafetyAlert(notificationId, 'marked_safe')
+          .catchError((e) {
+        debugPrint('Mark-safe notification sync skipped: $e');
+      });
+      for (final siblingId in request.siblingNotificationIds) {
+        NotificationService.respondToSafetyAlert(siblingId, 'marked_safe')
+            .catchError((e) {});
+      }
     }
     Navigator.of(context).popUntil((route) => route.isFirst);
     ScaffoldMessenger.of(context).showSnackBar(

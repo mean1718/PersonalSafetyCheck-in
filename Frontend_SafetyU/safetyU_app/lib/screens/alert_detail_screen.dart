@@ -425,9 +425,15 @@ class _AlertDetailScreenState extends State<AlertDetailScreen> {
     }
   }
 
-  /// Map height: about a third of the screen, never tiny or huge.
-  double _mapHeight(BuildContext context) =>
-      (MediaQuery.sizeOf(context).height * 0.32).clamp(190.0, 300.0).toDouble();
+  /// Map height. Used to be derived from MediaQuery.sizeOf(context), which
+  /// on Flutter Web can create a resize feedback loop with a Google Map:
+  /// the map is a real embedded browser element (HtmlElementView), and
+  /// inserting/resizing it can trigger a browser reflow that gets read
+  /// back as a viewport-size change — which recomputes this height,
+  /// resizes the map again, and repeats, overflowing the call stack. A
+  /// fixed height (same approach the other map screens already use
+  /// without issue) has no such dependency at all.
+  double _mapHeight(BuildContext context) => 260.0;
 
   /// A column child that is always present. Showing/hiding it changes only
   /// what is inside, never how many children the parent Column has — so the
@@ -606,6 +612,8 @@ class _AlertDetailScreenState extends State<AlertDetailScreen> {
       requestedAt: widget.request.requestedAt,
       checkInId: widget.request.checkInId,
       destinationLocation: _destinationLocation,
+      notificationId: widget.notificationId,
+      siblingNotificationIds: widget.siblingNotificationIds,
     );
     Navigator.pushReplacement(
       context,
@@ -796,17 +804,30 @@ class _AlertDetailScreenState extends State<AlertDetailScreen> {
                             ),
                           ),
                           const SizedBox(width: 8),
-                          OutlinedButton.icon(
-                            onPressed: _copyCoordinates,
-                            icon: const Icon(Icons.copy, size: 16),
-                            label: const Text('Copy'),
-                            style: OutlinedButton.styleFrom(
-                              foregroundColor: AppColors.navy,
-                              padding: const EdgeInsets.symmetric(
-                                  vertical: 12, horizontal: 14),
-                              side: BorderSide(color: AppColors.border),
-                              shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(12)),
+                          // Root cause of the "BoxConstraints forces an
+                          // infinite width" crash on this screen: a bare
+                          // OutlinedButton.icon as a direct Row child
+                          // (not wrapped in Expanded/Flexible) hits a
+                          // known Flutter Web layout bug where its
+                          // internal tap-target padding tries to size
+                          // itself against unbounded width. Flexible
+                          // gives it real, bounded constraints from the
+                          // Row while still letting it size to its own
+                          // content instead of stretching like Expanded
+                          // would.
+                          Flexible(
+                            child: OutlinedButton.icon(
+                              onPressed: _copyCoordinates,
+                              icon: const Icon(Icons.copy, size: 16),
+                              label: const Text('Copy'),
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: AppColors.navy,
+                                padding: const EdgeInsets.symmetric(
+                                    vertical: 12, horizontal: 14),
+                                side: BorderSide(color: AppColors.border),
+                                shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(12)),
+                              ),
                             ),
                           ),
                         ],
@@ -841,11 +862,16 @@ class _AlertDetailScreenState extends State<AlertDetailScreen> {
                                         color: AppColors.textPrimary),
                                   ),
                                 ),
-                                TextButton(
-                                  onPressed: _myPositionInFlight
-                                      ? null
-                                      : _updateMyPosition,
-                                  child: const Text('Retry'),
+                                // Same fix as the Copy button above — a
+                                // bare TextButton as a Row child hits the
+                                // same "infinite width" layout bug on Web.
+                                Flexible(
+                                  child: TextButton(
+                                    onPressed: _myPositionInFlight
+                                        ? null
+                                        : _updateMyPosition,
+                                    child: const Text('Retry'),
+                                  ),
                                 ),
                               ],
                             ),
