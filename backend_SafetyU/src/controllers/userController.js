@@ -275,7 +275,14 @@ const registerUser = async (req, res) => {
       password: hashedPassword,
       phone,
       role: requestedRole,
-      officerId: requestedRole === "responder" ? normalizedOfficerId : null,
+      // Omit officerId entirely for normal users rather than setting it
+      // to null — the partial index on User.js only ignores the field
+      // when it's genuinely absent, and this is also just the more
+      // correct shape: a normal-user document shouldn't carry a
+      // responder-only field at all.
+      ...(requestedRole === "responder"
+        ? { officerId: normalizedOfficerId }
+        : {}),
       responderStatus: requestedRole === "responder" ? "pending" : null,
       emergencyPin: requestedRole === "user" ? hashedEmergencyPin : null,
     });

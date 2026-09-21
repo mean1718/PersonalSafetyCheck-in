@@ -81,7 +81,7 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen>
       final route = await DirectionsService.route(
         from: origin,
         to: _destinationCoords,
-        walking: true,
+        walking: !_drivingMode,
       );
       if (!mounted || requestId != _routeRequestId) return;
       setState(() {
@@ -140,6 +140,9 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen>
   String _destination = 'Central Market';
   String _expectedTimeStr = '';
   LatLng _destinationCoords = const LatLng(11.5696, 104.9210);
+  // Whether Session Setup's "Walking / Driving" toggle was set to
+  // Driving — read from the navigation arguments; see didChangeDependencies.
+  bool _drivingMode = false;
 
   LatLng? _currentPosition;
   String? _locationStatusMessage;
@@ -310,6 +313,11 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen>
       final double longitude =
           (rawArguments['longitude'] as num?)?.toDouble() ?? 104.9210;
       _destinationCoords = LatLng(latitude, longitude);
+      // Setup already asked "walking or driving" and sends the answer
+      // here — without reading it, this screen always fetched the
+      // walking route regardless of what was picked, since
+      // _fetchWalkingRoute() used to hardcode walking: true.
+      _drivingMode = rawArguments['drivingMode'] == true;
       final dynamic ids = rawArguments['notifyContactIds'];
       // TODO(debug): remove once delivery is confirmed working. Shows the
       // raw value and its type — tells us whether Session Setup ever sent
@@ -1120,6 +1128,24 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen>
       const Duration(seconds: 8),
       (_) => _pushLocationToBackend(),
     );
+
+    // Seed the road route immediately from whatever position Session
+    // Setup already had (it just got its own GPS fix a few seconds ago to
+    // show its own route preview) rather than waiting on a brand new
+    // high-accuracy fix below, which can legitimately take up to 20s on
+    // web/emulators. Without this, the map showed nothing but a straight
+    // line — or nothing at all — for the first chunk of every session,
+    // which is most of a short test session. The real fix below still
+    // runs right after and any meaningful movement will refresh it via
+    // _maybeRefreshWalkingRoute.
+    if (_currentPosition == null) {
+      final seed = AppSession.instance.lastKnownPosition;
+      if (seed != null) {
+        setState(() => _currentPosition = seed);
+        _fetchWalkingRoute();
+      }
+    }
+
     try {
       final bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
       if (!serviceEnabled) {
@@ -1391,7 +1417,7 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen>
                   )
                 else
                   Container(
-                    height: 180,
+                    height: 260,
                     width: double.infinity,
                     margin: const EdgeInsets.all(20),
                     child: ClipRRect(
@@ -1443,14 +1469,14 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen>
                     ),
                   ),
                 Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  padding: const EdgeInsets.only(top: 22, bottom: 12),
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       Text(
                         _formatTime(_secondsRemaining),
                         style: TextStyle(
-                          fontSize: 54,
+                          fontSize: 42,
                           fontWeight: FontWeight.w800,
                           color: _isAwaitingResponse
                               ? AppColors.textMuted
