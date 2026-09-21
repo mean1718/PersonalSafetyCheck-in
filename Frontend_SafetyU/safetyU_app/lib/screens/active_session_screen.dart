@@ -293,6 +293,57 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen>
       return;
     }
     final dynamic rawArguments = ModalRoute.of(context)?.settings.arguments;
+
+    // RESUME MODE: this screen was reached with no Session Setup
+    // arguments at all (e.g. Home's active-session card pushed a bare
+    // ActiveSessionScreen()) while AppSession still says a session is
+    // active. Before this, that combination either fell through to the
+    // hardcoded 11.5696/104.9210 defaults, or — worse — went on to call
+    // _startBackendCheckIn() below and silently created a SECOND, brand
+    // new backend session on top of the real one still running. This
+    // happened whenever the original live screen instance was gone from
+    // the Navigator stack for any reason (browser back navigation, the
+    // tab losing and re-doing its history, etc.) — Home's card still
+    // correctly showed the session as active (AppSession itself was
+    // untouched), but tapping it had nothing left to pop back to, and
+    // the old fallback just told the person to reopen the app — which
+    // didn't actually fix anything either, since reopening lands back on
+    // Home with the exact same unreachable "active" session.
+    final bool isResume =
+        rawArguments is! Map && AppSession.instance.activeCheckInId != null;
+    if (isResume) {
+      _checkInId = AppSession.instance.activeCheckInId;
+      _destination =
+          AppSession.instance.activeSessionDestination ?? _destination;
+      final endTime = AppSession.instance.activeSessionEndTime;
+      if (endTime != null) {
+        final remaining = endTime.difference(DateTime.now()).inSeconds;
+        _secondsRemaining = remaining > 0 ? remaining : 0;
+      }
+      _expectedTimeStr = _formatTime(_secondsRemaining);
+      final resumePos = AppSession.instance.lastKnownPosition;
+      if (resumePos != null) {
+        _currentPosition = resumePos;
+      }
+      _isInitialized = true;
+      _sessionEndTime =
+          DateTime.now().add(Duration(seconds: _secondsRemaining));
+      _startTimer();
+      _initLocationTracking();
+      // No _startBackendCheckIn() here — that's the whole point of resume
+      // mode: the real session (and its backend record) already exists,
+      // this just reconnects this screen's timers/polling to it instead
+      // of creating a duplicate.
+      if (_checkInId != null) {
+        CheckInService.alertStatus(_checkInId!)
+            .then(_applyAlertStatus)
+            .catchError((e) => debugPrint('Alert status sync skipped: $e'));
+        _startAlertStatusPolling(_checkInId!);
+      }
+      _ensureContactsCached();
+      return;
+    }
+
     if (rawArguments is Map) {
       _destination =
           rawArguments['destination']?.toString() ?? 'Central Market';

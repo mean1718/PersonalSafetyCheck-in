@@ -182,24 +182,25 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
   }
 
   void _openActiveSession() {
-    // AppSession.activeCheckInId is only ever set by ActiveSessionScreen
-    // itself and cleared when a session actually ends (see
-    // active_session_screen.dart) -- so whenever it's set, there is by
-    // construction a still-alive ActiveSessionScreen sitting right below
-    // this one in the navigation stack (this Home screen only exists here
-    // at all because its own back arrow pushed a peek view on top of it).
-    // Popping reveals it exactly as it was, timers and all, rather than
-    // starting a second, duplicate session.
+    // AppSession.activeCheckInId is normally set while a live
+    // ActiveSessionScreen sits right below this one in the stack (this
+    // Home only exists here because its own back arrow pushed a peek view
+    // on top of it) -- popping reveals it exactly as it was, timers and
+    // all, rather than starting a second, duplicate session.
     if (Navigator.of(context).canPop()) {
       Navigator.of(context).pop();
-    } else {
-      // Defensive fallback for the unexpected case where this IS the
-      // root Home with no live session screen underneath to reveal.
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-            content: Text('Reopen your active session from the app.')),
-      );
+      return;
     }
+    // But that assumption can break -- browser back navigation, the tab
+    // losing its history, or this just being a fresh Home with nothing
+    // underneath it at all -- and it used to just tell the person to
+    // "reopen the app", which didn't actually fix anything: reopening
+    // lands right back on this same Home, with the same unreachable
+    // "active" session. Pushing a bare ActiveSessionScreen (no arguments)
+    // instead triggers its own resume-mode handling, which reconnects to
+    // the real, still-running backend session instead of creating a new
+    // one -- see the isResume branch in active_session_screen.dart.
+    Navigator.of(context).pushNamed('/active-session');
   }
 
   Future<void> _openPlans() async {
