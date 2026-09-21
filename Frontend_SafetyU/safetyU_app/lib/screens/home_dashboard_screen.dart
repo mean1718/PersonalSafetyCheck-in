@@ -57,107 +57,108 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
   // keeps running there even while this screen is what's on top.
   Timer? _activeSessionTickTimer;
   Future<void> _checkEmergencyPin() async {
-  final session = AppSession.instance;
+    final session = AppSession.instance;
 
-  // Only normal SafetyU users need an Emergency PIN.
-  if (session.role != UserRole.user) {
-    return;
+    // Only normal SafetyU users need an Emergency PIN.
+    if (session.role != UserRole.user) {
+      return;
+    }
+
+    // User already has a PIN.
+    if (session.hasEmergencyPin) {
+      return;
+    }
+
+    if (!mounted) return;
+
+    setState(() {
+      _showEmergencyPinPopup = true;
+    });
+
+    await _showCreateEmergencyPinDialog();
   }
 
-  // User already has a PIN.
-  if (session.hasEmergencyPin) {
-    return;
-  }
+  Future<void> _showCreateEmergencyPinDialog() async {
+    if (!mounted) return;
 
-  if (!mounted) return;
-
-  setState(() {
-    _showEmergencyPinPopup = true;
-  });
-
-  await _showCreateEmergencyPinDialog();
-}
-Future<void> _showCreateEmergencyPinDialog() async {
-  if (!mounted) return;
-
-  await showDialog(
-    context: context,
-    barrierDismissible: false,
-    builder: (dialogContext) {
-      return AlertDialog(
-        backgroundColor: AppColors.card,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(20),
-        ),
-        title: Row(
-          children: [
-            Container(
-              width: 42,
-              height: 42,
-              decoration: BoxDecoration(
-                color: AppColors.navy,
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Icon(
-                Icons.lock_outline,
-                color: AppColors.danger,
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Text(
-                'Create Emergency PIN',
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w800,
-                  color: AppColors.textPrimary,
+    await showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) {
+        return AlertDialog(
+          backgroundColor: AppColors.card,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+          ),
+          title: Row(
+            children: [
+              Container(
+                width: 42,
+                height: 42,
+                decoration: BoxDecoration(
+                  color: AppColors.navy,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Icon(
+                  Icons.lock_outline,
+                  color: AppColors.danger,
                 ),
               ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  'Create Emergency PIN',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w800,
+                    color: AppColors.textPrimary,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          content: Text(
+            'Your account does not have an Emergency PIN yet. Please create one before using Emergency Assistant.',
+            style: TextStyle(
+              fontSize: 13,
+              height: 1.45,
+              color: AppColors.textSecondary,
+            ),
+          ),
+          actions: [
+            ElevatedButton(
+              onPressed: () {
+                Navigator.pop(dialogContext);
+
+                Navigator.pushReplacementNamed(
+                  context,
+                  '/create-emergency-pin',
+                  arguments: {
+                    'isExistingUser': true,
+                  },
+                );
+              },
+              child: const Text('Create PIN'),
             ),
           ],
-        ),
-        content: Text(
-          'Your account does not have an Emergency PIN yet. Please create one before using Emergency Assistant.',
-          style: TextStyle(
-            fontSize: 13,
-            height: 1.45,
-            color: AppColors.textSecondary,
-          ),
-        ),
-        actions: [
-          ElevatedButton(
-            onPressed: () {
-              Navigator.pop(dialogContext);
+        );
+      },
+    );
 
-              Navigator.pushReplacementNamed(
-                context,
-                '/create-emergency-pin',
-                arguments: {
-                  'isExistingUser': true,
-                },
-              );
-            },
-            child: const Text('Create PIN'),
-          ),
-        ],
-      );
-    },
-  );
-
-  if (mounted) {
-    setState(() {
-      _showEmergencyPinPopup = false;
-    });
+    if (mounted) {
+      setState(() {
+        _showEmergencyPinPopup = false;
+      });
+    }
   }
-}
 
   @override
   void initState() {
     super.initState();
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
-  _checkEmergencyPin();
-  });
+      _checkEmergencyPin();
+    });
     _loadAlertStatus();
     _loadIncomingAlerts();
     _loadResolvedAlerts();
@@ -346,7 +347,10 @@ Future<void> _showCreateEmergencyPinDialog() async {
     final request = HelpRequest(
       requesterName: owner.fullName,
       requesterPhone: owner.phone,
-      destination: alert['message']?.toString() ?? 'their destination',
+      destination:
+          (alert['destinationName']?.toString().trim().isNotEmpty ?? false)
+              ? alert['destinationName'].toString()
+              : 'their destination',
       location: null,
       distanceKm: null,
       requestedAt: DateTime.tryParse(alert['notifiedAt']?.toString() ?? '') ??

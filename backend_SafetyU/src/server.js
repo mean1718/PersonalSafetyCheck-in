@@ -22,6 +22,7 @@ const locationRoutes = require("./routes/locationRoutes");
 const chatRoutes = require("./routes/ChatRoutes");
 const directionsRoutes = require("./routes/directionsRoutes");
 const paymentRoutes = require("./routes/paymentRoutes");
+const { startDeadlineWatcher } = require("./services/deadlineWatcher");
 
 const app = express();
 
@@ -30,7 +31,8 @@ app.use(cors());
 app.use(express.json());
 
 // Connect MongoDB
-connectDB();
+// The missed-deadline watcher only starts once the database is connected.
+connectDB().then(startDeadlineWatcher);
 
 // Routes
 app.use("/api/users", userRoutes);

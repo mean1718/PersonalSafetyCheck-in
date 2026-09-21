@@ -1,10 +1,12 @@
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart';
 import '../firebase_options.dart';
 import 'api_client.dart';
 import 'app_session.dart';
 import 'local_notification_service.dart';
+import 'route_observer.dart';
 
 /// This is the piece that makes trust requests and safety alerts show up
 /// on the phone even when SafetyU is fully closed — not just backgrounded.
@@ -34,6 +36,13 @@ class PushNotificationService {
   static bool _ready = false;
 
   static Future<void> init() async {
+    if (kIsWeb) {
+      // Web push needs its own service-worker file and web keys, and this
+      // app's web build is only used for testing. Skipping it also stops
+      // the "failed-service-worker-registration" error in the console.
+      debugPrint('PushNotificationService: skipped on web.');
+      return;
+    }
     try {
       await Firebase.initializeApp(
         options: DefaultFirebaseOptions.currentPlatform,
@@ -68,23 +77,55 @@ class PushNotificationService {
           id: message.hashCode,
           senderName: notification.body ?? 'Someone',
         );
-      } else if (type == 'checkin_completed') {
+      } else if (type == 'checkin_completed' ||
+          type == 'checkin_arrived' ||
+          type == 'payment_confirmed') {
         LocalNotificationService.showSafetyResolved(
           id: message.hashCode,
           title: notification.title ?? 'SafetyU',
-          body:
-              notification.body ?? 'A trusted friend confirmed they\'re safe.',
+          body: notification.body ?? 'You have a new SafetyU update.',
         );
       } else {
-        LocalNotificationService.showSafetyAlert(
+        // safety_alert (Need Help, missed deadline, session alert). This
+        // used to pass the push TITLE ("SafetyU Alert") in as the person's
+        // name, so the notification read "SafetyU Alert started a safety
+        // session...". Show the server's own message instead.
+        final ownerName = message.data['ownerName'] ?? 'A trusted friend';
+        LocalNotificationService.showSafetyAlertMessage(
           id: message.hashCode,
-          ownerName: notification.title ?? 'A trusted friend',
+          title: notification.title ?? 'SafetyU Alert',
+          body: notification.body ?? '$ownerName may need your help.',
         );
       }
     });
 
+    // Tapping a push (app in background or closed) should land on the
+    // alerts, not just open whatever screen was last showing.
+    FirebaseMessaging.onMessageOpenedApp.listen((_) => _openAlerts());
+    LocalNotificationService.onNotificationTap = _openAlerts;
+    final initial = await FirebaseMessaging.instance.getInitialMessage();
+    if (initial != null) {
+      // Cold start: give the first screen a moment to build.
+      Future.delayed(const Duration(seconds: 2), _openAlerts);
+    }
+
     FirebaseMessaging.instance.onTokenRefresh.listen(_registerToken);
     await registerAfterLogin();
+  }
+
+  /// Opens the Notifications screen (where an incoming alert can be
+  /// answered) on top of whatever is showing. Pushes rather than replaces,
+  /// so it can never tear down a running safety session screen.
+  static void _openAlerts() {
+    if (AppSession.instance.authToken == null) return;
+    final nav = rootNavigatorKey.currentState;
+    if (nav == null) return;
+    var alreadyThere = false;
+    nav.popUntil((route) {
+      alreadyThere = route.settings.name == '/notifications';
+      return true; // stop immediately: this only reads the current route
+    });
+    if (!alreadyThere) nav.pushNamed('/notifications');
   }
 
   /// Sends this device's current push token to the backend. Safe to call

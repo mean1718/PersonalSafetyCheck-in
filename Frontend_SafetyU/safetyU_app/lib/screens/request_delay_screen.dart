@@ -1,8 +1,17 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:geocoding/geocoding.dart';
 import '../theme/app_theme.dart';
 import '../widgets/safety_illustration.dart';
 
+/// "Request Delay" — same layout as before (remaining time, hours/minutes,
+/// reason, destination, Ok Start / Cancel), now with colour: a gradient
+/// countdown card, colour-coded sections and a gradient main button.
+///
+/// Returns (via Navigator.pop) the same map the session screen expects:
+/// extraSeconds, destination, latitude, longitude, reason.
 class RequestDelayScreen extends StatefulWidget {
   const RequestDelayScreen({super.key});
 
@@ -11,6 +20,11 @@ class RequestDelayScreen extends StatefulWidget {
 }
 
 class _RequestDelayScreenState extends State<RequestDelayScreen> {
+  static const Color _blue = Color(0xFF2F80ED);
+  static const Color _indigo = Color(0xFF5B5BD6);
+  static const Color _orange = Color(0xFFF59E0B);
+  static const Color _green = Color(0xFF27AE60);
+
   final TextEditingController _hourController =
       TextEditingController(text: '0');
   final TextEditingController _minuteController =
@@ -20,30 +34,34 @@ class _RequestDelayScreenState extends State<RequestDelayScreen> {
 
   bool _isInitialized = false;
   bool _isConfirming = false;
-  int _currentRemainingSeconds = 0;
   String _originalDestination = '';
+
+  // The running countdown, kept ticking off a real end time so the number
+  // on this screen doesn't freeze at the moment it was opened.
+  DateTime _endsAt = DateTime.now();
+  Timer? _ticker;
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
     if (!_isInitialized) {
-      // Pull in whatever the active session already knows: the countdown
-      // that's currently running and the destination the user typed on the
-      // setup screen. Previously this screen always opened blank/at 0h25m
-      // no matter what the real session state was.
       final rawArguments = ModalRoute.of(context)?.settings.arguments;
       if (rawArguments is Map<String, dynamic>) {
-        _currentRemainingSeconds =
-            rawArguments['remainingSeconds'] as int? ?? 0;
+        final remaining = rawArguments['remainingSeconds'] as int? ?? 0;
+        _endsAt = DateTime.now().add(Duration(seconds: remaining));
         _originalDestination = rawArguments['destination']?.toString() ?? '';
         _destinationController.text = _originalDestination;
       }
+      _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
+        if (mounted) setState(() {});
+      });
       _isInitialized = true;
     }
   }
 
   @override
   void dispose() {
+    _ticker?.cancel();
     _hourController.dispose();
     _minuteController.dispose();
     _reasonController.dispose();
@@ -51,10 +69,18 @@ class _RequestDelayScreenState extends State<RequestDelayScreen> {
     super.dispose();
   }
 
+  int get _remainingSeconds {
+    final ms = _endsAt.difference(DateTime.now()).inMilliseconds;
+    return ms <= 0 ? 0 : (ms / 1000).ceil();
+  }
+
   String _formatRemaining(int seconds) {
-    final int minutes = seconds ~/ 60;
+    final int hours = seconds ~/ 3600;
+    final int minutes = (seconds % 3600) ~/ 60;
     final int secs = seconds % 60;
-    return '${minutes.toString().padLeft(2, '0')}:${secs.toString().padLeft(2, '0')}';
+    final mm = minutes.toString().padLeft(2, '0');
+    final ss = secs.toString().padLeft(2, '0');
+    return hours > 0 ? '$hours:$mm:$ss' : '$mm:$ss';
   }
 
   Future<void> _confirmDelay() async {
@@ -83,11 +109,10 @@ class _RequestDelayScreenState extends State<RequestDelayScreen> {
 
     setState(() => _isConfirming = true);
 
-    // Only re-geocode if the destination text actually changed — no point
-    // hitting the network again for the same place.
+    // Only re-geocode if the destination text actually changed.
     double? latitude;
     double? longitude;
-    if (newDestination.isNotEmpty && newDestination != _originalDestination) {
+    if (newDestination != _originalDestination) {
       try {
         final List<Location> results =
             await locationFromAddress(newDestination);
@@ -96,16 +121,12 @@ class _RequestDelayScreenState extends State<RequestDelayScreen> {
           longitude = results.first.longitude;
         }
       } catch (_) {
-        // Keep the old pin location if lookup fails — still update the
-        // text so the person's typed destination isn't lost.
+        // Keep the old pin location if lookup fails.
       }
     }
 
     if (!mounted) return;
 
-    // Return everything the active session needs: the extra time, the
-    // (possibly edited) destination text, its real coordinates if we
-    // found any, and the optional reason.
     Navigator.pop(context, {
       'extraSeconds': totalExtraSeconds,
       'destination': newDestination,
@@ -113,6 +134,156 @@ class _RequestDelayScreenState extends State<RequestDelayScreen> {
       'longitude': longitude,
       'reason': _reasonController.text.trim(),
     });
+  }
+
+  // ---- colourful building blocks ----
+
+  Widget _sectionTitle(IconData icon, Color color, String text) {
+    return Row(
+      children: [
+        Container(
+          padding: const EdgeInsets.all(6),
+          decoration: BoxDecoration(
+            color: color.withValues(alpha: 0.15),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Icon(icon, size: 14, color: color),
+        ),
+        const SizedBox(width: 8),
+        Text(
+          text,
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w800,
+            color: color,
+            letterSpacing: 0.6,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _remainingCard() {
+    final left = _remainingSeconds;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: [_blue, _indigo],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: _blue.withValues(alpha: 0.30),
+            blurRadius: 14,
+            offset: const Offset(0, 6),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(9),
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.2),
+              shape: BoxShape.circle,
+            ),
+            child:
+                const Icon(Icons.timer_outlined, color: Colors.white, size: 20),
+          ),
+          const SizedBox(width: 12),
+          const Expanded(
+            child: Text(
+              'Currently remaining',
+              style: TextStyle(
+                fontSize: 13.5,
+                color: Colors.white,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+          Text(
+            _formatRemaining(left),
+            style: const TextStyle(
+              fontSize: 24,
+              color: Colors.white,
+              fontWeight: FontWeight.w800,
+              letterSpacing: 0.5,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // One box (hours or minutes). Uses a bare TextField so it doesn't draw
+  // the theme's own box inside this box (the "box in a box" look).
+  Widget _timeBox(TextEditingController controller, String unit, Color color) {
+    return Container(
+      height: 58,
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.09),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: color.withValues(alpha: 0.5), width: 1.4),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: TextField(
+              controller: controller,
+              keyboardType: TextInputType.number,
+              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+              style: TextStyle(
+                fontSize: 24,
+                fontWeight: FontWeight.w800,
+                color: AppColors.textPrimary,
+              ),
+              decoration: const InputDecoration(
+                border: InputBorder.none,
+                enabledBorder: InputBorder.none,
+                focusedBorder: InputBorder.none,
+                filled: false,
+                isDense: true,
+                contentPadding: EdgeInsets.zero,
+              ),
+            ),
+          ),
+          Text(
+            unit,
+            style: TextStyle(
+              fontSize: 13,
+              color: color,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  InputDecoration _fieldDecoration(String hint, IconData icon, Color color) {
+    OutlineInputBorder border(Color c, double w) => OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: BorderSide(color: c, width: w),
+        );
+    return InputDecoration(
+      hintText: hint,
+      hintStyle: TextStyle(
+        fontSize: 13,
+        color: AppColors.textMuted.withValues(alpha: 0.9),
+      ),
+      prefixIcon: Icon(icon, size: 20, color: color),
+      filled: true,
+      fillColor: color.withValues(alpha: 0.06),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 15),
+      border: border(color.withValues(alpha: 0.45), 1.2),
+      enabledBorder: border(color.withValues(alpha: 0.45), 1.2),
+      focusedBorder: border(color, 2),
+    );
   }
 
   @override
@@ -147,212 +318,47 @@ class _RequestDelayScreenState extends State<RequestDelayScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     const SizedBox(height: 12),
-
-                    // Shows the countdown the user actually started with,
-                    // so this screen doesn't feel disconnected from the
-                    // session running behind it.
-                    Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 16, vertical: 12),
-                      decoration: BoxDecoration(
-                        color: AppColors.card,
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(
-                          color: AppColors.border.withValues(alpha: 0.5),
-                        ),
-                      ),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Text(
-                            'Currently remaining',
-                            style: TextStyle(
-                              fontSize: 13,
-                              color: AppColors.textSecondary,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                          Text(
-                            _formatRemaining(_currentRemainingSeconds),
-                            style: TextStyle(
-                              fontSize: 16,
-                              color: AppColors.navy,
-                              fontWeight: FontWeight.w800,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 20),
+                    _remainingCard(),
+                    const SizedBox(height: 24),
 
                     // SECTION 1: I NEED MORE TIME
-                    Text(
-                      'I NEED MORE TIME',
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w800,
-                        color: AppColors.textPrimary,
-                        letterSpacing: 0.5,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
+                    _sectionTitle(Icons.more_time, _blue, 'I NEED MORE TIME'),
+                    const SizedBox(height: 10),
                     Row(
                       children: [
                         Expanded(
-                          child: Container(
-                            height: 48,
-                            padding: const EdgeInsets.symmetric(horizontal: 16),
-                            decoration: BoxDecoration(
-                              color: AppColors.card,
-                              borderRadius: BorderRadius.circular(12),
-                              border: Border.all(
-                                color: AppColors.border.withValues(alpha: 0.5),
-                              ),
-                            ),
-                            child: Row(
-                              children: [
-                                Expanded(
-                                  child: TextField(
-                                    controller: _hourController,
-                                    keyboardType: TextInputType.number,
-                                    decoration: const InputDecoration(
-                                      border: InputBorder.none,
-                                      isDense: true,
-                                    ),
-                                  ),
-                                ),
-                                Text(
-                                  'Hour',
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    color: AppColors.textSecondary,
-                                    fontWeight: FontWeight.w500,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
+                            child: _timeBox(_hourController, 'Hour', _blue)),
                         const SizedBox(width: 14),
                         Expanded(
-                          child: Container(
-                            height: 48,
-                            padding: const EdgeInsets.symmetric(horizontal: 16),
-                            decoration: BoxDecoration(
-                              color: AppColors.card,
-                              borderRadius: BorderRadius.circular(12),
-                              border: Border.all(
-                                color: AppColors.border.withValues(alpha: 0.5),
-                              ),
-                            ),
-                            child: Row(
-                              children: [
-                                Expanded(
-                                  child: TextField(
-                                    controller: _minuteController,
-                                    keyboardType: TextInputType.number,
-                                    decoration: const InputDecoration(
-                                      border: InputBorder.none,
-                                      isDense: true,
-                                    ),
-                                  ),
-                                ),
-                                Text(
-                                  'Minutes',
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    color: AppColors.textSecondary,
-                                    fontWeight: FontWeight.w500,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
+                            child: _timeBox(
+                                _minuteController, 'Minutes', _indigo)),
                       ],
                     ),
-                    const SizedBox(height: 20),
+                    const SizedBox(height: 24),
 
                     // SECTION 2: REASON (OPTIONAL)
-                    Text(
-                      'REASON (OPTIONAL)',
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w800,
-                        color: AppColors.textPrimary,
-                        letterSpacing: 0.5,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
+                    _sectionTitle(Icons.chat_bubble_outline, _orange,
+                        'REASON (OPTIONAL)'),
+                    const SizedBox(height: 10),
                     TextField(
                       controller: _reasonController,
-                      decoration: InputDecoration(
-                        hintText: 'e.g. Stuck in heavy traffic',
-                        hintStyle: TextStyle(
-                          fontSize: 13,
-                          color: AppColors.textMuted.withValues(alpha: 0.7),
-                        ),
-                        filled: true,
-                        fillColor: AppColors.card,
-                        contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 16,
-                          vertical: 14,
-                        ),
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(12),
-                          borderSide: BorderSide(
-                            color: AppColors.border.withValues(alpha: 0.5),
-                          ),
-                        ),
-                        enabledBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(12),
-                          borderSide: BorderSide(
-                            color: AppColors.border.withValues(alpha: 0.5),
-                          ),
-                        ),
-                      ),
+                      textCapitalization: TextCapitalization.sentences,
+                      decoration: _fieldDecoration(
+                          'e.g. Stuck in heavy traffic',
+                          Icons.edit_outlined,
+                          _orange),
                     ),
-                    const SizedBox(height: 20),
+                    const SizedBox(height: 24),
 
                     // SECTION 3: CONFIRM DESTINATION
-                    Text(
-                      'CONFIRM DESTINATION',
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w800,
-                        color: AppColors.textPrimary,
-                        letterSpacing: 0.5,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
+                    _sectionTitle(
+                        Icons.place_outlined, _green, 'CONFIRM DESTINATION'),
+                    const SizedBox(height: 10),
                     TextField(
                       controller: _destinationController,
-                      decoration: InputDecoration(
-                        hintText: 'e.g. Central Market',
-                        hintStyle: TextStyle(
-                          fontSize: 13,
-                          color: AppColors.textMuted.withValues(alpha: 0.7),
-                        ),
-                        filled: true,
-                        fillColor: AppColors.card,
-                        contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 16,
-                          vertical: 14,
-                        ),
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(12),
-                          borderSide: BorderSide(
-                            color: AppColors.border.withValues(alpha: 0.5),
-                          ),
-                        ),
-                        enabledBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(12),
-                          borderSide: BorderSide(
-                            color: AppColors.border.withValues(alpha: 0.5),
-                          ),
-                        ),
-                      ),
+                      textCapitalization: TextCapitalization.words,
+                      decoration: _fieldDecoration(
+                          'e.g. Central Market', Icons.place, _green),
                     ),
                     const SizedBox(height: 16),
                   ],
@@ -367,33 +373,58 @@ class _RequestDelayScreenState extends State<RequestDelayScreen> {
                 children: [
                   SizedBox(
                     width: double.infinity,
-                    height: 50,
-                    child: ElevatedButton(
-                      onPressed: _isConfirming ? null : _confirmDelay,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: AppColors.primaryButton,
-                        elevation: 0,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(25),
+                    height: 52,
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        gradient: const LinearGradient(
+                          colors: [_blue, _indigo],
                         ),
+                        borderRadius: BorderRadius.circular(26),
+                        boxShadow: [
+                          BoxShadow(
+                            color: _blue.withValues(alpha: 0.35),
+                            blurRadius: 12,
+                            offset: const Offset(0, 5),
+                          ),
+                        ],
                       ),
-                      child: _isConfirming
-                          ? const SizedBox(
-                              width: 20,
-                              height: 20,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2.5,
-                                color: Colors.white,
+                      child: ElevatedButton(
+                        onPressed: _isConfirming ? null : _confirmDelay,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.transparent,
+                          disabledBackgroundColor: Colors.transparent,
+                          shadowColor: Colors.transparent,
+                          elevation: 0,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(26),
+                          ),
+                        ),
+                        child: _isConfirming
+                            ? const SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2.5,
+                                  color: Colors.white,
+                                ),
+                              )
+                            : const Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Icon(Icons.check_circle_outline,
+                                      color: Colors.white, size: 20),
+                                  SizedBox(width: 8),
+                                  Text(
+                                    'Ok Start',
+                                    style: TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 15.5,
+                                      fontWeight: FontWeight.w800,
+                                    ),
+                                  ),
+                                ],
                               ),
-                            )
-                          : const Text(
-                              'Ok Start',
-                              style: TextStyle(
-                                color: Colors.white,
-                                fontSize: 15,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
+                      ),
                     ),
                   ),
                   const SizedBox(height: 10),
@@ -403,9 +434,10 @@ class _RequestDelayScreenState extends State<RequestDelayScreen> {
                     child: OutlinedButton(
                       onPressed: () => Navigator.pop(context),
                       style: OutlinedButton.styleFrom(
-                        backgroundColor: AppColors.background,
+                        backgroundColor: AppColors.card,
                         side: BorderSide(
-                          color: AppColors.border.withValues(alpha: 0.8),
+                          color: AppColors.danger.withValues(alpha: 0.7),
+                          width: 1.4,
                         ),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(25),
@@ -414,7 +446,7 @@ class _RequestDelayScreenState extends State<RequestDelayScreen> {
                       child: Text(
                         'Cancel',
                         style: TextStyle(
-                          color: AppColors.textPrimary,
+                          color: AppColors.danger,
                           fontSize: 15,
                           fontWeight: FontWeight.w700,
                         ),

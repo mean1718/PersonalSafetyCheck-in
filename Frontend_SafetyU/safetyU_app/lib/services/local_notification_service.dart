@@ -27,6 +27,11 @@ class LocalNotificationService {
   static final _plugin = FlutterLocalNotificationsPlugin();
   static bool _initialized = false;
 
+  /// Called when the person taps one of these notifications. Set by
+  /// PushNotificationService so a tap opens the alerts screen instead of
+  /// just launching the app and leaving them to find it.
+  static void Function()? onNotificationTap;
+
   static const AndroidNotificationDetails _trustRequestAndroidDetails =
       AndroidNotificationDetails(
     'trust_requests',
@@ -84,6 +89,9 @@ class LocalNotificationService {
   );
 
   static Future<void> init() async {
+    // flutter_local_notifications has no web support (and building the
+    // Android vibration pattern throws there), so skip it in the browser.
+    if (kIsWeb) return;
     if (_initialized) return;
     const androidInit = AndroidInitializationSettings('@mipmap/ic_launcher');
     const iosInit = DarwinInitializationSettings(
@@ -93,6 +101,7 @@ class LocalNotificationService {
     );
     await _plugin.initialize(
       const InitializationSettings(android: androidInit, iOS: iosInit),
+      onDidReceiveNotificationResponse: (_) => onNotificationTap?.call(),
     );
     // Android 13+ requires this explicit runtime request; older versions
     // and iOS (handled via DarwinInitializationSettings above) ignore it.
@@ -144,6 +153,7 @@ class LocalNotificationService {
     required int id,
     required String senderName,
   }) async {
+    if (kIsWeb) return;
     if (!_initialized) await init();
     try {
       await _plugin.show(
@@ -164,6 +174,7 @@ class LocalNotificationService {
     required int id,
     required String ownerName,
   }) async {
+    if (kIsWeb) return;
     if (!_initialized) await init();
     try {
       await _plugin.show(
@@ -180,10 +191,37 @@ class LocalNotificationService {
     }
   }
 
+  /// Shows a safety alert with the server's own wording ("Sam hasn't checked
+  /// in on the way to Central Market and may need help") instead of the
+  /// fixed "started a safety session" text, which was wrong for a missed
+  /// deadline or a Need Help.
+  static Future<void> showSafetyAlertMessage({
+    required int id,
+    required String title,
+    required String body,
+  }) async {
+    if (kIsWeb) return;
+    if (!_initialized) await init();
+    try {
+      await _plugin.show(
+        id,
+        title,
+        body,
+        NotificationDetails(
+          android: _safetyAlertAndroidDetails,
+          iOS: const DarwinNotificationDetails(),
+        ),
+      );
+    } catch (e) {
+      debugPrint('LocalNotificationService: safety alert show failed -> $e');
+    }
+  }
+
   static Future<void> showEmergencyAlert({
     required int id,
     required String userName,
   }) async {
+    if (kIsWeb) return;
     if (!_initialized) await init();
     try {
       await _plugin.show(
@@ -208,6 +246,7 @@ class LocalNotificationService {
     required String title,
     required String body,
   }) async {
+    if (kIsWeb) return;
     if (!_initialized) await init();
     try {
       await _plugin.show(

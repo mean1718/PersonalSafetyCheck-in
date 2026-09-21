@@ -13,6 +13,7 @@ const {
   viewSessionLocation,
   needHelpNow,
   confirmContactSafe,
+  extendCheckIn,
 } = require("../controllers/checkInController");
 const protect = require("../middleware/authMiddleware");
 
@@ -40,6 +41,9 @@ router.post("/:id/need-help", protect, needHelpNow);
 
 // A trusted contact confirms the owner is safe -- see confirmContactSafe.
 router.post("/:id/confirm-safe", protect, confirmContactSafe);
+
+// The owner asked for more time -- moves the server-side deadline too.
+router.put("/:id/extend", protect, extendCheckIn);
 
 // Get my check-ins
 router.get("/", protect, getMyCheckIns);

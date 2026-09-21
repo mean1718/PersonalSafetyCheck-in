@@ -9,6 +9,13 @@ const { activeExtraSlots } = require("../utils/extraSlots");
 
 const EXTRA_SLOTS_DURATION_MS = 24 * 60 * 60 * 1000;
 
+const PRO_DURATION_MS = 30 * 24 * 60 * 60 * 1000; // one billing month
+// How long after the QR's own expiry we still accept a confirmation. A bank
+// can settle a transfer a few seconds after the QR window closes; without
+// this grace a person who paid at the last moment was told "expired".
+const LATE_PAYMENT_GRACE_MS = 60 * 1000;
+const MAX_EXTRA_PER_TYPE = 50;
+
 const PRO_MONTHLY_PRICE_USD = 2.99;
 const PRICE_PER_CONTACT_USD = 0.2;
 
@@ -69,6 +76,149 @@ const hasKhqrAmount = (qrString) => {
   return false;
 };
 
+// True only while a Pro plan is genuinely active. Older accounts that were
+// marked Pro before proExpiresAt existed keep working (no expiry recorded).
+const proIsActive = (user) =>
+  !!user?.isPro &&
+  (!user.proExpiresAt || new Date(user.proExpiresAt) > new Date());
+
+// The plan state the app should show after a purchase. Always derived from
+// the database, so the phone never has to guess or "credit locally".
+const planSnapshot = (user) => {
+  const active = activeExtraSlots(user);
+  return {
+    isPro: proIsActive(user),
+    proExpiresAt: user?.proExpiresAt ?? null,
+    purchasedExtraMainSlots: active.main,
+    purchasedExtraOtherSlots: active.other,
+    extraSlotsExpireAt: active.expiresAt,
+  };
+};
+
+// Bakong's check_transaction_by_md5 answers "yes" for ANY transaction that
+// ever matched that md5 — including an older one. Without checking the
+// transaction itself, a new purchase whose QR hashes to the same md5 as an
+// earlier paid one is instantly (and wrongly) confirmed with no payment.
+// This makes sure the transaction Bakong returned really is THIS payment.
+const verifyBakongTransaction = (payment, raw) => {
+  const tx = raw?.data;
+  if (!tx || typeof tx !== "object") return { ok: true }; // nothing to compare
+
+  const createdMs = Number(tx.createdDateMs ?? tx.acknowledgedDateMs);
+  if (Number.isFinite(createdMs) && createdMs > 0) {
+    const earliestOk = new Date(payment.createdAt).getTime() - 2 * 60 * 1000;
+    if (createdMs < earliestOk) {
+      return { ok: false, reason: "transaction is older than this payment" };
+    }
+  }
+
+  const qrCurrency = payment.qrCurrency || "USD";
+  if (tx.currency && String(tx.currency).toUpperCase() !== qrCurrency) {
+    return { ok: false, reason: "currency does not match" };
+  }
+
+  const paidAmount = Number(tx.amount);
+  const expectedAmount =
+    payment.qrAmount ??
+    (qrCurrency === "USD" ? payment.amount : usdToKhr(payment.amount));
+  if (Number.isFinite(paidAmount) && tx.amount !== null) {
+    const tolerance = qrCurrency === "USD" ? 0.005 : 1;
+    if (Math.abs(paidAmount - expectedAmount) > tolerance) {
+      return { ok: false, reason: "amount does not match" };
+    }
+  }
+  return { ok: true };
+};
+
+// Applies a confirmed payment to the account EXACTLY ONCE, even if the app
+// polls several times at the same moment (the old code could credit twice,
+// or mark a payment paid and then fail before crediting it).
+// Returns the updated user, or null if someone else already credited it.
+const creditPayment = async (payment) => {
+  const claim = await Payment.findOneAndUpdate(
+    { _id: payment._id, credited: false },
+    { $set: { credited: true } },
+    { new: true },
+  );
+  if (!claim) return null;
+
+  try {
+    let user;
+    if (payment.purpose === "pro_subscription") {
+      const existing = await User.findById(payment.user).select(
+        "isPro proExpiresAt",
+      );
+      // Renewing while still active adds a month on top instead of losing
+      // the time that was already paid for.
+      const base =
+        proIsActive(existing) && existing.proExpiresAt
+          ? new Date(existing.proExpiresAt).getTime()
+          : Date.now();
+      user = await User.findByIdAndUpdate(
+        payment.user,
+        {
+          $set: { isPro: true, proExpiresAt: new Date(base + PRO_DURATION_MS) },
+        },
+        { new: true },
+      );
+    } else {
+      const existingUser = await User.findById(payment.user).select(
+        "purchasedExtraMainSlots purchasedExtraOtherSlots extraSlotsExpireAt",
+      );
+      const active = activeExtraSlots(existingUser);
+      user = await User.findByIdAndUpdate(
+        payment.user,
+        {
+          $set: {
+            purchasedExtraMainSlots: active.main + payment.extraMainSlots,
+            purchasedExtraOtherSlots: active.other + payment.extraOtherSlots,
+            extraSlotsExpireAt: new Date(Date.now() + EXTRA_SLOTS_DURATION_MS),
+          },
+        },
+        { new: true },
+      );
+    }
+    if (!user) throw new Error("User not found while crediting payment.");
+    return user;
+  } catch (error) {
+    // Crediting failed — release the flag so the next status poll retries
+    // instead of leaving the person "paid but never upgraded".
+    await Payment.updateOne(
+      { _id: payment._id },
+      { $set: { credited: false } },
+    );
+    throw error;
+  }
+};
+
+const notifyPaymentConfirmed = async (payment) => {
+  try {
+    const paymentLabel =
+      payment.purpose === "pro_subscription"
+        ? "Pro subscription (1 month)"
+        : `${payment.extraContacts} extra contact slot${payment.extraContacts === 1 ? "" : "s"} (24 hours)`;
+    const paymentMessage = `Your payment of $${payment.amount.toFixed(2)} for ${paymentLabel} was confirmed.`;
+    await Notification.create({
+      receiver: payment.user,
+      sender: payment.user,
+      type: "payment_confirmed",
+      title: "Payment confirmed",
+      message: paymentMessage,
+    });
+    sendPushToUser(payment.user, {
+      title: "Payment confirmed",
+      body: paymentMessage,
+      data: {
+        type: "payment_confirmed",
+        paymentId: payment._id.toString(),
+      },
+    });
+  } catch (error) {
+    // A missing receipt must never undo a payment that really went through.
+    console.warn("[payment] could not send confirmation:", error.message);
+  }
+};
+
 // GET /api/payments/pricing
 // Public (no auth) — lets the frontend always show the real, current price
 // instead of keeping its own hardcoded copy that can drift out of sync.
@@ -84,8 +234,14 @@ const getPricing = async (req, res) => {
 //    or { purpose: 'pay_per_contact', extraMain?, extraOther?, currency?: 'USD' | 'KHR' }
 const createKhqrPayment = async (req, res) => {
   const purpose = req.body.purpose;
-  const extraMain = Math.max(0, Number(req.body.extraMain) || 0);
-  const extraOther = Math.max(0, Number(req.body.extraOther) || 0);
+  const extraMain = Math.min(
+    MAX_EXTRA_PER_TYPE,
+    Math.max(0, Math.floor(Number(req.body.extraMain) || 0)),
+  );
+  const extraOther = Math.min(
+    MAX_EXTRA_PER_TYPE,
+    Math.max(0, Math.floor(Number(req.body.extraOther) || 0)),
+  );
   const extraContacts = extraMain + extraOther;
   const qrCurrency = resolveQrCurrency(req.body.currency);
 
@@ -102,16 +258,18 @@ const createKhqrPayment = async (req, res) => {
     purpose === "pro_subscription"
       ? PRO_MONTHLY_PRICE_USD
       : Math.round(extraContacts * PRICE_PER_CONTACT_USD * 100) / 100;
+  const qrAmount = qrCurrency === "USD" ? amountUsd : usdToKhr(amountUsd);
 
   try {
+    // Hand back the still-valid QR from a moment ago (double tap, reopened
+    // dialog) instead of creating a second one — but only if it has a
+    // useful amount of time left and is for exactly the same thing.
     const existing = await Payment.findOne({
       user: req.user.id,
       purpose,
       status: "pending",
-      expiresAt: { $gt: new Date() },
-      // Scope the reuse check to the requested currency too — otherwise a
-      // pending KHR payment could get handed back to someone who just
-      // asked for a USD one (and vice versa).
+      credited: false,
+      expiresAt: { $gt: new Date(Date.now() + 60 * 1000) },
       qrCurrency,
       ...(purpose === "pay_per_contact"
         ? { extraMainSlots: extraMain, extraOtherSlots: extraOther }
@@ -122,39 +280,46 @@ const createKhqrPayment = async (req, res) => {
         existing.status = "expired";
         await existing.save();
       } else {
-        const qrAmount =
-          existing.qrCurrency === "USD"
-            ? existing.amount
-            : usdToKhr(existing.amount);
         return res.status(200).json({
           paymentId: existing._id,
+          purpose: existing.purpose,
           qrString: existing.qrString,
           md5: existing.md5,
           amount: existing.amount,
           currency: existing.currency,
-          qrAmount,
+          qrAmount: existing.qrAmount ?? qrAmount,
           qrCurrency: existing.qrCurrency,
           expiresAt: existing.expiresAt,
         });
       }
     }
 
-    // USD requested -> exact charge, no conversion at all.
-    // KHR requested -> converted at BAKONG_USD_TO_KHR_RATE (not live;
-    // update that env var periodically to track the real exchange rate).
-    const qrAmount = qrCurrency === "USD" ? amountUsd : usdToKhr(amountUsd);
+    // Every QR must hash to an md5 that has never been used before —
+    // otherwise Bakong reports the OLD transaction for the new QR (wrongly
+    // "paid" instantly, or never matching the new transfer). If a
+    // collision happens, regenerate with a different bill number / store
+    // label until it is unique.
+    let generated = null;
+    for (let attempt = 0; attempt < 5 && !generated; attempt += 1) {
+      const candidate = buildIndividualKHQR({
+        ...accountInfo(),
+        currency: qrCurrency,
+        amount: qrAmount,
+        billNumber: crypto.randomBytes(6).toString("hex"),
+        ...(attempt > 0
+          ? { storeLabel: `SU${crypto.randomBytes(4).toString("hex")}` }
+          : {}),
+      });
+      const taken = await Payment.exists({ md5: candidate.md5 });
+      if (!taken) generated = candidate;
+    }
+    if (!generated) {
+      console.error("[createKhqrPayment] could not produce a unique md5");
+      return res.status(503).json({
+        message: "Could not generate a unique payment QR. Please try again.",
+      });
+    }
 
-    const billNumber = crypto.randomBytes(6).toString("hex");
-    const { qrString, md5, expiresAt } = buildIndividualKHQR({
-      ...accountInfo(),
-      currency: qrCurrency,
-      amount: qrAmount,
-      billNumber,
-    });
-
-    // md5 is no longer a unique index (see Payment.js) — a same-amount
-    // repeat purchase can legitimately share an md5 with an older record,
-    // and that's fine; status checks always scope by { md5, user }.
     const payment = await Payment.create({
       user: req.user.id,
       purpose,
@@ -163,32 +328,26 @@ const createKhqrPayment = async (req, res) => {
       extraOtherSlots: purpose === "pay_per_contact" ? extraOther : 0,
       amount: amountUsd,
       currency: "USD",
-      // The currency actually printed on this specific QR — separate from
-      // `currency` above, which is always the internal USD ledger amount.
       qrCurrency,
-      qrString,
-      md5,
-      expiresAt,
+      qrAmount,
+      qrString: generated.qrString,
+      md5: generated.md5,
+      expiresAt: generated.expiresAt,
     });
 
     return res.status(201).json({
       paymentId: payment._id,
+      purpose: payment.purpose,
       qrString: payment.qrString,
       md5: payment.md5,
       amount: amountUsd,
       currency: "USD",
-      // The amount/currency actually printed on the QR — lets the frontend
-      // show "≈ 12,259 ៛" next to the USD price when a conversion happened,
-      // so the person isn't surprised by what their banking app shows them.
       qrAmount,
       qrCurrency,
       expiresAt: payment.expiresAt,
     });
   } catch (error) {
     console.error("[createKhqrPayment] failed:", error);
-    // Don't leak raw Mongo/driver error text (e.g. "E11000 duplicate key
-    // error...") to the app — log the real error above for debugging, but
-    // show the person something actionable instead.
     const isDbError =
       typeof error.code !== "undefined" || error.name === "MongoServerError";
     return res.status(500).json({
@@ -199,125 +358,95 @@ const createKhqrPayment = async (req, res) => {
   }
 };
 
+const paidResponse = (payment, user) => ({
+  status: "paid",
+  purpose: payment.purpose,
+  extraMainSlots: payment.extraMainSlots,
+  extraOtherSlots: payment.extraOtherSlots,
+  ...planSnapshot(user),
+});
+
 // GET /api/payments/khqr/:md5/status
 const checkKhqrStatus = async (req, res) => {
   try {
-    // md5 is no longer unique (see Payment.js) — a user can have more than
-    // one payment record sharing the same md5, so always take the most
-    // recently created one rather than an arbitrary/possibly-stale match.
-    const payment = await Payment.findOne({
+    // md5 is not unique across purchases, so scope by user and take the
+    // newest record.
+    let payment = await Payment.findOne({
       md5: req.params.md5,
       user: req.user.id,
     }).sort({ createdAt: -1 });
     if (!payment)
       return res.status(404).json({ message: "Payment not found." });
 
+    // Already confirmed. If a previous poll marked it paid but crashed
+    // before crediting, finish the job now.
     if (payment.status === "paid") {
-      const user = await User.findById(payment.user).select(
-        "isPro purchasedExtraMainSlots purchasedExtraOtherSlots extraSlotsExpireAt",
-      );
-      const active = activeExtraSlots(user);
-      return res.json({
-        status: "paid",
-        purpose: payment.purpose,
-        extraMainSlots: payment.extraMainSlots,
-        extraOtherSlots: payment.extraOtherSlots,
-        isPro: user?.isPro ?? false,
-        purchasedExtraMainSlots: active.main,
-        purchasedExtraOtherSlots: active.other,
-        extraSlotsExpireAt: active.expiresAt,
-      });
+      if (!payment.credited) {
+        await creditPayment(payment);
+      }
+      const user = await User.findById(payment.user);
+      return res.json(paidResponse(payment, user));
     }
 
-    if (payment.expiresAt < new Date()) {
-      if (payment.status !== "expired") {
-        payment.status = "expired";
-        await payment.save();
-      }
+    const now = Date.now();
+    const pastExpiry = payment.expiresAt.getTime() < now;
+    if (payment.expiresAt.getTime() + LATE_PAYMENT_GRACE_MS < now) {
+      await Payment.updateOne(
+        { _id: payment._id, status: "pending" },
+        { $set: { status: "expired" } },
+      );
       return res.json({ status: "expired" });
     }
 
-    const result = await checkTransactionByMd5(payment.md5);
-    if (result.paid) {
-      payment.status = "paid";
-      payment.paidAt = new Date();
-      await payment.save();
-
-      // Credit the account only now that Bakong has actually confirmed
-      // the transfer — never before this point.
-      let user;
-      if (payment.purpose === "pro_subscription") {
-        user = await User.findByIdAndUpdate(
-          payment.user,
-          { isPro: true },
-          { new: true },
-        );
-      } else {
-        // Pay-per-contact is a 24-hour rental (see extraSlotsExpireAt on
-        // User). If the previous purchase already expired, its slots are
-        // gone — start this new purchase from zero rather than $inc-ing
-        // on top of a balance that shouldn't exist anymore. If it's still
-        // within its own 24h window, this purchase adds on top of it and
-        // the combined total gets a fresh 24h window from right now.
-        const existingUser = await User.findById(payment.user).select(
-          "purchasedExtraMainSlots purchasedExtraOtherSlots extraSlotsExpireAt",
-        );
-        const active = activeExtraSlots(existingUser);
-        user = await User.findByIdAndUpdate(
-          payment.user,
-          {
-            $set: {
-              purchasedExtraMainSlots: active.main + payment.extraMainSlots,
-              purchasedExtraOtherSlots: active.other + payment.extraOtherSlots,
-              extraSlotsExpireAt: new Date(
-                Date.now() + EXTRA_SLOTS_DURATION_MS,
-              ),
-            },
-          },
-          { new: true },
-        );
-      }
-
-      // Tell the person their payment went through, and leave a record
-      // they can look back on later — what they paid, how much, and when.
-      // Only fires here, on the actual pending->paid transition, never on
-      // the repeat "already paid" branch above (that one just re-reports
-      // an old confirmation and would otherwise duplicate this every poll).
-      const paymentLabel =
-        payment.purpose === "pro_subscription"
-          ? "Pro subscription"
-          : `${payment.extraContacts} extra contact slot${payment.extraContacts === 1 ? "" : "s"} (24 hours)`;
-      const paymentMessage = `Your payment of $${payment.amount.toFixed(2)} for ${paymentLabel} was confirmed.`;
-
-      await Notification.create({
-        receiver: payment.user,
-        sender: payment.user,
-        type: "payment_confirmed",
-        title: "Payment confirmed",
-        message: paymentMessage,
-      });
-      sendPushToUser(payment.user, {
-        title: "Payment confirmed",
-        body: paymentMessage,
-        data: {
-          type: "payment_confirmed",
-          paymentId: payment._id.toString(),
-        },
-      });
-
+    let result;
+    try {
+      result = await checkTransactionByMd5(payment.md5);
+    } catch (error) {
+      // Bakong being slow/unreachable is not a failed payment. Keep the
+      // app waiting (and polling) instead of showing a scary error.
+      console.error("[checkKhqrStatus] Bakong check failed:", error.message);
       return res.json({
-        status: "paid",
-        purpose: payment.purpose,
-        extraMainSlots: payment.extraMainSlots,
-        extraOtherSlots: payment.extraOtherSlots,
-        isPro: user?.isPro ?? false,
-        purchasedExtraMainSlots: user ? activeExtraSlots(user).main : 0,
-        purchasedExtraOtherSlots: user ? activeExtraSlots(user).other : 0,
-        extraSlotsExpireAt: user?.extraSlotsExpireAt ?? null,
+        status: pastExpiry ? "expired" : "pending",
+        checkError: error.message,
       });
     }
 
-    return res.json({ status: "pending" });
+    if (!result.paid) {
+      return res.json({ status: pastExpiry ? "expired" : "pending" });
+    }
+
+    const verification = verifyBakongTransaction(payment, result.raw);
+    if (!verification.ok) {
+      console.warn(
+        `[checkKhqrStatus] Bakong reported a transaction for md5 ${payment.md5} ` +
+          `but it is not this payment (${verification.reason}). Not crediting.`,
+      );
+      return res.json({ status: pastExpiry ? "expired" : "pending" });
+    }
+
+    // Atomically move pending -> paid. If two polls race, only ONE of them
+    // wins this update; the other simply re-reads the finished result.
+    const won = await Payment.findOneAndUpdate(
+      { _id: payment._id, status: { $in: ["pending", "expired"] } },
+      {
+        $set: {
+          status: "paid",
+          paidAt: new Date(),
+          bakongHash: result.raw?.data?.hash || undefined,
+        },
+      },
+      { new: true },
+    );
+    payment = won || (await Payment.findById(payment._id));
+
+    const credited = await creditPayment(payment);
+    if (credited) await notifyPaymentConfirmed(payment);
+
+    // If a parallel poll is the one crediting, give it a moment to finish
+    // so this response carries the finished plan, not the old one.
+    if (!credited) await new Promise((r) => setTimeout(r, 500));
+    const user = credited || (await User.findById(payment.user));
+    return res.json(paidResponse(payment, user));
   } catch (error) {
     console.error("[checkKhqrStatus] failed:", error);
     return res

@@ -27,9 +27,7 @@ class AuthService {
         'email': normalizedEmail,
         'password': password,
         'phone': phone,
-        'role': role == UserRole.emergencyResponder
-            ? 'responder'
-            : 'user',
+        'role': role == UserRole.emergencyResponder ? 'responder' : 'user',
 
         // -----------------------------------------------------
         // Responder Officer ID
@@ -78,44 +76,36 @@ class AuthService {
       auth: false,
     );
 
-    final user =
-        data['user'] as Map<String, dynamic>? ?? {};
+    final user = data['user'] as Map<String, dynamic>? ?? {};
 
     // Save JWT token.
-    AppSession.instance.authToken =
-        data['token'] as String?;
+    AppSession.instance.authToken = data['token'] as String?;
 
     // Save backend user ID.
-    AppSession.instance.backendUserId =
-        user['id']?.toString();
-    AppSession.instance.hasEmergencyPin =
-    user['hasEmergencyPin'] == true;
+    AppSession.instance.backendUserId = user['id']?.toString();
+    AppSession.instance.hasEmergencyPin = user['hasEmergencyPin'] == true;
 
     // ---------------------------------------------------------
     // Determine actual role from backend
     // ---------------------------------------------------------
 
-    final backendRole =
-        user['role']?.toString() ?? 'user';
+    final backendRole = user['role']?.toString() ?? 'user';
 
-    final actualRole =
-        backendRole == 'responder'
-            ? UserRole.emergencyResponder
-            : UserRole.user;
+    final actualRole = backendRole == 'responder'
+        ? UserRole.emergencyResponder
+        : UserRole.user;
 
     // ---------------------------------------------------------
     // Responder Officer ID
     // ---------------------------------------------------------
 
-    AppSession.instance.badgeId =
-        user['officerId']?.toString() ?? '';
+    AppSession.instance.badgeId = user['officerId']?.toString() ?? '';
 
     // ---------------------------------------------------------
     // Responder verification status
     // ---------------------------------------------------------
 
-    AppSession.instance.responderStatus =
-        _parseResponderStatus(
+    AppSession.instance.responderStatus = _parseResponderStatus(
       user['responderStatus'],
     );
 
@@ -124,14 +114,9 @@ class AuthService {
     // ---------------------------------------------------------
 
     AppSession.instance.signIn(
-      fullName:
-          (user['name'] as String?) ??
-              normalizedEmail.split('@').first,
-      email:
-          (user['email'] as String?) ??
-              normalizedEmail,
-      phone:
-          (user['phone'] as String?) ?? '',
+      fullName: (user['name'] as String?) ?? normalizedEmail.split('@').first,
+      email: (user['email'] as String?) ?? normalizedEmail,
+      phone: (user['phone'] as String?) ?? '',
       role: actualRole,
     );
 
@@ -142,6 +127,8 @@ class AuthService {
           (user['purchasedExtraMainSlots'] as num?)?.toInt(),
       purchasedExtraOtherSlots:
           (user['purchasedExtraOtherSlots'] as num?)?.toInt(),
+      extraSlotsExpireAt:
+          DateTime.tryParse(user['extraSlotsExpireAt']?.toString() ?? ''),
     );
 
     PushNotificationService.registerAfterLogin();
@@ -160,13 +147,13 @@ class AuthService {
 // Local Flutter session cleanup is handled by ProfileScreen.
 // =========================================================
 
-static Future<void> logout() async {
-  await ApiClient.post(
-    '/users/logout',
-    {},
-    auth: true,
-  );
-}
+  static Future<void> logout() async {
+    await ApiClient.post(
+      '/users/logout',
+      {},
+      auth: true,
+    );
+  }
 
   // =========================================================
   // VERIFY EMERGENCY PIN
@@ -221,67 +208,65 @@ static Future<void> logout() async {
 //     Confirm PIN
 // =========================================================
 
-static Future<void> createEmergencyPin({
-  required String newPin,
-  required String confirmPin,
-}) async {
-  final pin = newPin.trim();
-  final confirmation = confirmPin.trim();
+  static Future<void> createEmergencyPin({
+    required String newPin,
+    required String confirmPin,
+  }) async {
+    final pin = newPin.trim();
+    final confirmation = confirmPin.trim();
 
-  // ---------------------------------------------------------
-  // Validate PIN
-  // ---------------------------------------------------------
+    // ---------------------------------------------------------
+    // Validate PIN
+    // ---------------------------------------------------------
 
-  if (!RegExp(r'^\d{4}$').hasMatch(pin)) {
-    throw ApiException(
-      400,
-      'Emergency PIN must be exactly 4 digits.',
+    if (!RegExp(r'^\d{4}$').hasMatch(pin)) {
+      throw ApiException(
+        400,
+        'Emergency PIN must be exactly 4 digits.',
+      );
+    }
+
+    if (!RegExp(r'^\d{4}$').hasMatch(confirmation)) {
+      throw ApiException(
+        400,
+        'Confirm Emergency PIN must be exactly 4 digits.',
+      );
+    }
+
+    if (pin != confirmation) {
+      throw ApiException(
+        400,
+        'Emergency PINs do not match.',
+      );
+    }
+
+    // ---------------------------------------------------------
+    // Create PIN in backend
+    // ---------------------------------------------------------
+
+    final data = await ApiClient.post(
+      '/users/create-emergency-pin',
+      {
+        'newPin': pin,
+        'confirmPin': confirmation,
+      },
+      auth: true,
     );
+
+    // ---------------------------------------------------------
+    // Update local session
+    // ---------------------------------------------------------
+
+    AppSession.instance.hasEmergencyPin = data['hasEmergencyPin'] == true;
+
+    // In case backend does not return the field for some reason,
+    // a successful request itself means the PIN now exists.
+    if (data['hasEmergencyPin'] == null) {
+      AppSession.instance.hasEmergencyPin = true;
+    }
+
+    AppSession.instance.notifyListeners();
   }
-
-  if (!RegExp(r'^\d{4}$').hasMatch(confirmation)) {
-    throw ApiException(
-      400,
-      'Confirm Emergency PIN must be exactly 4 digits.',
-    );
-  }
-
-  if (pin != confirmation) {
-    throw ApiException(
-      400,
-      'Emergency PINs do not match.',
-    );
-  }
-
-  // ---------------------------------------------------------
-  // Create PIN in backend
-  // ---------------------------------------------------------
-
-  final data = await ApiClient.post(
-    '/users/create-emergency-pin',
-    {
-      'newPin': pin,
-      'confirmPin': confirmation,
-    },
-    auth: true,
-  );
-
-  // ---------------------------------------------------------
-  // Update local session
-  // ---------------------------------------------------------
-
-  AppSession.instance.hasEmergencyPin =
-      data['hasEmergencyPin'] == true;
-
-  // In case backend does not return the field for some reason,
-  // a successful request itself means the PIN now exists.
-  if (data['hasEmergencyPin'] == null) {
-    AppSession.instance.hasEmergencyPin = true;
-  }
-
-  AppSession.instance.notifyListeners();
-}
-
 
   // =========================================================
 // CHANGE EMERGENCY PIN
@@ -298,67 +283,67 @@ static Future<void> createEmergencyPin({
 // the new PIN with bcrypt.
 // =========================================================
 
-static Future<void> changeEmergencyPin({
-  required String currentPin,
-  required String newPin,
-  required String confirmPin,
-}) async {
-  final oldPin = currentPin.trim();
-  final pin = newPin.trim();
-  final confirmation = confirmPin.trim();
+  static Future<void> changeEmergencyPin({
+    required String currentPin,
+    required String newPin,
+    required String confirmPin,
+  }) async {
+    final oldPin = currentPin.trim();
+    final pin = newPin.trim();
+    final confirmation = confirmPin.trim();
 
-  // ---------------------------------------------------------
-  // Validate all PINs
-  // ---------------------------------------------------------
+    // ---------------------------------------------------------
+    // Validate all PINs
+    // ---------------------------------------------------------
 
-  if (!RegExp(r'^\d{4}$').hasMatch(oldPin)) {
-    throw ApiException(
-      400,
-      'Current Emergency PIN must be exactly 4 digits.',
+    if (!RegExp(r'^\d{4}$').hasMatch(oldPin)) {
+      throw ApiException(
+        400,
+        'Current Emergency PIN must be exactly 4 digits.',
+      );
+    }
+
+    if (!RegExp(r'^\d{4}$').hasMatch(pin)) {
+      throw ApiException(
+        400,
+        'New Emergency PIN must be exactly 4 digits.',
+      );
+    }
+
+    if (!RegExp(r'^\d{4}$').hasMatch(confirmation)) {
+      throw ApiException(
+        400,
+        'Confirmation PIN must be exactly 4 digits.',
+      );
+    }
+
+    if (pin != confirmation) {
+      throw ApiException(
+        400,
+        'Emergency PINs do not match.',
+      );
+    }
+
+    if (oldPin == pin) {
+      throw ApiException(
+        400,
+        'New Emergency PIN must be different from your current PIN.',
+      );
+    }
+
+    // ---------------------------------------------------------
+    // Change PIN in backend
+    // ---------------------------------------------------------
+
+    await ApiClient.put(
+      '/users/change-emergency-pin',
+      {
+        'currentPin': oldPin,
+        'newPin': pin,
+        'confirmPin': confirmation,
+      },
     );
   }
-
-  if (!RegExp(r'^\d{4}$').hasMatch(pin)) {
-    throw ApiException(
-      400,
-      'New Emergency PIN must be exactly 4 digits.',
-    );
-  }
-
-  if (!RegExp(r'^\d{4}$').hasMatch(confirmation)) {
-    throw ApiException(
-      400,
-      'Confirmation PIN must be exactly 4 digits.',
-    );
-  }
-
-  if (pin != confirmation) {
-    throw ApiException(
-      400,
-      'Emergency PINs do not match.',
-    );
-  }
-
-  if (oldPin == pin) {
-    throw ApiException(
-      400,
-      'New Emergency PIN must be different from your current PIN.',
-    );
-  }
-
-  // ---------------------------------------------------------
-  // Change PIN in backend
-  // ---------------------------------------------------------
-
-  await ApiClient.put(
-    '/users/change-emergency-pin',
-    {
-      'currentPin': oldPin,
-      'newPin': pin,
-      'confirmPin': confirmation,
-    },
-  );
-}
 
   // =========================================================
   // RESPONDER STATUS

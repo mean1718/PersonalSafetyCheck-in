@@ -2,6 +2,27 @@ const CheckIn = require("../models/CheckIn");
 const TrustRequest = require("../models/TrustRequest");
 const Notification = require("../models/Notification");
 const mongoose = require("mongoose");
+const { sendPushToUsers } = require("../services/pushService");
+
+// Within this many meters of the destination counts as "arrived".
+const ARRIVAL_RADIUS_METERS = 75;
+
+const distanceMeters = (lat1, lon1, lat2, lon2) => {
+  const R = 6371000;
+  const toRad = (d) => (d * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(a));
+};
+
+const num = (v) => {
+  if (v === null || v === undefined || v === "") return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+};
 
 const hasAcceptedTrust = (userId, contactId) =>
   TrustRequest.exists({
@@ -41,8 +62,25 @@ const getSessionTrustedContacts = async (req, res) => {
 // Start a safety check-in
 const startCheckIn = async (req, res) => {
   try {
-    const { message, latitude, longitude, contactUserId, contactUserIds, destinationLatitude, destinationLongitude } =
-      req.body;
+    const {
+      message,
+      contactUserId,
+      contactUserIds,
+      destinationName,
+      expectedEndAt,
+      durationSeconds,
+    } = req.body;
+    // Numbers can arrive as strings; 0 is a valid coordinate, so don't
+    // use truthiness checks on them.
+    const latitude = num(req.body.latitude);
+    const longitude = num(req.body.longitude);
+    const destinationLatitude = num(req.body.destinationLatitude);
+    const destinationLongitude = num(req.body.destinationLongitude);
+    let endAt = expectedEndAt ? new Date(expectedEndAt) : null;
+    if ((!endAt || Number.isNaN(endAt.getTime())) && num(durationSeconds) > 0) {
+      endAt = new Date(Date.now() + num(durationSeconds) * 1000);
+    }
+    if (endAt && Number.isNaN(endAt.getTime())) endAt = null;
     const requestedIds = Array.isArray(contactUserIds)
       ? [...new Set(contactUserIds.map((id) => id?.toString()).filter(Boolean))]
       : contactUserId
@@ -80,12 +118,20 @@ const startCheckIn = async (req, res) => {
         : {}),
       message: message || "",
       location: {
-        latitude: latitude || null,
-        longitude: longitude || null,
+        latitude,
+        longitude,
       },
+      ...(latitude !== null && longitude !== null
+        ? { locationUpdatedAt: new Date() }
+        : {}),
+      destinationName:
+        typeof destinationName === "string"
+          ? destinationName.trim().slice(0, 200)
+          : "",
+      ...(endAt ? { expectedEndAt: endAt } : {}),
       // Optional -- older/other callers that don't send this just get no
       // destination pin on the trusted contact's side, same as before.
-      ...(destinationLatitude != null && destinationLongitude != null
+      ...(destinationLatitude !== null && destinationLongitude !== null
         ? {
             destination: {
               latitude: destinationLatitude,
@@ -131,7 +177,9 @@ const completeAllMyActiveCheckIns = async (req, res) => {
       modified: result.modifiedCount ?? result.nModified,
     });
   } catch (error) {
-    return res.status(500).json({ message: "Server error", error: error.message });
+    return res
+      .status(500)
+      .json({ message: "Server error", error: error.message });
   }
 };
 
@@ -217,10 +265,15 @@ const getAlertStatus = async (req, res) => {
       }
       // Keep the earliest "notified at" (their first alert) but let a
       // response on ANY of their alerts win over a still-pending one.
-      const existingResponded = (existing.responseStatus || "pending") !== "pending";
+      const existingResponded =
+        (existing.responseStatus || "pending") !== "pending";
       const thisResponded = (n.responseStatus || "pending") !== "pending";
       if (thisResponded && !existingResponded) {
-        byContact.set(key, { ...existing.toObject(), ...n.toObject(), createdAt: existing.createdAt });
+        byContact.set(key, {
+          ...existing.toObject(),
+          ...n.toObject(),
+          createdAt: existing.createdAt,
+        });
       }
     }
 
@@ -230,7 +283,9 @@ const getAlertStatus = async (req, res) => {
       // Set once any alerted contact taps "Mark [owner] as Safe" -- lets
       // Active Session show a "Trust confirm you safe!" popup even though
       // this poll is really about per-contact can/can't-help responses.
-      confirmedSafeBy: checkIn.confirmedSafeBy?.at ? checkIn.confirmedSafeBy : null,
+      confirmedSafeBy: checkIn.confirmedSafeBy?.at
+        ? checkIn.confirmedSafeBy
+        : null,
       notifiedContacts: [...byContact.values()].map((n) => ({
         notificationId: n._id,
         userId: n.receiver._id,
@@ -279,18 +334,50 @@ const updateLocation = async (req, res) => {
       return res.status(404).json({ message: "Check-in not found" });
     }
 
-    // Only an ACTIVE session should keep updating location. Once the
-    // user taps Safe (status becomes "completed"), we stop accepting
-    // new GPS points for it -- there's no reason to keep tracking
-    // someone after their session has ended.
-    if (checkIn.status !== "active") {
+    // Keep accepting GPS points while the session is active OR has
+    // escalated to an emergency -- the emergency is exactly when contacts
+    // and responders most need the position to keep moving. Only a
+    // completed session stops tracking.
+    if (!["active", "emergency"].includes(checkIn.status)) {
       return res
         .status(400)
         .json({ message: "This session is no longer active." });
     }
 
     checkIn.location = { latitude, longitude };
+    checkIn.locationUpdatedAt = new Date();
+
+    // Arrival: the first time the person gets within range of where they
+    // said they were going, record it and tell their contacts.
+    let justArrived = false;
+    const dest = checkIn.destination;
+    if (
+      !checkIn.arrivedAt &&
+      dest?.latitude != null &&
+      dest?.longitude != null &&
+      distanceMeters(latitude, longitude, dest.latitude, dest.longitude) <=
+        ARRIVAL_RADIUS_METERS
+    ) {
+      checkIn.arrivedAt = new Date();
+      justArrived = true;
+    }
     await checkIn.save();
+
+    if (justArrived) {
+      const receivers = (checkIn.trustedContactUsers || []).map(String);
+      if (receivers.length) {
+        const name = req.authenticatedUser?.name || "Your contact";
+        const place = checkIn.destinationName || "their destination";
+        sendPushToUsers(receivers, {
+          title: "SafetyU",
+          body: `${name} has arrived at ${place}.`,
+          data: {
+            type: "checkin_arrived",
+            checkInId: checkIn._id.toString(),
+          },
+        });
+      }
+    }
 
     return res
       .status(200)
@@ -338,19 +425,49 @@ const viewSessionLocation = async (req, res) => {
     // A Trusted Contact should only ever see a LIVE location while the
     // session is still active. Once it's completed, we hide the
     // location from contacts (the owner can still see their own).
-    if (!isOwner && checkIn.status !== "active") {
-      return res
-        .status(400)
-        .json({
-          message: "This session has ended. Location is no longer shared.",
-        });
+    //
+    // An "emergency" session is still live -- contacts must keep seeing
+    // the position then, not lose it at the worst possible moment.
+    if (!isOwner && !["active", "emergency"].includes(checkIn.status)) {
+      // 410 Gone lets the app tell "session over" apart from a network
+      // hiccup and stop refreshing instead of retrying forever.
+      return res.status(410).json({
+        message: "This session has ended. Location is no longer shared.",
+      });
     }
+
+    const loc = checkIn.location;
+    const dest = checkIn.destination;
+    const hasLoc = loc?.latitude != null && loc?.longitude != null;
+    const hasDest = dest?.latitude != null && dest?.longitude != null;
 
     return res.status(200).json({
       checkInId: checkIn._id,
       status: checkIn.status,
       location: checkIn.location,
       destination: checkIn.destination,
+      destinationName: checkIn.destinationName || "",
+      arrivedAt: checkIn.arrivedAt || null,
+      locationUpdatedAt: checkIn.locationUpdatedAt || null,
+      expectedEndAt: checkIn.expectedEndAt || null,
+      delayReason: checkIn.delayReason || "",
+      delayRequestedAt: checkIn.delayRequestedAt || null,
+      // Straight-line distance still left to travel (null until both
+      // points are known, or once they have arrived).
+      distanceToDestinationMeters:
+        hasLoc && hasDest && !checkIn.arrivedAt
+          ? Math.round(
+              distanceMeters(
+                loc.latitude,
+                loc.longitude,
+                dest.latitude,
+                dest.longitude,
+              ),
+            )
+          : null,
+      // The phone's clock can be wrong; this lets it show correct
+      // "updated 5s ago" / "overdue" values.
+      serverTime: new Date(),
     });
   } catch (error) {
     return res
@@ -369,40 +486,99 @@ const viewSessionLocation = async (req, res) => {
 // naturally reappears as a fresh, unread, pending alert — instead of
 // silently resetting the original one's history.
 const needHelpNow = async (req, res) => {
-    if (!mongoose.isValidObjectId(req.params.id)) {
-        return res.status(404).json({ message: "Check-in not found" });
+  if (!mongoose.isValidObjectId(req.params.id)) {
+    return res.status(404).json({ message: "Check-in not found" });
+  }
+  try {
+    const checkIn = await CheckIn.findOne({
+      _id: req.params.id,
+      user: req.user.id,
+    });
+    if (!checkIn)
+      return res.status(404).json({ message: "Check-in not found" });
+    if (checkIn.status === "completed") {
+      return res
+        .status(400)
+        .json({ message: "This session has already ended." });
     }
-    try {
-        const checkIn = await CheckIn.findOne({ _id: req.params.id, user: req.user.id });
-        if (!checkIn) return res.status(404).json({ message: "Check-in not found" });
-        if (checkIn.status === "completed") {
-            return res.status(400).json({ message: "This session has already ended." });
-        }
 
-        const { contactUserIds } = req.body;
-        const requestedIds = Array.isArray(contactUserIds)
-            ? [...new Set(contactUserIds.map((id) => id?.toString()).filter(Boolean))]
-            : (checkIn.trustedContactUsers || []).map((id) => id.toString());
-        if (requestedIds.some((id) => !mongoose.isValidObjectId(id))) {
-            return res.status(400).json({ message: "One of the selected contacts is invalid." });
-        }
-        if (requestedIds.length === 0) {
-            return res.status(400).json({ message: "No contacts to notify." });
-        }
-
-        const created = await Notification.insertMany(requestedIds.map((receiver) => ({
-            receiver,
-            sender: req.user.id,
-            checkIn: checkIn._id,
-            type: "safety_alert",
-            title: "SafetyU Alert",
-            message: `${req.authenticatedUser?.name || "A trusted contact"} needs help right now.`,
-        })));
-
-        return res.status(201).json({ message: "Contacts re-alerted.", notifications: created });
-    } catch (error) {
-        return res.status(500).json({ message: "Server error", error: error.message });
+    const { contactUserIds } = req.body;
+    const requestedIds = Array.isArray(contactUserIds)
+      ? [...new Set(contactUserIds.map((id) => id?.toString()).filter(Boolean))]
+      : (checkIn.trustedContactUsers || []).map((id) => id.toString());
+    if (requestedIds.some((id) => !mongoose.isValidObjectId(id))) {
+      return res
+        .status(400)
+        .json({ message: "One of the selected contacts is invalid." });
     }
+    if (requestedIds.length === 0) {
+      return res.status(400).json({ message: "No contacts to notify." });
+    }
+
+    // Only people who are actually confirmed trusted contacts may be
+    // alerted -- this endpoint used to accept any user id in the body.
+    const allowed = [];
+    for (const id of requestedIds) {
+      if (await hasAcceptedTrust(req.user.id, id)) allowed.push(id);
+    }
+    if (allowed.length === 0) {
+      return res
+        .status(403)
+        .json({
+          message: "None of the selected users are confirmed trusted contacts.",
+        });
+    }
+
+    const ownerName = req.authenticatedUser?.name || "A trusted contact";
+    const alertMessage = `${ownerName} needs help right now.`;
+    const created = await Notification.insertMany(
+      allowed.map((receiver) => ({
+        receiver,
+        sender: req.user.id,
+        checkIn: checkIn._id,
+        type: "safety_alert",
+        title: "SafetyU Alert",
+        message: alertMessage,
+        ...(checkIn.location?.latitude != null &&
+        checkIn.location?.longitude != null
+          ? {
+              location: {
+                latitude: checkIn.location.latitude,
+                longitude: checkIn.location.longitude,
+              },
+            }
+          : {}),
+      })),
+    );
+
+    // The database rows above only show up when the contact's app is
+    // open and polling. This is the part that puts the alert on their
+    // phone screen / lock screen, even if SafetyU is closed.
+    sendPushToUsers(allowed, {
+      title: "SafetyU Alert",
+      body: alertMessage,
+      data: {
+        type: "safety_alert",
+        checkInId: checkIn._id.toString(),
+        ownerName,
+      },
+    });
+
+    // Contacts have now been alerted for this deadline, so the
+    // server-side missed-deadline watcher must not alert them again.
+    if (!checkIn.deadlineAlertedAt) {
+      checkIn.deadlineAlertedAt = new Date();
+      await checkIn.save();
+    }
+
+    return res
+      .status(201)
+      .json({ message: "Contacts re-alerted.", notifications: created });
+  } catch (error) {
+    return res
+      .status(500)
+      .json({ message: "Server error", error: error.message });
+  }
 };
 
 // ---------------------------------------------------------------
@@ -448,11 +624,84 @@ const confirmContactSafe = async (req, res) => {
       confirmedSafeBy: checkIn.confirmedSafeBy,
     });
   } catch (error) {
-    return res.status(500).json({ message: "Server error", error: error.message });
+    return res
+      .status(500)
+      .json({ message: "Server error", error: error.message });
+  }
+};
+
+// PUT /api/checkins/:id/extend -- the owner asked for more time. The phone
+// used to just add seconds to its own local timer, so the server (and any
+// deadline alert) never knew the deadline had moved. Body: either
+// { expectedEndAt: ISO date } (preferred, exact) or { extraSeconds }.
+const extendCheckIn = async (req, res) => {
+  if (!mongoose.isValidObjectId(req.params.id)) {
+    return res.status(404).json({ message: "Check-in not found" });
+  }
+  try {
+    const checkIn = await CheckIn.findOne({
+      _id: req.params.id,
+      user: req.user.id,
+    });
+    if (!checkIn)
+      return res.status(404).json({ message: "Check-in not found" });
+    if (checkIn.status === "completed") {
+      return res
+        .status(400)
+        .json({ message: "This session has already ended." });
+    }
+
+    let newEnd = req.body.expectedEndAt
+      ? new Date(req.body.expectedEndAt)
+      : null;
+    if (!newEnd || Number.isNaN(newEnd.getTime())) {
+      const extra = num(req.body.extraSeconds);
+      if (!extra || extra <= 0) {
+        return res
+          .status(400)
+          .json({ message: "expectedEndAt or extraSeconds is required." });
+      }
+      const base = Math.max(
+        checkIn.expectedEndAt ? checkIn.expectedEndAt.getTime() : 0,
+        Date.now(),
+      );
+      newEnd = new Date(base + extra * 1000);
+    }
+
+    checkIn.expectedEndAt = newEnd;
+    if (typeof req.body.reason === "string") {
+      checkIn.delayReason = req.body.reason.trim().slice(0, 200);
+    }
+    checkIn.delayRequestedAt = new Date();
+
+    // The person may also have changed where they're going while asking for
+    // more time -- contacts must see the new place, and "arrived" starts
+    // over for it.
+    const newDestLat = num(req.body.destinationLatitude);
+    const newDestLng = num(req.body.destinationLongitude);
+    if (newDestLat !== null && newDestLng !== null) {
+      checkIn.destination = { latitude: newDestLat, longitude: newDestLng };
+      checkIn.arrivedAt = undefined;
+    }
+    if (
+      typeof req.body.destinationName === "string" &&
+      req.body.destinationName.trim()
+    ) {
+      checkIn.destinationName = req.body.destinationName.trim().slice(0, 200);
+    }
+    // A new, later deadline can raise a fresh missed-deadline alert.
+    if (newEnd.getTime() > Date.now()) checkIn.deadlineAlertedAt = null;
+    await checkIn.save();
+    return res.json({ message: "Deadline extended.", expectedEndAt: newEnd });
+  } catch (error) {
+    return res
+      .status(500)
+      .json({ message: "Server error", error: error.message });
   }
 };
 
 module.exports = {
+  extendCheckIn,
   getSessionTrustedContacts,
   startCheckIn,
   completeCheckIn,

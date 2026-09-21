@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import '../models/contact.dart';
 import '../models/user_role.dart';
@@ -19,6 +20,30 @@ import '../models/contact_response_state.dart';
 /// every screen reads from instead of hardcoded placeholder data — whatever
 /// the person types or does in the app is what shows up everywhere else.
 class AppSession extends ChangeNotifier {
+  // ---- Safe notifications ----
+  // Screens call methods on this session (which notify listeners) from
+  // initState, e.g. clearing the alert list when a session starts. Notifying
+  // while Flutter is in the middle of building makes every listening widget
+  // throw "setState() or markNeedsBuild() called during build", which can
+  // leave the screen half-drawn. So when a notification is requested
+  // mid-frame it is delivered right after the frame instead.
+  bool _notifyScheduled = false;
+
+  @override
+  void notifyListeners() {
+    if (SchedulerBinding.instance.schedulerPhase ==
+        SchedulerPhase.persistentCallbacks) {
+      if (_notifyScheduled) return;
+      _notifyScheduled = true;
+      Future.microtask(() {
+        _notifyScheduled = false;
+        super.notifyListeners();
+      });
+      return;
+    }
+    super.notifyListeners();
+  }
+
   AppSession._internal();
   static final AppSession instance = AppSession._internal();
 
@@ -226,7 +251,7 @@ class AppSession extends ChangeNotifier {
 
   // ---- Plan / paywall ----
   // SafetyU's free plan caps how many contacts can be notified per safety
-  // session: up to 2 Main and 2 Other. Going over that shows the upgrade /
+  // session: up to 2 Main and 1 Other. Going over that shows the upgrade /
   // pay-per-contact paywall instead of silently notifying everyone.
   static const int freeMainContactLimit = 2;
   static const int freeOtherContactLimit = 1;
@@ -236,25 +261,40 @@ class AppSession extends ChangeNotifier {
   int purchasedExtraMainSlots = 0;
   int purchasedExtraOtherSlots = 0;
 
+  /// Pay-per-contact slots are a 24-hour rental. The backend has always
+  /// enforced that, but the app never knew when they expire, so slots that
+  /// had run out on the server kept working on the phone (and then failed
+  /// when the session started). Every reader below checks this first.
+  DateTime? extraSlotsExpireAt;
+
   /// True Pro status right now — false once [proExpiresAt] has passed, even
   /// if the last-synced [isPro] flag from the backend was still true.
   bool get isProActive =>
       isPro && (proExpiresAt == null || proExpiresAt!.isAfter(DateTime.now()));
 
+  bool get _extraSlotsActive =>
+      extraSlotsExpireAt != null && extraSlotsExpireAt!.isAfter(DateTime.now());
+
+  /// Extra main/other slots that are still within their 24h window.
+  int get activeExtraMainSlots =>
+      _extraSlotsActive ? purchasedExtraMainSlots : 0;
+  int get activeExtraOtherSlots =>
+      _extraSlotsActive ? purchasedExtraOtherSlots : 0;
+
   int get maxMainContacts =>
-      isProActive ? 1 << 30 : freeMainContactLimit + purchasedExtraMainSlots;
+      isProActive ? 1 << 30 : freeMainContactLimit + activeExtraMainSlots;
   int get maxOtherContacts =>
-      isProActive ? 1 << 30 : freeOtherContactLimit + purchasedExtraOtherSlots;
+      isProActive ? 1 << 30 : freeOtherContactLimit + activeExtraOtherSlots;
 
   /// Applies the plan fields the backend just returned (on login, or right
-  /// after AuthService confirms a payment) so this device's paywall state
-  /// matches what's actually been paid for, not just what happened locally
-  /// on this device since the app was last opened.
+  /// after a payment is confirmed) so this device's paywall state matches
+  /// what's actually been paid for and what the server will enforce.
   void syncPlanFromBackend({
     bool? isPro,
     DateTime? proExpiresAt,
     int? purchasedExtraMainSlots,
     int? purchasedExtraOtherSlots,
+    DateTime? extraSlotsExpireAt,
   }) {
     if (isPro != null) this.isPro = isPro;
     this.proExpiresAt = proExpiresAt;
@@ -264,19 +304,24 @@ class AppSession extends ChangeNotifier {
     if (purchasedExtraOtherSlots != null) {
       this.purchasedExtraOtherSlots = purchasedExtraOtherSlots;
     }
+    this.extraSlotsExpireAt = extraSlotsExpireAt;
     notifyListeners();
   }
 
+  /// Kept for older callers. Prefer [syncPlanFromBackend] with the plan the
+  /// server returned after the payment was confirmed — this only flips the
+  /// flag and cannot know the real expiry.
   void upgradeToPro() {
     isPro = true;
     notifyListeners();
   }
 
-  /// Simulates a one-time "pay per extra contact" purchase — there's no
-  /// real payment processor in this build, so this just grants the slots.
+  /// Kept for older callers. Grants the slots locally for 24 hours from
+  /// now (matching the backend rule). Prefer [syncPlanFromBackend].
   void purchaseExtraSlots({int extraMain = 0, int extraOther = 0}) {
-    purchasedExtraMainSlots += extraMain;
-    purchasedExtraOtherSlots += extraOther;
+    purchasedExtraMainSlots = activeExtraMainSlots + extraMain;
+    purchasedExtraOtherSlots = activeExtraOtherSlots + extraOther;
+    extraSlotsExpireAt = DateTime.now().add(const Duration(hours: 24));
     notifyListeners();
   }
 
@@ -302,6 +347,13 @@ class AppSession extends ChangeNotifier {
     backendUserId = null;
     hasEmergencyPin = false;
     activeCheckInId = null;
+    // The plan belongs to the account, not the device — never let the next
+    // person to sign in inherit Pro or paid slots from the previous one.
+    isPro = false;
+    proExpiresAt = null;
+    purchasedExtraMainSlots = 0;
+    purchasedExtraOtherSlots = 0;
+    extraSlotsExpireAt = null;
     contacts.clear();
     profilePhotoPath = null;
     // Everything below is per-account state. It used to intentionally

@@ -67,11 +67,50 @@ class PendingPayment {
 }
 
 /// Status of a payment as the client polls it: 'pending' (still waiting on
-/// the Bakong network), 'paid', or 'expired' (the 5-minute QR window ran
-/// out — start a new payment).
+/// the Bakong network), 'paid', or 'expired' (the QR window ran out — start
+/// a new payment).
+///
+/// When 'paid', the backend also sends the account's plan as it now stands
+/// (Pro + expiry, extra slots + their 24h expiry). The app applies THAT
+/// instead of guessing locally, so what the phone shows always matches
+/// what the server will actually enforce.
 class PaymentStatus {
   final String status;
-  const PaymentStatus(this.status);
+
+  /// Set when the last check against Bakong failed (network/token). The
+  /// status is still 'pending' in that case — this just lets the UI say
+  /// "still checking" honestly instead of looking frozen.
+  final String? checkError;
+
+  final bool? isPro;
+  final DateTime? proExpiresAt;
+  final int? purchasedExtraMainSlots;
+  final int? purchasedExtraOtherSlots;
+  final DateTime? extraSlotsExpireAt;
+
+  const PaymentStatus(
+    this.status, {
+    this.checkError,
+    this.isPro,
+    this.proExpiresAt,
+    this.purchasedExtraMainSlots,
+    this.purchasedExtraOtherSlots,
+    this.extraSlotsExpireAt,
+  });
+
+  factory PaymentStatus.fromJson(Map<String, dynamic> json) => PaymentStatus(
+        json['status']?.toString() ?? 'pending',
+        checkError: json['checkError']?.toString(),
+        isPro: json['isPro'] as bool?,
+        proExpiresAt: DateTime.tryParse(json['proExpiresAt']?.toString() ?? ''),
+        purchasedExtraMainSlots:
+            (json['purchasedExtraMainSlots'] as num?)?.toInt(),
+        purchasedExtraOtherSlots:
+            (json['purchasedExtraOtherSlots'] as num?)?.toInt(),
+        extraSlotsExpireAt:
+            DateTime.tryParse(json['extraSlotsExpireAt']?.toString() ?? ''),
+      );
+
   bool get isPaid => status == 'paid';
   bool get isExpired => status == 'expired';
   bool get isPending => status == 'pending';
@@ -185,6 +224,6 @@ class PaymentService {
   static Future<PaymentStatus> checkStatus(String md5) async {
     // Backend route: GET /api/payments/khqr/:md5/status
     final res = await ApiClient.get('/payments/khqr/$md5/status');
-    return PaymentStatus(res['status']?.toString() ?? 'pending');
+    return PaymentStatus.fromJson(res);
   }
 }
