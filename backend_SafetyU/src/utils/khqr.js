@@ -21,6 +21,7 @@ const generatePaymentQR = ({
   amount,
   currency = "KHR",
   billNumber,
+  storeLabel,
 }) => {
   try {
     const accountId =
@@ -58,6 +59,11 @@ const generatePaymentQR = ({
       amount: numericAmount,
       billNumber: safeBillNumber,
       expirationTimestamp: expiresAt.getTime(),
+      // Only sent when paymentController needs to force a different QR
+      // (and therefore a different md5) after a collision.
+      ...(storeLabel
+        ? { storeLabel: String(storeLabel).substring(0, 25) }
+        : {}),
     };
 
     console.log("========== MINIMAL KHQR GENERATION ==========");

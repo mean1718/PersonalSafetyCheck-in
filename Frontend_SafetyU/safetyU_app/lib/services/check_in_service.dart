@@ -22,8 +22,17 @@ class CheckInService {
     double? longitude,
     double? destinationLatitude,
     double? destinationLongitude,
+    // The place's name ("Central Market") so trusted contacts see WHERE
+    // the person is going, and when they promised to be safe by so the
+    // server can alert contacts even if this phone goes dark.
+    String? destinationName,
+    DateTime? expectedEndAt,
   }) async {
     final data = await ApiClient.post('/checkins', {
+      if (destinationName != null && destinationName.trim().isNotEmpty)
+        'destinationName': destinationName.trim(),
+      if (expectedEndAt != null)
+        'expectedEndAt': expectedEndAt.toUtc().toIso8601String(),
       if (contactUserIds.isNotEmpty) 'contactUserIds': contactUserIds,
       'message': message,
       if (latitude != null) 'latitude': latitude,
@@ -35,6 +44,28 @@ class CheckInService {
     });
     final checkIn = data['checkIn'] as Map<String, dynamic>?;
     return checkIn?['_id']?.toString();
+  }
+
+  /// Tells the server the deadline moved (the person asked for more time).
+  /// Best-effort by design — the phone's own timer already moved.
+  static Future<void> extend(
+    String checkInId,
+    DateTime newEndAt, {
+    String? destinationName,
+    double? destinationLatitude,
+    double? destinationLongitude,
+    String? reason,
+  }) async {
+    await ApiClient.put('/checkins/$checkInId/extend', {
+      'expectedEndAt': newEndAt.toUtc().toIso8601String(),
+      if (reason != null && reason.trim().isNotEmpty) 'reason': reason.trim(),
+      if (destinationName != null && destinationName.trim().isNotEmpty)
+        'destinationName': destinationName.trim(),
+      if (destinationLatitude != null && destinationLongitude != null) ...{
+        'destinationLatitude': destinationLatitude,
+        'destinationLongitude': destinationLongitude,
+      },
+    });
   }
 
   static Future<void> complete(String checkInId) async {
@@ -76,6 +107,11 @@ class CheckInService {
   static Future<Map<String, dynamic>?> fetchLocation(String checkInId) async {
     try {
       return await ApiClient.get('/checkins/$checkInId/location');
+    } on ApiException catch (e) {
+      // 410 = the session really ended. Tell the caller so it can stop
+      // refreshing and say so, instead of treating it like a network blip.
+      if (e.statusCode == 410) return {'ended': true};
+      return null;
     } catch (_) {
       return null;
     }

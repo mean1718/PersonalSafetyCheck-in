@@ -33,7 +33,14 @@ const ANDROID_CHANNEL_BY_TYPE = {
   safety_alert: "safety_alerts_v2",
   checkin_completed: "safety_resolved",
   emergency_alert: "emergency_alerts",
+  checkin_arrived: "safety_resolved",
+  // The phone only creates the channels above; anything else falls back to
+  // a low-importance default and can be silently hidden.
+  payment_confirmed: "safety_resolved",
 };
+
+// Types that must reach the phone screen right now, not "sometime".
+const URGENT_TYPES = new Set(["safety_alert", "emergency_alert"]);
 
 async function sendPushToUser(userId, { title, body, data = {} }) {
   if (!messaging || !userId) return;
@@ -44,6 +51,8 @@ async function sendPushToUser(userId, { title, body, data = {} }) {
 
     const channelId = ANDROID_CHANNEL_BY_TYPE[data.type] || "safety_alerts";
 
+    const urgent = URGENT_TYPES.has(data.type);
+
     const response = await messaging.sendEachForMulticast({
       tokens,
       notification: { title, body },
@@ -52,13 +61,31 @@ async function sendPushToUser(userId, { title, body, data = {} }) {
       ),
       android: {
         priority: "high",
+        // An alert that arrives hours late is confusing and stale; if the
+        // phone is offline for longer than this, drop it (the alert is
+        // still in the app's list when it reconnects).
+        ttl: urgent ? 30 * 60 * 1000 : 24 * 60 * 60 * 1000,
         notification: {
           channelId,
           priority: "max",
           sound: "default",
+          // Show on the lock screen with full text.
+          visibility: "public",
         },
       },
-      apns: { payload: { aps: { sound: "default" } } },
+      apns: {
+        headers: {
+          // 10 = deliver immediately. Without it iOS may batch/delay.
+          "apns-priority": "10",
+          "apns-push-type": "alert",
+        },
+        payload: {
+          aps: {
+            sound: "default",
+            ...(urgent ? { "interruption-level": "time-sensitive" } : {}),
+          },
+        },
+      },
     });
 
     const deadTokens = [];

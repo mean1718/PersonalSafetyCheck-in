@@ -445,7 +445,10 @@ class _TrustedContactsScreenState extends State<TrustedContactsScreen> {
     final request = HelpRequest(
       requesterName: contact.fullName,
       requesterPhone: contact.phone,
-      destination: alert['message']?.toString() ?? 'their destination',
+      destination:
+          (alert['destinationName']?.toString().trim().isNotEmpty ?? false)
+              ? alert['destinationName'].toString()
+              : 'their destination',
       location: null,
       distanceKm: null,
       requestedAt: DateTime.tryParse(alert['notifiedAt']?.toString() ?? '') ??

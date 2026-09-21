@@ -168,11 +168,53 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
   String? _paymentError;
   bool _creatingPayment = false;
   Timer? _pollTimer;
+  // Ticks once a second while a QR is on screen so the "expires in" text
+  // actually counts down.
+  Timer? _clockTimer;
+  // The status check is async and can take several seconds. Without this
+  // guard the 3-second timer fired a NEW check while the previous one was
+  // still running, so the backend got several overlapping "is it paid?"
+  // calls for the same payment at once.
+  bool _pollInFlight = false;
+  int _consecutivePollErrors = 0;
+  String? _pollWarning;
+
+  void _stopTimers() {
+    _pollTimer?.cancel();
+    _clockTimer?.cancel();
+    _pollTimer = null;
+    _clockTimer = null;
+    _pollInFlight = false;
+  }
 
   @override
   void dispose() {
-    _pollTimer?.cancel();
+    _stopTimers();
     super.dispose();
+  }
+
+  /// Puts the plan the SERVER says the account now has onto this device.
+  /// (It used to credit locally — "+1 slot" forever, Pro with no expiry —
+  /// which drifted from what the backend enforces.)
+  void _applyPaidPlan(PaymentStatus status,
+      {int extraMain = 0, int extraOther = 0, bool pro = false}) {
+    final hasServerPlan = status.isPro != null ||
+        status.purchasedExtraMainSlots != null ||
+        status.purchasedExtraOtherSlots != null;
+    if (hasServerPlan) {
+      AppSession.instance.syncPlanFromBackend(
+        isPro: status.isPro,
+        proExpiresAt: status.proExpiresAt,
+        purchasedExtraMainSlots: status.purchasedExtraMainSlots,
+        purchasedExtraOtherSlots: status.purchasedExtraOtherSlots,
+        extraSlotsExpireAt: status.extraSlotsExpireAt,
+      );
+    } else if (pro) {
+      AppSession.instance.upgradeToPro();
+    } else {
+      AppSession.instance
+          .purchaseExtraSlots(extraMain: extraMain, extraOther: extraOther);
+    }
   }
 
   String _friendlyError(Object error) {
@@ -182,31 +224,129 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
     return 'Something went wrong creating the payment. Please try again.';
   }
 
-  void _startPolling({required VoidCallback onPaid}) {
-    _pollTimer?.cancel();
+  void _startPolling({required void Function(PaymentStatus status) onPaid}) {
+    _stopTimers();
+    _consecutivePollErrors = 0;
+    _pollWarning = null;
+
+    _clockTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted && _pendingPayment != null) setState(() {});
+    });
+
     _pollTimer = Timer.periodic(const Duration(seconds: 3), (_) async {
+      if (_pollInFlight) return;
       final payment = _pendingPayment;
       if (payment == null || !mounted) return;
+      _pollInFlight = true;
       try {
         final status = await PaymentService.checkStatus(payment.md5);
-        if (!mounted) return;
+        // The person may have cancelled (or started another payment) while
+        // this request was running — don't act on a stale answer.
+        if (!mounted || _pendingPayment?.md5 != payment.md5) return;
+        _consecutivePollErrors = 0;
         if (status.isPaid) {
-          _pollTimer?.cancel();
-          onPaid();
+          _stopTimers();
+          onPaid(status);
         } else if (status.isExpired) {
-          _pollTimer?.cancel();
+          _stopTimers();
           setState(() {
+            _pendingPayment = null;
             _paymentError =
                 'This QR code expired before payment was received. Please try again.';
             _step = _LimitStep.plans;
           });
+        } else {
+          final warning = status.checkError != null
+              ? 'Still checking with the bank…'
+              : null;
+          if (warning != _pollWarning) setState(() => _pollWarning = warning);
         }
-        // isPending: keep waiting quietly, no need to update UI each tick.
       } catch (_) {
-        // Transient network hiccup while polling — try again next tick
-        // rather than interrupting the person mid-payment.
+        // Keep polling — but after a few failures in a row, say so instead
+        // of looking frozen forever.
+        if (!mounted) return;
+        _consecutivePollErrors++;
+        if (_consecutivePollErrors >= 3 && _pollWarning == null) {
+          setState(() => _pollWarning =
+              'Having trouble reaching the server. Still trying…');
+        }
+      } finally {
+        _pollInFlight = false;
       }
     });
+  }
+
+  // Shared status line under the QR: spinner + countdown while waiting, or
+  // the error with a Try again button (the old screen just spun forever if
+  // the QR could not be created).
+  Widget _paymentStatusArea({required VoidCallback onRetry}) {
+    if (_paymentError != null) {
+      return Column(
+        children: [
+          Text(
+            _paymentError!,
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontSize: 12, color: Colors.red),
+          ),
+          const SizedBox(height: 6),
+          TextButton.icon(
+            onPressed: _creatingPayment ? null : onRetry,
+            icon: const Icon(Icons.refresh, size: 16),
+            label: const Text('Try again'),
+          ),
+        ],
+      );
+    }
+
+    String label;
+    if (_creatingPayment || _pendingPayment == null) {
+      label = 'Generating your KHQR code…';
+    } else {
+      final left = _pendingPayment!.expiresAt.difference(DateTime.now());
+      if (left.isNegative) {
+        label = 'Finalizing payment check…';
+      } else {
+        final m = left.inMinutes.toString().padLeft(2, '0');
+        final sec = (left.inSeconds % 60).toString().padLeft(2, '0');
+        label = 'Waiting for payment… expires in $m:$sec';
+      }
+    }
+    return Column(
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            SizedBox(
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: AppColors.navy,
+              ),
+            ),
+            const SizedBox(width: 10),
+            Flexible(
+              child: Text(
+                label,
+                style: TextStyle(
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.textSecondary,
+                ),
+              ),
+            ),
+          ],
+        ),
+        if (_pollWarning != null) ...[
+          const SizedBox(height: 4),
+          Text(
+            _pollWarning!,
+            textAlign: TextAlign.center,
+            style: TextStyle(fontSize: 11, color: AppColors.textMuted),
+          ),
+        ],
+      ],
+    );
   }
 
   // ---------------------------------------------------------------------------
@@ -240,11 +380,11 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
         _creatingPayment = false;
       });
       _startPolling(
-        onPaid: () {
+        onPaid: (status) {
           if (!mounted) return;
-          // Credit locally only after the backend confirms the real
-          // Bakong payment settled.
-          AppSession.instance.upgradeToPro();
+          // Only after the backend confirms the real Bakong payment
+          // settled, and using the plan the backend reports.
+          _applyPaidPlan(status, pro: true);
           setState(() => _step = _LimitStep.proSuccess);
         },
       );
@@ -286,12 +426,9 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
         _creatingPayment = false;
       });
       _startPolling(
-        onPaid: () {
+        onPaid: (status) {
           if (!mounted) return;
-          AppSession.instance.purchaseExtraSlots(
-            extraMain: extraMain,
-            extraOther: extraOther,
-          );
+          _applyPaidPlan(status, extraMain: extraMain, extraOther: extraOther);
           setState(() => _step = _LimitStep.paySuccess);
         },
       );
@@ -977,37 +1114,7 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
         const SizedBox(height: 18),
         _khqrPanel(),
         const SizedBox(height: 16),
-        if (_paymentError == null)
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              SizedBox(
-                width: 16,
-                height: 16,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  color: AppColors.navy,
-                ),
-              ),
-              const SizedBox(width: 10),
-              Text(
-                _creatingPayment
-                    ? 'Generating your KHQR code…'
-                    : 'Waiting for payment confirmation…',
-                style: TextStyle(
-                  fontSize: 12.5,
-                  fontWeight: FontWeight.w600,
-                  color: AppColors.textSecondary,
-                ),
-              ),
-            ],
-          )
-        else
-          Text(
-            _paymentError!,
-            textAlign: TextAlign.center,
-            style: const TextStyle(fontSize: 12, color: Colors.red),
-          ),
+        _paymentStatusArea(onRetry: _beginProPayment),
         const SizedBox(height: 8),
         Text(
           'Open your Bakong-linked banking or e-wallet app and scan this '
@@ -1022,7 +1129,7 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
         const SizedBox(height: 16),
         TextButton(
           onPressed: () {
-            _pollTimer?.cancel();
+            _stopTimers();
             setState(() {
               _selectedPlan = 'pro';
               _pendingPayment = null;
@@ -1053,16 +1160,23 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: AppColors.border),
       ),
-      child: _creatingPayment || _pendingPayment == null
+      child: (!_creatingPayment &&
+              _pendingPayment == null &&
+              _paymentError != null)
           ? Center(
-              child: CircularProgressIndicator(color: AppColors.navy),
+              child:
+                  Icon(Icons.qr_code_2, size: 64, color: AppColors.textMuted),
             )
-          : QrImageView(
-              data: _pendingPayment!.qrString,
-              version: QrVersions.auto,
-              size: 180,
-              gapless: true,
-            ),
+          : _creatingPayment || _pendingPayment == null
+              ? Center(
+                  child: CircularProgressIndicator(color: AppColors.navy),
+                )
+              : QrImageView(
+                  data: _pendingPayment!.qrString,
+                  version: QrVersions.auto,
+                  size: 180,
+                  gapless: true,
+                ),
     );
   }
 
@@ -1401,37 +1515,7 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
         const SizedBox(height: 18),
         _khqrPanel(),
         const SizedBox(height: 16),
-        if (_paymentError == null)
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              SizedBox(
-                width: 16,
-                height: 16,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  color: AppColors.navy,
-                ),
-              ),
-              const SizedBox(width: 10),
-              Text(
-                _creatingPayment
-                    ? 'Generating your KHQR code…'
-                    : 'Waiting for payment confirmation…',
-                style: TextStyle(
-                  fontSize: 12.5,
-                  fontWeight: FontWeight.w600,
-                  color: AppColors.textSecondary,
-                ),
-              ),
-            ],
-          )
-        else
-          Text(
-            _paymentError!,
-            textAlign: TextAlign.center,
-            style: const TextStyle(fontSize: 12, color: Colors.red),
-          ),
+        _paymentStatusArea(onRetry: _beginPayPayment),
         const SizedBox(height: 8),
         Text(
           'Open your Bakong-linked banking or e-wallet app and scan this '
@@ -1446,7 +1530,7 @@ class _LimitReachedDialogState extends State<_LimitReachedDialog> {
         const SizedBox(height: 16),
         TextButton(
           onPressed: () {
-            _pollTimer?.cancel();
+            _stopTimers();
             setState(() {
               _selectedPlan = 'pay';
               _pendingPayment = null;

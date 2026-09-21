@@ -7,7 +7,10 @@ const getMyNotifications = async (req, res) => {
   try {
     const notifications = await Notification.find({ receiver: req.user.id })
       .populate("sender", "name phone")
-      .populate("checkIn", "status")
+      .populate(
+        "checkIn",
+        "status message destinationName expectedEndAt arrivedAt",
+      )
       .sort({ createdAt: -1 });
     return res.json({ notifications });
   } catch (_) {
@@ -24,7 +27,10 @@ const getMyActiveSafetyAlerts = async (req, res) => {
       type: "safety_alert",
     })
       .populate("sender", "name phone")
-      .populate("checkIn", "status message startedAt")
+      .populate(
+        "checkIn",
+        "status message startedAt destinationName expectedEndAt arrivedAt",
+      )
       .sort({ createdAt: -1 });
     const alerts = notifications
       .filter((notification) =>
@@ -43,6 +49,11 @@ const getMyActiveSafetyAlerts = async (req, res) => {
         ownerPhone: notification.sender?.phone || "",
         sessionStatus: notification.checkIn?.status || null,
         message: notification.checkIn?.message || notification.message,
+        // The real place the person is headed (the alert text above is not
+        // a destination). Empty for alerts sent from chat with no session.
+        destinationName: notification.checkIn?.destinationName || "",
+        expectedEndAt: notification.checkIn?.expectedEndAt || null,
+        arrivedAt: notification.checkIn?.arrivedAt || null,
         notifiedAt: notification.createdAt,
         responseStatus: notification.responseStatus || "pending",
         respondedAt: notification.respondedAt || null,

@@ -20,167 +20,137 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
   List<Map<String, dynamic>> _backendNotifications = [];
   List<Map<String, dynamic>> _trustRequests = [];
 
- @override
-void initState() {
-  super.initState();
+  @override
+  void initState() {
+    super.initState();
 
-  // Do NOT mark backend emergency notifications as read here.
-  //
-  // A responder must explicitly Take Case before the
-  // emergency notification becomes read.
+    // Do NOT mark backend emergency notifications as read here.
+    //
+    // A responder must explicitly Take Case before the
+    // emergency notification becomes read.
 
-  WidgetsBinding.instance.addPostFrameCallback((_) {
-    AppSession.instance.markAllNotificationsRead();
-  });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      AppSession.instance.markAllNotificationsRead();
+    });
 
-  _loadBackendNotifications();
-  _loadTrustRequests();
-}
+    _loadBackendNotifications();
+    _loadTrustRequests();
+  }
 
   Future<void> _loadBackendNotifications() async {
-  try {
-    final notifications =
-        await NotificationService.fetchAll();
+    try {
+      final notifications = await NotificationService.fetchAll();
 
-    // ---------------------------------------------------------
-    // DEDUPLICATE EMERGENCY ALERTS
-    //
-    // Other notification types are kept normally.
-    // Emergency alerts are grouped by Emergency._id.
-    // ---------------------------------------------------------
+      // ---------------------------------------------------------
+      // DEDUPLICATE EMERGENCY ALERTS
+      //
+      // Other notification types are kept normally.
+      // Emergency alerts are grouped by Emergency._id.
+      // ---------------------------------------------------------
 
-    final List<Map<String, dynamic>>
-        result = [];
+      final List<Map<String, dynamic>> result = [];
 
-    final Map<String, Map<String, dynamic>>
-        emergencyById = {};
+      final Map<String, Map<String, dynamic>> emergencyById = {};
 
-    for (final notification
-        in notifications) {
-      if (notification['type']?.toString() !=
-          'emergency_alert') {
-        result.add(notification);
-        continue;
+      for (final notification in notifications) {
+        if (notification['type']?.toString() != 'emergency_alert') {
+          result.add(notification);
+          continue;
+        }
+
+        final emergencyValue = notification['emergency'];
+
+        final emergencyId = emergencyValue is Map<String, dynamic>
+            ? emergencyValue['_id']?.toString()
+            : emergencyValue?.toString();
+
+        // If an emergency notification has no emergency ID,
+        // keep it rather than silently deleting it.
+        if (emergencyId == null || emergencyId.isEmpty) {
+          result.add(notification);
+          continue;
+        }
+
+        final existing = emergencyById[emergencyId];
+
+        if (existing == null) {
+          emergencyById[emergencyId] = notification;
+          continue;
+        }
+
+        // Prefer unread.
+        final existingUnread = existing['isRead'] != true;
+
+        final currentUnread = notification['isRead'] != true;
+
+        if (!existingUnread && currentUnread) {
+          emergencyById[emergencyId] = notification;
+          continue;
+        }
+
+        // Otherwise prefer newest.
+        final existingTime = DateTime.tryParse(
+              existing['createdAt']?.toString() ?? '',
+            ) ??
+            DateTime.fromMillisecondsSinceEpoch(
+              0,
+            );
+
+        final currentTime = DateTime.tryParse(
+              notification['createdAt']?.toString() ?? '',
+            ) ??
+            DateTime.fromMillisecondsSinceEpoch(
+              0,
+            );
+
+        if (currentTime.isAfter(existingTime)) {
+          emergencyById[emergencyId] = notification;
+        }
       }
 
-      final emergencyValue =
-          notification['emergency'];
+      result.addAll(
+        emergencyById.values,
+      );
 
-      final emergencyId =
-          emergencyValue
-                  is Map<String, dynamic>
-              ? emergencyValue['_id']
-                    ?.toString()
-              : emergencyValue?.toString();
+      // Newest first.
+      result.sort((a, b) {
+        final aTime = DateTime.tryParse(
+              a['createdAt']?.toString() ?? '',
+            ) ??
+            DateTime.fromMillisecondsSinceEpoch(
+              0,
+            );
 
-      // If an emergency notification has no emergency ID,
-      // keep it rather than silently deleting it.
-      if (emergencyId == null ||
-          emergencyId.isEmpty) {
-        result.add(notification);
-        continue;
+        final bTime = DateTime.tryParse(
+              b['createdAt']?.toString() ?? '',
+            ) ??
+            DateTime.fromMillisecondsSinceEpoch(
+              0,
+            );
+
+        return bTime.compareTo(aTime);
+      });
+
+      if (!mounted) {
+        return;
       }
 
-      final existing =
-          emergencyById[emergencyId];
+      setState(() {
+        _backendNotifications = result;
+      });
 
-      if (existing == null) {
-        emergencyById[emergencyId] =
-            notification;
-        continue;
-      }
-
-      // Prefer unread.
-      final existingUnread =
-          existing['isRead'] != true;
-
-      final currentUnread =
-          notification['isRead'] != true;
-
-      if (!existingUnread &&
-          currentUnread) {
-        emergencyById[emergencyId] =
-            notification;
-        continue;
-      }
-
-      // Otherwise prefer newest.
-      final existingTime =
-          DateTime.tryParse(
-                existing['createdAt']
-                        ?.toString() ??
-                    '',
-              ) ??
-              DateTime.fromMillisecondsSinceEpoch(
-                0,
-              );
-
-      final currentTime =
-          DateTime.tryParse(
-                notification['createdAt']
-                        ?.toString() ??
-                    '',
-              ) ??
-              DateTime.fromMillisecondsSinceEpoch(
-                0,
-              );
-
-      if (currentTime
-          .isAfter(existingTime)) {
-        emergencyById[emergencyId] =
-            notification;
-      }
+      // IMPORTANT:
+      //
+      // Do NOT mark notifications read here.
+      //
+      // Emergency notifications become read only when
+      // the responder actually takes the case.
+    } catch (e) {
+      debugPrint(
+        'Failed to load backend notifications: $e',
+      );
     }
-
-    result.addAll(
-      emergencyById.values,
-    );
-
-    // Newest first.
-    result.sort((a, b) {
-      final aTime =
-          DateTime.tryParse(
-                a['createdAt']
-                        ?.toString() ??
-                    '',
-              ) ??
-              DateTime.fromMillisecondsSinceEpoch(
-                0,
-              );
-
-      final bTime =
-          DateTime.tryParse(
-                b['createdAt']
-                        ?.toString() ??
-                    '',
-              ) ??
-              DateTime.fromMillisecondsSinceEpoch(
-                0,
-              );
-
-      return bTime.compareTo(aTime);
-    });
-
-    if (!mounted) {
-      return;
-    }
-
-    setState(() {
-      _backendNotifications = result;
-    });
-
-    // IMPORTANT:
-    //
-    // Do NOT mark notifications read here.
-    //
-    // Emergency notifications become read only when
-    // the responder actually takes the case.
-  } catch (e) {
-    debugPrint(
-      'Failed to load backend notifications: $e',
-    );
   }
-}
 
   Future<void> _loadTrustRequests() async {
     try {
@@ -248,7 +218,10 @@ void initState() {
     final request = HelpRequest(
       requesterName: owner.fullName,
       requesterPhone: owner.phone,
-      destination: notification['message']?.toString() ?? 'their destination',
+      destination:
+          (checkIn?['destinationName']?.toString().trim().isNotEmpty ?? false)
+              ? checkIn!['destinationName'].toString()
+              : 'their destination',
       location: null,
       distanceKm: null,
       requestedAt:

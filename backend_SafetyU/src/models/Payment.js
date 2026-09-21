@@ -21,6 +21,13 @@ const paymentSchema = new mongoose.Schema(
     extraOtherSlots: { type: Number, default: 0 },
     amount: { type: Number, required: true },
     currency: { type: String, enum: ["USD", "KHR"], required: true },
+    // The currency/amount actually printed on the KHQR (the fields above are
+    // always the internal USD ledger amount). These were being set by
+    // paymentController but were missing from this schema, so Mongoose
+    // silently dropped them: reused QRs came back with the wrong currency
+    // and the amount could never be verified against Bakong.
+    qrCurrency: { type: String, enum: ["USD", "KHR"], default: "USD" },
+    qrAmount: { type: Number },
     qrString: { type: String, required: true },
     // NOT unique: Bakong's KHQR md5 for an individual dynamic QR is
     // computed from account + amount + currency + merchant fields, and in
@@ -39,6 +46,12 @@ const paymentSchema = new mongoose.Schema(
     },
     expiresAt: { type: Date, required: true },
     paidAt: { type: Date },
+    // Set only once the purchase has actually been applied to the User
+    // (Pro activated / slots granted). Lets a half-finished confirmation be
+    // safely retried without ever crediting twice.
+    credited: { type: Boolean, default: false },
+    // Bakong's own transaction hash, kept as proof of what confirmed this.
+    bakongHash: { type: String },
   },
   { timestamps: true },
 );

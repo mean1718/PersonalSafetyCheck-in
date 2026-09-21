@@ -37,7 +37,8 @@ class ActiveSessionScreen extends StatefulWidget {
   State<ActiveSessionScreen> createState() => _ActiveSessionScreenState();
 }
 
-class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
+class _ActiveSessionScreenState extends State<ActiveSessionScreen>
+    with WidgetsBindingObserver {
   Timer? _timer;
   StreamSubscription<Position>? _positionSub;
   GoogleMapController? _mapController;
@@ -120,6 +121,22 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
   bool _isInitialized = false;
 
   int _secondsRemaining = 30 * 60;
+  // The countdown is driven by these ABSOLUTE times, not by counting down
+  // one tick at a time. A `Timer.periodic` that just did `seconds--` stops
+  // (or runs slowly) whenever the phone is locked or the app is in the
+  // background -- so the clock froze and the "you missed your deadline"
+  // alert to trusted contacts never fired on time. Now the remaining time
+  // is always recomputed from the real clock, including the instant the app
+  // comes back to the foreground.
+  DateTime? _sessionEndTime;
+  DateTime _stageEndTime = DateTime.now();
+
+  int _secondsUntil(DateTime? t) {
+    if (t == null) return 0;
+    final ms = t.difference(DateTime.now()).inMilliseconds;
+    return ms <= 0 ? 0 : (ms / 1000).ceil();
+  }
+
   String _destination = 'Central Market';
   String _expectedTimeStr = '';
   LatLng _destinationCoords = const LatLng(11.5696, 104.9210);
@@ -191,6 +208,7 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
   void initState() {
     super.initState();
     _sessionStartedAt = DateTime.now();
+    WidgetsBinding.instance.addObserver(this);
     // Fresh session — clear any leftover response tracking from a
     // previous alert so Home only ever shows the current one.
     AppSession.instance.clearCurrentAlertResponses();
@@ -201,6 +219,7 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     AppSession.instance.removeListener(_onSessionChanged);
     _timer?.cancel();
     _stageTimer?.cancel();
@@ -208,6 +227,20 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
     _positionSub?.cancel();
     _locationPushTimer?.cancel();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Back from the background/lock screen: catch the clocks up to real
+    // time right now (and fire any deadline that passed while away)
+    // instead of waiting for a timer that may have been paused.
+    if (state != AppLifecycleState.resumed || !mounted) return;
+    if (_sessionEndedAsSafe) return;
+    if (_timer?.isActive ?? false) _onMainTick();
+    final stageTimer = _stageTimer;
+    if (stageTimer != null && stageTimer.isActive) {
+      _onStageTick(stageTimer, _stage);
+    }
   }
 
   void _onSessionChanged() {
@@ -299,6 +332,7 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
     }
 
     _isInitialized = true;
+    _sessionEndTime = DateTime.now().add(Duration(seconds: _secondsRemaining));
     _startTimer();
     _initLocationTracking();
     _startBackendCheckIn();
@@ -341,6 +375,8 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
     _startBackendCheckInFuture = CheckInService.start(
       contactUserIds: _confirmedNotifyContactIds,
       message: 'Safety session to $_destination',
+      destinationName: _destination,
+      expectedEndAt: _sessionEndTime,
       latitude: pos?.latitude,
       longitude: pos?.longitude,
       // So a trusted contact's Alert Detail screen can show where this
@@ -491,20 +527,24 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
 
   void _startTimer() {
     _timer?.cancel();
-    _timer = Timer.periodic(const Duration(seconds: 1), (Timer timer) {
-      if (!mounted) {
-        timer.cancel();
-        return;
-      }
-      if (_secondsRemaining > 0) {
-        setState(() => _secondsRemaining--);
-      } else {
-        timer.cancel();
-        if (!_isAwaitingResponse && !_emergencyTriggered) {
-          _enterEscalation(_EscalationStage.main);
-        }
-      }
-    });
+    _timer = Timer.periodic(const Duration(seconds: 1), (_) => _onMainTick());
+  }
+
+  void _onMainTick() {
+    if (!mounted) {
+      _timer?.cancel();
+      return;
+    }
+    final left = _secondsUntil(_sessionEndTime);
+    if (left > 0) {
+      if (left != _secondsRemaining) setState(() => _secondsRemaining = left);
+      return;
+    }
+    _timer?.cancel();
+    setState(() => _secondsRemaining = 0);
+    if (!_isAwaitingResponse && !_emergencyTriggered) {
+      _enterEscalation(_EscalationStage.main);
+    }
   }
 
   // Guards _endSessionAsSafe against running twice — e.g. the owner taps
@@ -620,6 +660,8 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
       _isAwaitingResponse = true;
       _stage = stage;
       _stageSecondsRemaining = _stageGracePeriodSeconds;
+      _stageEndTime =
+          DateTime.now().add(const Duration(seconds: _stageGracePeriodSeconds));
     });
 
     // Real alert feedback so the person notices even if the phone is face
@@ -636,33 +678,41 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
 
     _syncEscalationToBackend(stage);
     _stageTimer?.cancel();
-    _stageTimer = Timer.periodic(const Duration(seconds: 1), (Timer timer) {
-      if (!mounted) {
-        timer.cancel();
-        return;
+    _stageTimer = Timer.periodic(
+      const Duration(seconds: 1),
+      (Timer timer) => _onStageTick(timer, stage),
+    );
+  }
+
+  void _onStageTick(Timer timer, _EscalationStage stage) {
+    if (!mounted) {
+      timer.cancel();
+      return;
+    }
+    if (_someoneConfirmedHelp()) {
+      // Don't wait for this stage's countdown to run out — the moment
+      // anyone confirms, stop ticking toward the next, louder stage.
+      timer.cancel();
+      setState(() {});
+      return;
+    }
+    final left = _secondsUntil(_stageEndTime);
+    if (left > 0) {
+      if (left != _stageSecondsRemaining) {
+        setState(() => _stageSecondsRemaining = left);
       }
-      if (_someoneConfirmedHelp()) {
-        // Don't wait for this stage's countdown to run out — the moment
-        // anyone confirms, stop ticking toward the next, louder stage.
-        timer.cancel();
-        setState(() {});
-        return;
-      }
-      if (_stageSecondsRemaining > 0) {
-        setState(() => _stageSecondsRemaining--);
-      } else {
-        timer.cancel();
-        // Nobody at this stage responded in time — record that on Home for
-        // every one of them, not just one, before moving on.
-        for (final target in _currentStageTargets) {
-          AppSession.instance.markContactTimedOut(target.id);
-        }
-        final next = stage == _EscalationStage.main
-            ? _EscalationStage.secondary
-            : _EscalationStage.emergency;
-        _enterEscalation(next);
-      }
-    });
+      return;
+    }
+    timer.cancel();
+    // Nobody at this stage responded in time — record that on Home for
+    // every one of them, not just one, before moving on.
+    for (final target in _currentStageTargets) {
+      AppSession.instance.markContactTimedOut(target.id);
+    }
+    final next = stage == _EscalationStage.main
+        ? _EscalationStage.secondary
+        : _EscalationStage.emergency;
+    _enterEscalation(next);
   }
 
   bool _someoneConfirmedHelp() => AppSession.instance.currentAlertResponses
@@ -1047,7 +1097,11 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
 
   void _pushLocationToBackend() {
     final checkInId = _checkInId;
-    final position = _currentPosition;
+    // Fall back to the last position the app ever got: if the live GPS
+    // fix is slow (or the person is standing still, so the movement
+    // stream stays quiet), contacts still get a fresh "last seen" time
+    // instead of a location that silently goes stale for minutes.
+    final position = _currentPosition ?? AppSession.instance.lastKnownPosition;
     if (checkInId == null || position == null) return;
     CheckInService.updateLocation(
       checkInId,
@@ -1057,6 +1111,15 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
   }
 
   Future<void> _initLocationTracking() async {
+    // Start the 8-second location heartbeat FIRST. It used to start only
+    // at the very end, so any early exit below (permission prompt, slow
+    // first GPS fix, a browser that answers late) meant the timer never
+    // started and the trusted contact saw "last seen 4 min ago" forever.
+    _locationPushTimer?.cancel();
+    _locationPushTimer = Timer.periodic(
+      const Duration(seconds: 8),
+      (_) => _pushLocationToBackend(),
+    );
     try {
       final bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
       if (!serviceEnabled) {
@@ -1080,24 +1143,37 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
         return;
       }
 
-      final Position initial = await Geolocator.getCurrentPosition(
-          desiredAccuracy: LocationAccuracy.high);
+      // A slow first GPS fix must NOT switch live sharing off: if it
+      // fails or times out we still subscribe to the position stream
+      // below, which delivers the first fix whenever it arrives.
+      try {
+        final Position initial = await Geolocator.getCurrentPosition(
+          desiredAccuracy: LocationAccuracy.high,
+          timeLimit: const Duration(seconds: 20),
+        );
+        if (!mounted) {
+          return;
+        }
+        final initialLatLng = LatLng(initial.latitude, initial.longitude);
+        setState(() {
+          _currentPosition = initialLatLng;
+          _locationStatusMessage = null;
+        });
+        AppSession.instance.updateLastKnownPosition(initialLatLng);
+        _fetchWalkingRoute();
+
+        try {
+          _mapController?.animateCamera(
+            CameraUpdate.newLatLngZoom(_currentPosition!, 15.0),
+          );
+        } catch (_) {}
+      } catch (e) {
+        debugPrint('[ACTIVE] First GPS fix not ready yet: $e');
+        _setLocationStatus('Still looking for your GPS position…');
+      }
       if (!mounted) {
         return;
       }
-      final initialLatLng = LatLng(initial.latitude, initial.longitude);
-      setState(() {
-        _currentPosition = initialLatLng;
-        _locationStatusMessage = null;
-      });
-      AppSession.instance.updateLastKnownPosition(initialLatLng);
-      _fetchWalkingRoute();
-
-      try {
-        _mapController?.animateCamera(
-          CameraUpdate.newLatLngZoom(_currentPosition!, 15.0),
-        );
-      } catch (_) {}
 
       _positionSub?.cancel();
       _positionSub = Geolocator.getPositionStream(
@@ -1109,7 +1185,10 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
             return;
           }
           final latLng = LatLng(position.latitude, position.longitude);
-          setState(() => _currentPosition = latLng);
+          setState(() {
+            _currentPosition = latLng;
+            _locationStatusMessage = null;
+          });
           // Keep the last-known-position cache fresh on every real fix, so
           // if GPS/connectivity drops right before an escalation, we still
           // have a real (if slightly old) location to send instead of
@@ -1134,11 +1213,6 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
       debugPrint('[ACTIVE] Location initialization error: $e');
       _setLocationStatus('Could not get your current location.');
     }
-    _locationPushTimer?.cancel();
-    _locationPushTimer = Timer.periodic(
-      const Duration(seconds: 8),
-      (_) => _pushLocationToBackend(),
-    );
   }
 
   void _setLocationStatus(String message) {
@@ -1470,6 +1544,8 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
                                   result['extraSeconds'] as int? ?? 0;
                               final String? newDestination =
                                   result['destination'] as String?;
+                              final String? delayReason =
+                                  result['reason'] as String?;
                               final double? newLat =
                                   (result['latitude'] as num?)?.toDouble();
                               final double? newLng =
@@ -1477,7 +1553,15 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
 
                               setState(() {
                                 if (extraSeconds > 0) {
-                                  _secondsRemaining += extraSeconds;
+                                  final now = DateTime.now();
+                                  final base = (_sessionEndTime != null &&
+                                          _sessionEndTime!.isAfter(now))
+                                      ? _sessionEndTime!
+                                      : now;
+                                  _sessionEndTime =
+                                      base.add(Duration(seconds: extraSeconds));
+                                  _secondsRemaining =
+                                      _secondsUntil(_sessionEndTime);
                                   _hadDelay = true;
                                   _expectedTimeStr =
                                       _formatClockFromNow(_secondsRemaining);
@@ -1506,6 +1590,31 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
                                       _stageGracePeriodSeconds;
                                 }
                               });
+
+                              // Tell the server too, so the missed-deadline
+                              // alert and the contacts' view follow the new
+                              // time / destination instead of the old ones.
+                              if ((extraSeconds > 0 ||
+                                      (newDestination != null &&
+                                          newDestination.isNotEmpty)) &&
+                                  _sessionEndTime != null) {
+                                final endTime = _sessionEndTime!;
+                                (_startBackendCheckInFuture ??
+                                        Future<String?>.value(_checkInId))
+                                    .then((id) async {
+                                  final checkInId = id ?? _checkInId;
+                                  if (checkInId == null) return;
+                                  await CheckInService.extend(
+                                    checkInId,
+                                    endTime,
+                                    destinationName: newDestination,
+                                    destinationLatitude: newLat,
+                                    destinationLongitude: newLng,
+                                    reason: delayReason,
+                                  );
+                                }).catchError((e) => debugPrint(
+                                        'Deadline sync skipped: $e'));
+                              }
 
                               if (newLat != null && newLng != null) {
                                 _fetchWalkingRoute();
