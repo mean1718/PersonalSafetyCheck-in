@@ -630,7 +630,7 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen>
   // reassurance popup on the owner's screen — the session itself, and
   // Home's "SESSION ACTIVE" card, stayed active until the owner also
   // separately tapped "I'm Safe" themselves.
-  void _endSessionAsSafe({required bool navigateToSafeScreen}) {
+  Future<void> _endSessionAsSafe({required bool navigateToSafeScreen}) async {
     if (_sessionEndedAsSafe) return;
     _sessionEndedAsSafe = true;
 
@@ -639,6 +639,23 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen>
     _alertStatusPollTimer?.cancel();
     _logHistory(SessionOutcome.safe);
     _syncSessionEndToBackend();
+
+    // One last check for anyone who responded (e.g. "Can Help") in the
+    // gap between the last 6s poll and right now -- without this, Home's
+    // "Your Alert Status" froze on whatever it last happened to see,
+    // showing a contact as still "Waiting..." forever even after they'd
+    // already responded, simply because nothing ever asked again after
+    // this exact moment. Best-effort and bounded, so a slow/offline
+    // backend can't delay actually ending the session.
+    if (_checkInId != null) {
+      try {
+        final data = await CheckInService.alertStatus(_checkInId!)
+            .timeout(const Duration(seconds: 4));
+        _applyAlertStatus(data);
+      } catch (e) {
+        debugPrint('Final alert status refresh skipped: $e');
+      }
+    }
 
     // This session is over, so stop re-fetching/polling it — but keep
     // who-was-notified visible on Home as a "Safe" confirmation instead

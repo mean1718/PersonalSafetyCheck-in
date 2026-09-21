@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:geolocator/geolocator.dart';
 import '../services/marker_icons.dart';
 import '../services/directions_service.dart';
 import '../services/check_in_service.dart';
@@ -116,15 +117,22 @@ class AlertResponseResultScreen extends StatelessWidget {
                           builder: (context, snapshot) {
                             final liveIcon = snapshot.data?.liveIcon;
                             final destIcon = snapshot.data?.destinationIcon;
+                            final meIcon = snapshot.data?.meIcon;
                             final route = snapshot.data?.route;
+                            final myPosition = snapshot.data?.myPosition;
                             return GoogleMap(
                               onMapCreated: (controller) {
-                                if (location != null && destination != null) {
+                                final points = [
+                                  if (location != null) location,
+                                  if (destination != null) destination,
+                                  if (myPosition != null) myPosition,
+                                ];
+                                if (points.length > 1) {
                                   Future.delayed(
                                       const Duration(milliseconds: 200), () {
                                     controller.animateCamera(
                                       CameraUpdate.newLatLngBounds(
-                                        _boundsFor([location, destination]),
+                                        _boundsFor(points),
                                         40,
                                       ),
                                     );
@@ -135,17 +143,29 @@ class AlertResponseResultScreen extends StatelessWidget {
                                 target: location ?? destination!,
                                 zoom: 15,
                               ),
-                              polylines: route == null
-                                  ? {}
-                                  : {
-                                      Polyline(
-                                        polylineId:
-                                            const PolylineId('to-destination'),
-                                        points: route.points,
-                                        width: 4,
-                                        color: AppColors.navy,
-                                      ),
-                                    },
+                              polylines: {
+                                if (route != null)
+                                  Polyline(
+                                    polylineId:
+                                        const PolylineId('to-destination'),
+                                    points: route.points,
+                                    width: 4,
+                                    color: AppColors.navy,
+                                  ),
+                                // The line from the viewer to the person --
+                                // straight-line is fine here (unlike Alert
+                                // Detail's own live road route) since this
+                                // is a one-time snapshot, not a screen the
+                                // person is meant to navigate by.
+                                if (myPosition != null && location != null)
+                                  Polyline(
+                                    polylineId:
+                                        const PolylineId('to-me-straight'),
+                                    points: [myPosition, location],
+                                    width: 3,
+                                    color: const Color(0xFF2F80ED),
+                                  ),
+                              },
                               markers: {
                                 if (location != null)
                                   Marker(
@@ -164,6 +184,14 @@ class AlertResponseResultScreen extends StatelessWidget {
                                         BitmapDescriptor.defaultMarker,
                                     infoWindow:
                                         const InfoWindow(title: 'Destination'),
+                                  ),
+                                if (myPosition != null)
+                                  Marker(
+                                    markerId: const MarkerId('me'),
+                                    position: myPosition,
+                                    icon: meIcon ??
+                                        BitmapDescriptor.defaultMarker,
+                                    infoWindow: const InfoWindow(title: 'You'),
                                   ),
                               },
                             );
@@ -202,6 +230,7 @@ class AlertResponseResultScreen extends StatelessWidget {
     final icons = await Future.wait([
       MarkerIcons.destination(context),
       MarkerIcons.contactSelected(context),
+      MarkerIcons.me(context),
     ]);
     RouteResult? route;
     if (location != null && destination != null) {
@@ -212,8 +241,41 @@ class AlertResponseResultScreen extends StatelessWidget {
         debugPrint('Route fetch failed: $e');
       }
     }
+    // The viewer's OWN position (blue pin) -- Alert Detail already shows
+    // this alongside the person's live location and their destination,
+    // but this popup only ever showed the other two. A single, one-time
+    // fix (not continuously tracked the way Alert Detail's is -- this
+    // dialog is a quick look, not a live-tracking screen) is enough to
+    // put the same three-pin picture here too. Best-effort: no
+    // permission/no signal just means this pin doesn't show, same as
+    // everywhere else location fetches are optional in this app.
+    LatLng? myPosition;
+    try {
+      final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (serviceEnabled) {
+        var permission = await Geolocator.checkPermission();
+        if (permission == LocationPermission.denied) {
+          permission = await Geolocator.requestPermission();
+        }
+        if (permission == LocationPermission.always ||
+            permission == LocationPermission.whileInUse) {
+          final position = await Geolocator.getCurrentPosition(
+            desiredAccuracy: LocationAccuracy.medium,
+            timeLimit: const Duration(seconds: 6),
+          );
+          myPosition = LatLng(position.latitude, position.longitude);
+        }
+      }
+    } catch (e) {
+      debugPrint('My-position fetch skipped: $e');
+    }
     return _MapAssets(
-        liveIcon: icons[0], destinationIcon: icons[1], route: route);
+      liveIcon: icons[0],
+      destinationIcon: icons[1],
+      meIcon: icons[2],
+      route: route,
+      myPosition: myPosition,
+    );
   }
 
   /// Smallest LatLngBounds containing every point given -- fits both the
@@ -558,16 +620,20 @@ class _ResultScaffold extends StatelessWidget {
 }
 
 /// Bundle of what the live-location popup's map needs to render in one
-/// go: both marker icons and, when both endpoints are known, the actual
+/// go: all marker icons and, when both endpoints are known, the actual
 /// road/walking route between them.
 class _MapAssets {
   final BitmapDescriptor liveIcon;
   final BitmapDescriptor destinationIcon;
+  final BitmapDescriptor meIcon;
   final RouteResult? route;
+  final LatLng? myPosition;
 
   const _MapAssets({
     required this.liveIcon,
     required this.destinationIcon,
+    required this.meIcon,
     required this.route,
+    required this.myPosition,
   });
 }
