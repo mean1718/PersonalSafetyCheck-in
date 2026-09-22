@@ -275,9 +275,9 @@ const registerUser = async (req, res) => {
       password: hashedPassword,
       phone,
       role: requestedRole,
-      officerId: requestedRole === "responder" ? normalizedOfficerId : undefined,
-      responderStatus: requestedRole === "responder" ? "pending" : undefined,
-      emergencyPin: requestedRole === "user" ? hashedEmergencyPin : undefined,
+      officerId: requestedRole === "responder" ? normalizedOfficerId : null,
+      responderStatus: requestedRole === "responder" ? "pending" : null,
+      emergencyPin: requestedRole === "user" ? hashedEmergencyPin : null,
     });
 
     // =====================================================

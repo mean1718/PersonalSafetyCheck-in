@@ -23,6 +23,17 @@ class HelpRequest {
   // the backend -- AlertDetailScreen fills this in alongside the live
   // location fetch, the same way it fills in [location].
   final LatLng? destinationLocation;
+  // The Notification this specific alert was responded to from, plus any
+  // duplicate/sibling notifications for the same event (see
+  // AlertDetailScreen.siblingNotificationIds). Carried forward so
+  // AlertResponseResultScreen's "Mark [name] as Safe" can mark the SAME
+  // notification(s) resolved (responseStatus: 'marked_safe') that "Can
+  // Help"/"Can't Help" already do -- without this, marking someone safe
+  // never touched the notification itself, so it kept showing up in "You
+  // were notified" as still-pending forever, even after the session had
+  // genuinely ended.
+  final String? notificationId;
+  final List<String> siblingNotificationIds;
 
   const HelpRequest({
     required this.requesterName,
@@ -33,5 +44,7 @@ class HelpRequest {
     required this.requestedAt,
     this.checkInId,
     this.destinationLocation,
+    this.notificationId,
+    this.siblingNotificationIds = const [],
   });
 }

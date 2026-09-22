@@ -48,12 +48,21 @@ const userSchema = new mongoose.Schema(
     fcmTokens: { type: [String], default: [] },
 
     // ---- Responder accounts ----
+    // No `sparse`/`unique` here — that combination still indexes a
+    // document once officerId is explicitly set to null (sparse only
+    // skips a field that's completely ABSENT, not one that's present
+    // with value null), and only ONE null is allowed under a unique
+    // index. Every normal-user registration was writing officerId: null
+    // explicitly (see userController.js), so the very first normal user
+    // ever registered claimed that one allowed null slot — every normal
+    // user after that hit E11000 "duplicate key ... officerId: null" on
+    // registration. The real uniqueness rule (a partial index, below)
+    // only looks at documents where officerId is an actual string, so
+    // normal users are invisible to it no matter how many there are.
     officerId: {
       type: String,
       trim: true,
       uppercase: true,
-      sparse: true,
-      unique: true,
     },
 
     responderStatus: {
@@ -91,6 +100,19 @@ lastSeenAt: {
     extraSlotsExpireAt: { type: Date },
   },
   { timestamps: true },
+);
+
+// Real fix for the officerId uniqueness rule: only documents where
+// officerId is an actual string are considered for uniqueness at all.
+// Unlike `unique + sparse` on the field itself, this simply never looks
+// at normal-user accounts (officerId null/absent), so there's no shared
+// "one null slot" for them to collide over, no matter how many there are.
+userSchema.index(
+  { officerId: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { officerId: { $type: "string" } },
+  },
 );
 
 module.exports = mongoose.model("User", userSchema);

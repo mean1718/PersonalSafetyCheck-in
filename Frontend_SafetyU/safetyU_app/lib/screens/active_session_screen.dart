@@ -28,7 +28,7 @@ import 'session_safe_screen.dart';
 /// safe in time. Since this app has no backend, there is no way to detect
 /// whether a contact actually *saw* a message — each stage only tracks
 /// that its timer ran out, which is the honest limit of a client-only app.
-enum _EscalationStage { main, secondary, emergency }
+enum _EscalationStage { personal, main, secondary, emergency }
 
 class ActiveSessionScreen extends StatefulWidget {
   const ActiveSessionScreen({super.key});
@@ -81,7 +81,7 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen>
       final route = await DirectionsService.route(
         from: origin,
         to: _destinationCoords,
-        walking: true,
+        walking: !_drivingMode,
       );
       if (!mounted || requestId != _routeRequestId) return;
       setState(() {
@@ -140,6 +140,9 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen>
   String _destination = 'Central Market';
   String _expectedTimeStr = '';
   LatLng _destinationCoords = const LatLng(11.5696, 104.9210);
+  // Whether Session Setup's "Walking / Driving" toggle was set to
+  // Driving — read from the navigation arguments; see didChangeDependencies.
+  bool _drivingMode = false;
 
   LatLng? _currentPosition;
   String? _locationStatusMessage;
@@ -290,6 +293,57 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen>
       return;
     }
     final dynamic rawArguments = ModalRoute.of(context)?.settings.arguments;
+
+    // RESUME MODE: this screen was reached with no Session Setup
+    // arguments at all (e.g. Home's active-session card pushed a bare
+    // ActiveSessionScreen()) while AppSession still says a session is
+    // active. Before this, that combination either fell through to the
+    // hardcoded 11.5696/104.9210 defaults, or — worse — went on to call
+    // _startBackendCheckIn() below and silently created a SECOND, brand
+    // new backend session on top of the real one still running. This
+    // happened whenever the original live screen instance was gone from
+    // the Navigator stack for any reason (browser back navigation, the
+    // tab losing and re-doing its history, etc.) — Home's card still
+    // correctly showed the session as active (AppSession itself was
+    // untouched), but tapping it had nothing left to pop back to, and
+    // the old fallback just told the person to reopen the app — which
+    // didn't actually fix anything either, since reopening lands back on
+    // Home with the exact same unreachable "active" session.
+    final bool isResume =
+        rawArguments is! Map && AppSession.instance.activeCheckInId != null;
+    if (isResume) {
+      _checkInId = AppSession.instance.activeCheckInId;
+      _destination =
+          AppSession.instance.activeSessionDestination ?? _destination;
+      final endTime = AppSession.instance.activeSessionEndTime;
+      if (endTime != null) {
+        final remaining = endTime.difference(DateTime.now()).inSeconds;
+        _secondsRemaining = remaining > 0 ? remaining : 0;
+      }
+      _expectedTimeStr = _formatTime(_secondsRemaining);
+      final resumePos = AppSession.instance.lastKnownPosition;
+      if (resumePos != null) {
+        _currentPosition = resumePos;
+      }
+      _isInitialized = true;
+      _sessionEndTime =
+          DateTime.now().add(Duration(seconds: _secondsRemaining));
+      _startTimer();
+      _initLocationTracking();
+      // No _startBackendCheckIn() here — that's the whole point of resume
+      // mode: the real session (and its backend record) already exists,
+      // this just reconnects this screen's timers/polling to it instead
+      // of creating a duplicate.
+      if (_checkInId != null) {
+        CheckInService.alertStatus(_checkInId!)
+            .then(_applyAlertStatus)
+            .catchError((e) => debugPrint('Alert status sync skipped: $e'));
+        _startAlertStatusPolling(_checkInId!);
+      }
+      _ensureContactsCached();
+      return;
+    }
+
     if (rawArguments is Map) {
       _destination =
           rawArguments['destination']?.toString() ?? 'Central Market';
@@ -310,6 +364,11 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen>
       final double longitude =
           (rawArguments['longitude'] as num?)?.toDouble() ?? 104.9210;
       _destinationCoords = LatLng(latitude, longitude);
+      // Setup already asked "walking or driving" and sends the answer
+      // here — without reading it, this screen always fetched the
+      // walking route regardless of what was picked, since
+      // _fetchWalkingRoute() used to hardcode walking: true.
+      _drivingMode = rawArguments['drivingMode'] == true;
       final dynamic ids = rawArguments['notifyContactIds'];
       // TODO(debug): remove once delivery is confirmed working. Shows the
       // raw value and its type — tells us whether Session Setup ever sent
@@ -543,7 +602,14 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen>
     _timer?.cancel();
     setState(() => _secondsRemaining = 0);
     if (!_isAwaitingResponse && !_emergencyTriggered) {
-      _enterEscalation(_EscalationStage.main);
+      // Give the session owner themselves a 2-minute window to confirm
+      // they're safe BEFORE anyone else is told anything — trusted
+      // contacts used to be alerted the instant the countdown hit zero,
+      // with no chance for the owner to just tap "I'm Safe" a moment
+      // late. _EscalationStage.personal notifies nobody; _onStageTick
+      // below moves on to the real first alert (.main) only if this
+      // grace period runs out too.
+      _enterEscalation(_EscalationStage.personal);
     }
   }
 
@@ -564,7 +630,7 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen>
   // reassurance popup on the owner's screen — the session itself, and
   // Home's "SESSION ACTIVE" card, stayed active until the owner also
   // separately tapped "I'm Safe" themselves.
-  void _endSessionAsSafe({required bool navigateToSafeScreen}) {
+  Future<void> _endSessionAsSafe({required bool navigateToSafeScreen}) async {
     if (_sessionEndedAsSafe) return;
     _sessionEndedAsSafe = true;
 
@@ -573,6 +639,23 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen>
     _alertStatusPollTimer?.cancel();
     _logHistory(SessionOutcome.safe);
     _syncSessionEndToBackend();
+
+    // One last check for anyone who responded (e.g. "Can Help") in the
+    // gap between the last 6s poll and right now -- without this, Home's
+    // "Your Alert Status" froze on whatever it last happened to see,
+    // showing a contact as still "Waiting..." forever even after they'd
+    // already responded, simply because nothing ever asked again after
+    // this exact moment. Best-effort and bounded, so a slow/offline
+    // backend can't delay actually ending the session.
+    if (_checkInId != null) {
+      try {
+        final data = await CheckInService.alertStatus(_checkInId!)
+            .timeout(const Duration(seconds: 4));
+        _applyAlertStatus(data);
+      } catch (e) {
+        debugPrint('Final alert status refresh skipped: $e');
+      }
+    }
 
     // This session is over, so stop re-fetching/polling it — but keep
     // who-was-notified visible on Home as a "Safe" confirmation instead
@@ -676,7 +759,12 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen>
       return;
     }
 
-    _syncEscalationToBackend(stage);
+    // No backend Emergency record yet during the personal grace period —
+    // nobody's been notified, so there's nothing real to escalate. That
+    // starts for real once .main actually fires below.
+    if (stage != _EscalationStage.personal) {
+      _syncEscalationToBackend(stage);
+    }
     _stageTimer?.cancel();
     _stageTimer = Timer.periodic(
       const Duration(seconds: 1),
@@ -709,9 +797,14 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen>
     for (final target in _currentStageTargets) {
       AppSession.instance.markContactTimedOut(target.id);
     }
-    final next = stage == _EscalationStage.main
-        ? _EscalationStage.secondary
-        : _EscalationStage.emergency;
+    final next = switch (stage) {
+      // Grace period ran out with no response — this is the real first
+      // alert to trusted contacts, exactly the old flow from here on.
+      _EscalationStage.personal => _EscalationStage.main,
+      _EscalationStage.main => _EscalationStage.secondary,
+      _EscalationStage.secondary => _EscalationStage.emergency,
+      _EscalationStage.emergency => _EscalationStage.emergency,
+    };
     _enterEscalation(next);
   }
 
@@ -877,6 +970,14 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen>
   }
 
   Future<void> _notifyStage(_EscalationStage stage) async {
+    if (stage == _EscalationStage.personal) {
+      // Nobody is notified during the owner's own 2-minute grace period —
+      // that's the entire point of this stage. _onStageTick moves on to
+      // _EscalationStage.main (the real first alert) once its timer runs
+      // out with still no response.
+      _currentStageTargets = [];
+      return;
+    }
     List<Contact> targets;
     if (stage == _EscalationStage.main) {
       targets = _sessionMainContacts;
@@ -1120,6 +1221,24 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen>
       const Duration(seconds: 8),
       (_) => _pushLocationToBackend(),
     );
+
+    // Seed the road route immediately from whatever position Session
+    // Setup already had (it just got its own GPS fix a few seconds ago to
+    // show its own route preview) rather than waiting on a brand new
+    // high-accuracy fix below, which can legitimately take up to 20s on
+    // web/emulators. Without this, the map showed nothing but a straight
+    // line — or nothing at all — for the first chunk of every session,
+    // which is most of a short test session. The real fix below still
+    // runs right after and any meaningful movement will refresh it via
+    // _maybeRefreshWalkingRoute.
+    if (_currentPosition == null) {
+      final seed = AppSession.instance.lastKnownPosition;
+      if (seed != null) {
+        setState(() => _currentPosition = seed);
+        _fetchWalkingRoute();
+      }
+    }
+
     try {
       final bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
       if (!serviceEnabled) {
@@ -1391,7 +1510,7 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen>
                   )
                 else
                   Container(
-                    height: 180,
+                    height: 260,
                     width: double.infinity,
                     margin: const EdgeInsets.all(20),
                     child: ClipRRect(
@@ -1443,14 +1562,14 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen>
                     ),
                   ),
                 Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  padding: const EdgeInsets.only(top: 22, bottom: 12),
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       Text(
                         _formatTime(_secondsRemaining),
                         style: TextStyle(
-                          fontSize: 54,
+                          fontSize: 42,
                           fontWeight: FontWeight.w800,
                           color: _isAwaitingResponse
                               ? AppColors.textMuted
@@ -1670,9 +1789,11 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen>
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
                             Text(
-                              _stage == _EscalationStage.main
-                                  ? 'We will alert your other contacts in'
-                                  : 'We will alert Emergency Responders in',
+                              _stage == _EscalationStage.personal
+                                  ? 'We will alert your trusted contacts in'
+                                  : _stage == _EscalationStage.main
+                                      ? 'We will alert your other contacts in'
+                                      : 'We will alert Emergency Responders in',
                               style: TextStyle(
                                   fontSize: 12,
                                   color: AppColors.textSecondary,
@@ -1737,6 +1858,10 @@ class _EscalationBanner extends StatelessWidget {
       title = 'SOS Sent';
       subtitle =
           'Your Emergency Responders have been alerted with your location.';
+    } else if (stage == _EscalationStage.personal) {
+      title = 'Time is up!';
+      subtitle =
+          "Please confirm you're safe within 2 minutes, or we'll alert your trusted contacts.";
     } else if (stage == _EscalationStage.main) {
       title = 'Time is up!';
       subtitle = 'Are you safe? Your main contacts have been notified.';
