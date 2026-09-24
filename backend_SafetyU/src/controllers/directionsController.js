@@ -6,47 +6,27 @@
 // with Dart's http package, which IS a raw browser fetch on web — silently
 // blocked. Calling it from here (a Node server, not a browser) has no such
 // restriction, so this proxies the request instead.
-const GOOGLE_DIRECTIONS_URL = "https://maps.googleapis.com/maps/api/directions/json";
-
 const getRoute = async (req, res) => {
   const { originLat, originLng, destLat, destLng, mode } = req.query;
   if (!originLat || !originLng || !destLat || !destLng) {
-    return res.status(400).json({
-      message: "originLat, originLng, destLat, and destLng are all required.",
-    });
-  }
-  const apiKey = process.env.GOOGLE_MAPS_API_KEY;
-  if (!apiKey) {
-    return res.status(500).json({
-      message: "GOOGLE_MAPS_API_KEY is not set on the server.",
-    });
+    return res.status(400).json({ message: "originLat, originLng, destLat, and destLng are all required." });
   }
   try {
-    const url = new URL(GOOGLE_DIRECTIONS_URL);
-    url.searchParams.set("origin", `${originLat},${originLng}`);
-    url.searchParams.set("destination", `${destLat},${destLng}`);
-    url.searchParams.set("mode", mode === "driving" ? "driving" : "walking");
-    url.searchParams.set("key", apiKey);
+    const base = mode === "driving"
+      ? "https://routing.openstreetmap.de/routed-car/route/v1/driving"
+      : "https://routing.openstreetmap.de/routed-foot/route/v1/foot";
+    const url = `${base}/${originLng},${originLat};${destLng},${destLat}?overview=full&geometries=polyline`;
 
-    const googleRes = await fetch(url.toString());
-    const body = await googleRes.json();
-
-    if (body.status !== "OK") {
-      return res.status(502).json({
-        message: `No route found (${body.status || "unknown error"}).`,
-      });
-    }
-
+    const r = await fetch(url);
+    const body = await r.json();
     const route = body.routes?.[0];
-    const leg = route?.legs?.[0];
-    if (!route || !leg) {
-      return res.status(502).json({ message: "No route found." });
+    if (body.code !== "Ok" || !route) {
+      return res.status(502).json({ message: `No route found (${body.code || "unknown"}).` });
     }
-
     return res.json({
-      encodedPolyline: route.overview_polyline.points,
-      distanceMeters: leg.distance.value,
-      durationSeconds: leg.duration.value,
+      encodedPolyline: route.geometry,
+      distanceMeters: route.distance,
+      durationSeconds: route.duration,
     });
   } catch (error) {
     return res.status(500).json({ message: "Server error", error: error.message });
