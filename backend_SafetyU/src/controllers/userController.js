@@ -307,6 +307,7 @@ const registerUser = async (req, res) => {
 
     if (error?.code === 11000) {
       const field = Object.keys(error.keyPattern || {})[0];
+      console.error("Duplicate key on field:", field, error.keyValue);
 
       return res.status(409).json({
         message:

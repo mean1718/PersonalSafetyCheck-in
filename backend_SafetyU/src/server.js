@@ -53,6 +53,29 @@ app.get("/", (req, res) => {
   });
 });
 
+// Health check (handy for Render + for testing the app's base URL)
+app.get("/api/health", (req, res) => {
+  res.json({ status: "ok", time: new Date().toISOString() });
+});
+
+// Unknown route -> JSON 404 that says exactly which route was not found.
+// Without this, Express sends an HTML "Cannot POST ..." page and the app can
+// only show a bare "Server error (404)".
+app.use((req, res) => {
+  res.status(404).json({
+    message: `Route not found: ${req.method} ${req.originalUrl}`,
+  });
+});
+
+// Last-resort error handler so unexpected errors also come back as JSON.
+// eslint-disable-next-line no-unused-vars
+app.use((err, req, res, next) => {
+  console.error("Unhandled error:", err);
+  res.status(err.status || 500).json({
+    message: err.status && err.status < 500 ? err.message : "Server error",
+  });
+});
+
 // Server
 const PORT = process.env.PORT || 5000;
 
