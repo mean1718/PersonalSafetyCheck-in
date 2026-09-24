@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'api_config.dart';
@@ -31,7 +32,21 @@ class ApiConnectionException implements Exception {
 /// signed-in person's JWT automatically once AppSession.instance.authToken
 /// is set (AuthService.login sets it after a successful login).
 class ApiClient {
-  static const Duration _timeout = Duration(seconds: 12);
+  // Render's free tier puts the backend to sleep after ~15 min idle and
+  // a cold start can take 30-60+ seconds. 12s was timing out before the
+  // server had even finished waking up, so allow a full minute.
+  static const Duration _timeout = Duration(seconds: 60);
+
+  /// Pings /health to wake a sleeping backend. Fire-and-forget: call it
+  /// early (app start, signup screens) so by the time the person taps
+  /// "Create Account" the server is already awake. Never throws.
+  static Future<void> wakeUp() async {
+    try {
+      await http.get(_uri('/health')).timeout(const Duration(seconds: 90));
+    } catch (_) {
+      // Ignore - this is only a warm-up.
+    }
+  }
 
   static Map<String, String> _headers({bool auth = true}) {
     final headers = {'Content-Type': 'application/json'};
@@ -72,6 +87,11 @@ class ApiClient {
       return _decode(res);
     } on ApiException {
       rethrow;
+    } on TimeoutException {
+      throw ApiConnectionException(
+        'The server is taking longer than usual to wake up. '
+        'Please wait a few seconds and tap the button again.',
+      );
     } catch (e) {
       throw ApiConnectionException(
         'Could not reach the SafetyU server at ${ApiConfig.baseUrl}. '

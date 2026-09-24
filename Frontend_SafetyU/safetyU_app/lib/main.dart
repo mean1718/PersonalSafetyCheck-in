@@ -1,3 +1,4 @@
+import 'services/api_client.dart';
 import 'dart:ui' show PlatformDispatcher;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -197,6 +198,8 @@ class _DebugErrorOverlayState extends State<_DebugErrorOverlay> {
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
+  // Wake the (sleeping) backend right away so sign up / login are fast.
+  ApiClient.wakeUp();
   _installDebugErrorScreen();
   // Fire-and-forget: sets up the notification channels/permissions so the
   // app can put alerts in the phone's tray the moment something needs one

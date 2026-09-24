@@ -14,8 +14,7 @@ class EmergencyPinSetupScreen extends StatefulWidget {
       _EmergencyPinSetupScreenState();
 }
 
-class _EmergencyPinSetupScreenState
-    extends State<EmergencyPinSetupScreen> {
+class _EmergencyPinSetupScreenState extends State<EmergencyPinSetupScreen> {
   final _pinController = TextEditingController();
   final _confirmPinController = TextEditingController();
 
@@ -38,6 +37,13 @@ class _EmergencyPinSetupScreenState
   }
 
   @override
+  void initState() {
+    super.initState();
+    // Make sure the backend is awake before the person taps Create Account.
+    ApiClient.wakeUp();
+  }
+
+  @override
   void dispose() {
     _pinController.dispose();
     _confirmPinController.dispose();
@@ -45,110 +51,123 @@ class _EmergencyPinSetupScreenState
   }
 
   bool get _isExistingUser {
-  final args = ModalRoute.of(context)?.settings.arguments;
+    final args = ModalRoute.of(context)?.settings.arguments;
 
-  return args is Map &&
-      args['isExistingUser'] == true;
-}
+    return args is Map && args['isExistingUser'] == true;
+  }
+
   Future<void> _createAccount() async {
-  final pin = _pinController.text.trim();
-  final confirmPin = _confirmPinController.text.trim();
+    final pin = _pinController.text.trim();
+    final confirmPin = _confirmPinController.text.trim();
 
-  setState(() => _error = null);
+    setState(() => _error = null);
 
-  // ----------------------------------------
-  // Validate PIN
-  // ----------------------------------------
+    // ----------------------------------------
+    // Validate PIN
+    // ----------------------------------------
 
-  if (!RegExp(r'^\d{4}$').hasMatch(pin)) {
-    setState(
-      () => _error =
-          'Emergency PIN must be exactly 4 digits.',
-    );
-    return;
-  }
-
-  if (pin != confirmPin) {
-    setState(
-      () => _error =
-          'Emergency PINs do not match.',
-    );
-    return;
-  }
-
-  setState(() => _isSubmitting = true);
-
-  try {
-    // =======================================================
-    // EXISTING USER WITHOUT PIN
-    // =======================================================
-
-    if (_isExistingUser) {
-      await AuthService.createEmergencyPin(
-        newPin: pin,
-        confirmPin: confirmPin,
+    if (!RegExp(r'^\d{4}$').hasMatch(pin)) {
+      setState(
+        () => _error = 'Emergency PIN must be exactly 4 digits.',
       );
+      return;
+    }
 
+    if (pin != confirmPin) {
+      setState(
+        () => _error = 'Emergency PINs do not match.',
+      );
+      return;
+    }
+
+    setState(() => _isSubmitting = true);
+
+    try {
+      // =======================================================
+      // EXISTING USER WITHOUT PIN
+      // =======================================================
+
+      if (_isExistingUser) {
+        await AuthService.createEmergencyPin(
+          newPin: pin,
+          confirmPin: confirmPin,
+        );
+
+        if (!mounted) return;
+
+        setState(() => _isSubmitting = false);
+
+        Navigator.pushReplacementNamed(
+          context,
+          UserRole.user.homeRoute,
+        );
+
+        return;
+      }
+
+      // =======================================================
+      // NEW USER
+      // =======================================================
+
+      final draft = _draft;
+
+      await AuthService.register(
+        fullName: draft['fullName'] ?? '',
+        email: draft['email'] ?? '',
+        password: draft['password'] ?? '',
+        phone: draft['phone'] ?? '',
+        role: UserRole.user,
+        emergencyPin: pin,
+      );
+    } on ApiException catch (e) {
       if (!mounted) return;
 
-      setState(() => _isSubmitting = false);
+      setState(() {
+        _isSubmitting = false;
+        _error = e.message;
+      });
 
-      Navigator.pushReplacementNamed(
-        context,
-        UserRole.user.homeRoute,
-      );
+      return;
+    } on ApiConnectionException catch (e) {
+      if (!mounted) return;
+
+      setState(() {
+        _isSubmitting = false;
+        _error = e.message;
+      });
+
+      return;
+    } catch (e) {
+      if (!mounted) return;
+
+      setState(() {
+        _isSubmitting = false;
+        _error = 'Something went wrong. Please try again.';
+      });
 
       return;
     }
 
-    // =======================================================
-    // NEW USER
-    // =======================================================
-
-    final draft = _draft;
-
-    await AuthService.register(
-      fullName: draft['fullName'] ?? '',
-      email: draft['email'] ?? '',
-      password: draft['password'] ?? '',
-      phone: draft['phone'] ?? '',
-      role: UserRole.user,
-      emergencyPin: pin,
-    );
-  } on ApiException catch (e) {
     if (!mounted) return;
 
-    setState(() {
-      _isSubmitting = false;
-      _error = e.message;
-    });
+    setState(() => _isSubmitting = false);
 
-    return;
-  } on ApiConnectionException catch (e) {
-    if (!mounted) return;
-
-    setState(() {
-      _isSubmitting = false;
-      _error = e.message;
-    });
-
-    return;
+    // PINs matched and the account is created + signed in -> go to Home.
+    await _proceedAfterAuth(UserRole.user.homeRoute);
   }
-
-  if (!mounted) return;
-
-  setState(() => _isSubmitting = false);
-
-  await _proceedAfterAuth(UserRole.user.homeRoute);
-}
 
   Future<void> _proceedAfterAuth(String targetRoute) async {
     if (!mounted) return;
 
-    final permission = await Geolocator.checkPermission();
-
-    final needsPrompt =
-        permission == LocationPermission.denied;
+    // Checking location permission must never block reaching Home (it can
+    // throw on web or when location services are unavailable).
+    bool needsPrompt = false;
+    try {
+      final permission = await Geolocator.checkPermission();
+      needsPrompt = permission == LocationPermission.denied;
+    } catch (_) {
+      needsPrompt = false;
+    }
 
     if (!mounted) return;
 
@@ -182,44 +201,37 @@ class _EmergencyPinSetupScreenState
                   24,
                 ),
                 child: Column(
-                  crossAxisAlignment:
-                      CrossAxisAlignment.start,
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     GestureDetector(
-                      onTap: _isSubmitting
-                          ? null
-                          : () => Navigator.pop(context),
+                      onTap:
+                          _isSubmitting ? null : () => Navigator.pop(context),
                       child: Row(
                         children: [
                           Icon(
                             Icons.arrow_back,
                             size: 18,
-                            color:
-                                AppColors.textSecondary,
+                            color: AppColors.textSecondary,
                           ),
                           const SizedBox(width: 6),
                           Text(
                             'Back',
                             style: TextStyle(
                               fontSize: 13,
-                              color:
-                                  AppColors.textSecondary,
+                              color: AppColors.textSecondary,
                             ),
                           ),
                         ],
                       ),
                     ),
-
                     const SizedBox(height: 28),
-
                     Center(
                       child: Container(
                         width: 64,
                         height: 64,
                         decoration: BoxDecoration(
                           color: AppColors.navy,
-                          borderRadius:
-                              BorderRadius.circular(18),
+                          borderRadius: BorderRadius.circular(18),
                         ),
                         child: Icon(
                           Icons.lock_outline,
@@ -228,9 +240,7 @@ class _EmergencyPinSetupScreenState
                         ),
                       ),
                     ),
-
                     const SizedBox(height: 18),
-
                     Center(
                       child: Text(
                         'Create Emergency PIN',
@@ -238,42 +248,34 @@ class _EmergencyPinSetupScreenState
                         style: TextStyle(
                           fontSize: 24,
                           fontWeight: FontWeight.w800,
-                          color:
-                              AppColors.textPrimary,
+                          color: AppColors.textPrimary,
                         ),
                       ),
                     ),
-
                     const SizedBox(height: 8),
-
                     Center(
                       child: Text(
                         'This PIN protects your Emergency Assistant.',
                         textAlign: TextAlign.center,
                         style: TextStyle(
                           fontSize: 13,
-                          color:
-                              AppColors.textSecondary,
+                          color: AppColors.textSecondary,
                         ),
                       ),
                     ),
-
                     const SizedBox(height: 20),
-
                     Container(
                       width: double.infinity,
                       padding: const EdgeInsets.all(16),
                       decoration: BoxDecoration(
                         color: AppColors.card,
-                        borderRadius:
-                            BorderRadius.circular(16),
+                        borderRadius: BorderRadius.circular(16),
                         border: Border.all(
                           color: AppColors.border,
                         ),
                       ),
                       child: Row(
-                        crossAxisAlignment:
-                            CrossAxisAlignment.start,
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Icon(
                             Icons.shield_outlined,
@@ -287,34 +289,27 @@ class _EmergencyPinSetupScreenState
                               style: TextStyle(
                                 fontSize: 12,
                                 height: 1.45,
-                                color:
-                                    AppColors.textSecondary,
+                                color: AppColors.textSecondary,
                               ),
                             ),
                           ),
                         ],
                       ),
                     ),
-
                     const SizedBox(height: 26),
-
                     Text(
                       'CREATE PIN',
                       style: TextStyle(
                         fontSize: 11.5,
                         fontWeight: FontWeight.w700,
-                        color:
-                            AppColors.textSecondary,
+                        color: AppColors.textSecondary,
                         letterSpacing: 0.5,
                       ),
                     ),
-
                     const SizedBox(height: 8),
-
                     TextField(
                       controller: _pinController,
-                      keyboardType:
-                          TextInputType.number,
+                      keyboardType: TextInputType.number,
                       maxLength: 4,
                       obscureText: true,
                       textAlign: TextAlign.center,
@@ -327,59 +322,44 @@ class _EmergencyPinSetupScreenState
                         counterText: '',
                         hintText: '••••',
                         hintStyle: TextStyle(
-                          color:
-                              AppColors.textMuted,
+                          color: AppColors.textMuted,
                           letterSpacing: 10,
                         ),
                         filled: true,
                         fillColor: AppColors.card,
                         prefixIcon: Icon(
                           Icons.lock_outline,
-                          color:
-                              AppColors.textMuted,
+                          color: AppColors.textMuted,
                         ),
                         border: OutlineInputBorder(
-                          borderRadius:
-                              BorderRadius.circular(14),
+                          borderRadius: BorderRadius.circular(14),
                           borderSide: BorderSide(
-                            color:
-                                AppColors.border,
+                            color: AppColors.border,
                           ),
                         ),
-                        focusedBorder:
-                            OutlineInputBorder(
-                          borderRadius:
-                              BorderRadius.circular(14),
-                          borderSide:
-                              BorderSide(
-                            color:
-                                AppColors.navy,
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(14),
+                          borderSide: BorderSide(
+                            color: AppColors.navy,
                             width: 1.6,
                           ),
                         ),
                       ),
                     ),
-
                     const SizedBox(height: 18),
-
                     Text(
                       'CONFIRM PIN',
                       style: TextStyle(
                         fontSize: 11.5,
                         fontWeight: FontWeight.w700,
-                        color:
-                            AppColors.textSecondary,
+                        color: AppColors.textSecondary,
                         letterSpacing: 0.5,
                       ),
                     ),
-
                     const SizedBox(height: 8),
-
                     TextField(
-                      controller:
-                          _confirmPinController,
-                      keyboardType:
-                          TextInputType.number,
+                      controller: _confirmPinController,
+                      keyboardType: TextInputType.number,
                       maxLength: 4,
                       obscureText: true,
                       textAlign: TextAlign.center,
@@ -392,83 +372,75 @@ class _EmergencyPinSetupScreenState
                         counterText: '',
                         hintText: '••••',
                         hintStyle: TextStyle(
-                          color:
-                              AppColors.textMuted,
+                          color: AppColors.textMuted,
                           letterSpacing: 10,
                         ),
                         filled: true,
                         fillColor: AppColors.card,
                         prefixIcon: Icon(
                           Icons.verified_user_outlined,
-                          color:
-                              AppColors.textMuted,
+                          color: AppColors.textMuted,
                         ),
                         border: OutlineInputBorder(
-                          borderRadius:
-                              BorderRadius.circular(14),
+                          borderRadius: BorderRadius.circular(14),
                           borderSide: BorderSide(
-                            color:
-                                AppColors.border,
+                            color: AppColors.border,
                           ),
                         ),
-                        focusedBorder:
-                            OutlineInputBorder(
-                          borderRadius:
-                              BorderRadius.circular(14),
-                          borderSide:
-                              BorderSide(
-                            color:
-                                AppColors.navy,
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(14),
+                          borderSide: BorderSide(
+                            color: AppColors.navy,
                             width: 1.6,
                           ),
                         ),
                       ),
                     ),
-
                     if (_error != null) ...[
                       const SizedBox(height: 12),
                       Container(
                         width: double.infinity,
-                        padding:
-                            const EdgeInsets.all(12),
+                        padding: const EdgeInsets.all(12),
                         decoration: BoxDecoration(
-                          color:
-                              AppColors.dangerLight,
-                          borderRadius:
-                              BorderRadius.circular(12),
+                          color: AppColors.dangerLight,
+                          borderRadius: BorderRadius.circular(12),
                         ),
                         child: Text(
                           _error!,
                           style: TextStyle(
                             fontSize: 12,
-                            fontWeight:
-                                FontWeight.w600,
-                            color:
-                                AppColors.danger,
+                            fontWeight: FontWeight.w600,
+                            color: AppColors.danger,
                           ),
                         ),
                       ),
                     ],
-
+                    if (_isSubmitting) ...[
+                      const SizedBox(height: 12),
+                      Text(
+                        'Creating your account... the first request can take up to a minute while the server wakes up.',
+                        style: TextStyle(
+                          fontSize: 12,
+                          height: 1.45,
+                          color: AppColors.textSecondary,
+                        ),
+                      ),
+                    ],
                     const SizedBox(height: 20),
-
                     Text(
                       "When you need emergency help, you'll enter this PIN once to confirm that you want to send an emergency alert.",
                       style: TextStyle(
                         fontSize: 12,
                         height: 1.45,
-                        color:
-                            AppColors.textSecondary,
+                        color: AppColors.textSecondary,
                       ),
                     ),
                   ],
                 ),
               ),
             ),
-
             Padding(
-              padding:
-                  const EdgeInsets.fromLTRB(
+              padding: const EdgeInsets.fromLTRB(
                 24,
                 8,
                 24,
@@ -478,22 +450,18 @@ class _EmergencyPinSetupScreenState
                 width: double.infinity,
                 height: 52,
                 child: ElevatedButton(
-                  onPressed: _isSubmitting
-                      ? null
-                      : _createAccount,
+                  onPressed: _isSubmitting ? null : _createAccount,
                   child: _isSubmitting
                       ? const SizedBox(
                           width: 20,
                           height: 20,
-                          child:
-                              CircularProgressIndicator(
+                          child: CircularProgressIndicator(
                             strokeWidth: 2,
                             color: Colors.white,
                           ),
                         )
                       : const Row(
-                          mainAxisAlignment:
-                              MainAxisAlignment.center,
+                          mainAxisAlignment: MainAxisAlignment.center,
                           children: [
                             Text('Create Account'),
                             SizedBox(width: 8),

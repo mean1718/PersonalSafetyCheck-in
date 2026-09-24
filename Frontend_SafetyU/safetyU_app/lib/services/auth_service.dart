@@ -20,6 +20,55 @@ class AuthService {
   }) async {
     final normalizedEmail = email.trim().toLowerCase();
 
+    try {
+      await _postRegister(
+        fullName: fullName,
+        normalizedEmail: normalizedEmail,
+        password: password,
+        phone: phone,
+        role: role,
+        officerId: officerId,
+        emergencyPin: emergencyPin,
+      );
+    } on ApiException catch (e) {
+      // A previous attempt may have created the account on the server but
+      // timed out before the app heard back (slow cold start). Retrying
+      // then answers "already exists". If the same email + password logs
+      // in successfully, that account is the one we just created - carry
+      // on instead of leaving the person stuck on the PIN screen.
+      final alreadyExists = e.statusCode == 409 &&
+          e.message.toLowerCase().contains('email already exists');
+      if (!alreadyExists) rethrow;
+
+      try {
+        await login(
+          email: normalizedEmail,
+          password: password,
+          role: role,
+        );
+        return;
+      } on ApiException {
+        throw e;
+      }
+    }
+
+    // Automatically log the new account in.
+    await login(
+      email: normalizedEmail,
+      password: password,
+      role: role,
+    );
+  }
+
+  static Future<void> _postRegister({
+    required String fullName,
+    required String normalizedEmail,
+    required String password,
+    required String phone,
+    required UserRole role,
+    String? officerId,
+    String? emergencyPin,
+  }) async {
     await ApiClient.post(
       '/users/register',
       {
@@ -46,13 +95,6 @@ class AuthService {
           'emergencyPin': emergencyPin.trim(),
       },
       auth: false,
-    );
-
-    // Automatically log the new account in.
-    await login(
-      email: normalizedEmail,
-      password: password,
-      role: role,
     );
   }
 
