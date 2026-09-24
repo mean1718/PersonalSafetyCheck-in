@@ -6,22 +6,29 @@
 // with Dart's http package, which IS a raw browser fetch on web — silently
 // blocked. Calling it from here (a Node server, not a browser) has no such
 // restriction, so this proxies the request instead.
+// Route lookup using the free OpenStreetMap routing service (OSRM).
+// No Google key needed. Returns the same shape the Flutter app already expects.
 const getRoute = async (req, res) => {
   const { originLat, originLng, destLat, destLng, mode } = req.query;
   if (!originLat || !originLng || !destLat || !destLng) {
-    return res.status(400).json({ message: "originLat, originLng, destLat, and destLng are all required." });
+    return res.status(400).json({
+      message: "originLat, originLng, destLat, and destLng are all required.",
+    });
   }
   try {
-    const base = mode === "driving"
-      ? "https://routing.openstreetmap.de/routed-car/route/v1/driving"
-      : "https://routing.openstreetmap.de/routed-foot/route/v1/foot";
+    const base =
+      mode === "driving"
+        ? "https://routing.openstreetmap.de/routed-car/route/v1/driving"
+        : "https://routing.openstreetmap.de/routed-foot/route/v1/foot";
     const url = `${base}/${originLng},${originLat};${destLng},${destLat}?overview=full&geometries=polyline`;
 
     const r = await fetch(url);
     const body = await r.json();
-    const route = body.routes?.[0];
+    const route = body.routes && body.routes[0];
     if (body.code !== "Ok" || !route) {
-      return res.status(502).json({ message: `No route found (${body.code || "unknown"}).` });
+      return res
+        .status(502)
+        .json({ message: `No route found (${body.code || "unknown"}).` });
     }
     return res.json({
       encodedPolyline: route.geometry,
@@ -29,7 +36,9 @@ const getRoute = async (req, res) => {
       durationSeconds: route.duration,
     });
   } catch (error) {
-    return res.status(500).json({ message: "Server error", error: error.message });
+    return res
+      .status(500)
+      .json({ message: "Server error", error: error.message });
   }
 };
 

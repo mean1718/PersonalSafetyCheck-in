@@ -1,5 +1,7 @@
+import 'dart:convert';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:google_polyline_algorithm/google_polyline_algorithm.dart';
+import 'package:http/http.dart' as http;
 import 'api_client.dart';
 
 class RouteResult {
@@ -23,53 +25,69 @@ class RouteResult {
   }
 }
 
-/// Draws the actual walkable/drivable road path between two points — the
-/// same routing data the Google Maps app itself uses, so the line on our
-/// map follows real streets and turns instead of cutting a straight
-/// diagonal through buildings.
+/// Draws the real road path between two points.
 ///
-/// This goes through OUR OWN backend (see directionsController.js) rather
-/// than calling Google's Directions REST endpoint directly from here.
-/// That endpoint has no CORS headers, so a direct call works fine on
-/// Android/iOS (no browser involved) but is silently blocked by the
-/// browser on Flutter Web — which was exactly what was happening before.
-/// Google's own fix for web pages is a separate JS-only class
-/// (google.maps.DirectionsService) that isn't a real CORS-checked fetch;
-/// since we don't have access to that from Dart, proxying through our
-/// backend (a server calling another server — no CORS involved at all)
-/// is the actual fix, and also stops the API key from ever appearing in
-/// the browser's network tab.
+/// 1. Tries our own backend (/directions) first.
+/// 2. If that fails for any reason (backend not updated, Google key denied,
+///    server asleep), it falls back to the free OpenStreetMap routing
+///    service directly, so the line still follows real roads.
 class DirectionsService {
   static Future<RouteResult> route({
     required LatLng from,
     required LatLng to,
     bool walking = true,
   }) async {
-    final body = await ApiClient.get(
-      '/directions'
-      '?originLat=${from.latitude}&originLng=${from.longitude}'
-      '&destLat=${to.latitude}&destLng=${to.longitude}'
-      '&mode=${walking ? 'walking' : 'driving'}',
+    try {
+      final body = await ApiClient.get(
+        '/directions'
+        '?originLat=${from.latitude}&originLng=${from.longitude}'
+        '&destLat=${to.latitude}&destLng=${to.longitude}'
+        '&mode=${walking ? 'walking' : 'driving'}',
+      );
+      return _fromBody(
+        body['encodedPolyline'] as String,
+        (body['distanceMeters'] as num).toDouble(),
+        (body['durationSeconds'] as num).toDouble(),
+      );
+    } catch (_) {
+      return _routeDirect(from: from, to: to, walking: walking);
+    }
+  }
+
+  static Future<RouteResult> _routeDirect({
+    required LatLng from,
+    required LatLng to,
+    required bool walking,
+  }) async {
+    final base = walking
+        ? 'https://routing.openstreetmap.de/routed-foot/route/v1/foot'
+        : 'https://routing.openstreetmap.de/routed-car/route/v1/driving';
+    final url = '$base/${from.longitude},${from.latitude};'
+        '${to.longitude},${to.latitude}?overview=full&geometries=polyline';
+    final res =
+        await http.get(Uri.parse(url)).timeout(const Duration(seconds: 20));
+    final data = jsonDecode(res.body) as Map<String, dynamic>;
+    final routes = data['routes'] as List?;
+    if (data['code'] != 'Ok' || routes == null || routes.isEmpty) {
+      throw Exception('No route found (${data['code']}).');
+    }
+    final r = routes.first as Map<String, dynamic>;
+    return _fromBody(
+      r['geometry'] as String,
+      (r['distance'] as num).toDouble(),
+      (r['duration'] as num).toDouble(),
     );
-    final encoded = body['encodedPolyline'] as String;
-    // This used to be a hand-written decoder using the same algorithm —
-    // but it used the `~` (bitwise complement) operator to handle negative
-    // deltas, which has a documented Dart-web (Chrome) compatibility bug:
-    // native Android/iOS builds compute it correctly (real 64-bit ints),
-    // but compiling to JavaScript for web can silently produce wrong
-    // values for that exact operator. That's almost certainly why routes
-    // decoded fine in theory (right point *count*) but rendered as a
-    // straight line on web specifically — some points' coordinates were
-    // simply wrong. Using the official, actively maintained package here
-    // instead, whose changelog explicitly lists fixing this same bug.
+  }
+
+  static RouteResult _fromBody(String encoded, double dist, double dur) {
     final decoded = decodePolyline(encoded);
     final points = decoded
         .map((pair) => LatLng(pair[0].toDouble(), pair[1].toDouble()))
         .toList();
     return RouteResult(
       points: points,
-      distanceMeters: (body['distanceMeters'] as num).toDouble(),
-      durationSeconds: (body['durationSeconds'] as num).toDouble(),
+      distanceMeters: dist,
+      durationSeconds: dur,
     );
   }
 }

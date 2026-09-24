@@ -75,6 +75,11 @@ class _SessionSetupScreenState extends State<SessionSetupScreen> {
       debugPrint('[SETUP] Route fetched successfully: '
           '${route.points.length} points, ${route.distanceLabel}, ${route.durationLabel}');
       setState(() => _walkingRoute = route);
+      // Use the real road duration (from my location to the destination)
+      // for Expected Time, instead of the straight-line guess.
+      final routeMinutes = (route.durationSeconds / 60).ceil().clamp(1, 720);
+      setState(() => _durationMinutes = routeMinutes);
+      _syncDurationFields();
     } catch (e) {
       debugPrint('[SETUP] Route fetch failed: $e');
       if (!mounted || requestId != _routeRequestId) return;
@@ -941,7 +946,7 @@ class _SessionSetupScreenState extends State<SessionSetupScreen> {
                       if (_walkingRoute != null) ...[
                         const SizedBox(height: 6),
                         Text(
-                          '${_walkingRoute!.distanceLabel} • ${_walkingRoute!.durationLabel}',
+                          'My location → Destination  •  ${_walkingRoute!.distanceLabel} • ${_walkingRoute!.durationLabel}',
                           style: TextStyle(
                               fontSize: 12,
                               fontWeight: FontWeight.w600,
